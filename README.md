@@ -5,7 +5,7 @@
 </picture>
 
 ## Decoder
-Miniature and universal H.264 and H.265 decoder for Android devices
+**Miniature and universal H.264 and H.265 decoder for Android devices**
 
 [![Telegram](https://openipc.org/images/telegram_button.svg)][telegram]
 
