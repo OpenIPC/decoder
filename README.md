@@ -12,6 +12,11 @@ Miniature and universal H.264 and H.265 decoder for Android devices
 ### Introduction
 ...
 
+### Downloadable versions
+
+- [v1.02, 2025.09.02](#) - Audio (PCM, 8k) is now available when receiving RTSP over TCP/UDP; RTP receiving is temporarily disabled; Experimental button controller is temporarily disabled.
+- [v1.01, 2025.08.31](#) - First basic public release; New compact and convenient menu; Possibility of working with video via RTP UDP and RTSP TCP/UDP; Experimental button controller.
+
 
 [price]: https://openipc.org/support-open-source
 [firmware]: https://github.com/openipc/firmware
