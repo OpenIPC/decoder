@@ -25,6 +25,7 @@ The application is designed for OpenIPC devices and can be used for:
     - Audio (PCM, 8k) is now available when receiving RTSP over TCP/UDP
     - RTP UDP receiving is temporarily disabled
     - Experimental bluetooth button controller is temporarily disabled
+    - The current size of the application is 23 kilobytes
 
 
 [price]: https://openipc.org/support-open-source
