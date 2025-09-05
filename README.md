@@ -18,7 +18,7 @@ The application is designed for OpenIPC devices and can be used for:
 
 ![Menu](photo_menu.jpg)
 
-### Downloadable versions
+### Version history
 - [v1.02, 2025.09.03](#)
     - Announcement and first public release
     - New compact and convenient menu
