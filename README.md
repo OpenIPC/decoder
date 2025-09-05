@@ -11,24 +11,20 @@
 
 ### Introduction
 The application is designed for OpenIPC devices and can be used for:
-- testing and experiments
-- intercom systems
-- baby monitors
-- radio-controlled toys
+- Any testing and experiments
+- Intercom systems
+- Baby monitors
+- Radio-controlled toys
 
 ![Menu](photo_menu.jpg)
 
 ### Downloadable versions
-
 - [v1.02, 2025.09.03](#)
+    - Announcement and first public release
+    - New compact and convenient menu
     - Audio (PCM, 8k) is now available when receiving RTSP over TCP/UDP
     - RTP UDP receiving is temporarily disabled
-    - Experimental button controller is temporarily disabled
-- [v1.01, 2025.08.31](#)
-    - First public release
-    - New compact and convenient menu
-    - Possibility of working with video via RTP UDP and RTSP TCP/UDP
-    - Experimental button controller
+    - Experimental bluetooth button controller is temporarily disabled
 
 
 [price]: https://openipc.org/support-open-source
