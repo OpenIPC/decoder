@@ -16,6 +16,8 @@ The application is designed for OpenIPC devices and can be used for:
 - baby monitors
 - radio-controlled toys
 
+![Menu](photo_menu.jpg)
+
 ### Downloadable versions
 
 - [v1.02, 2025.09.03](#)
