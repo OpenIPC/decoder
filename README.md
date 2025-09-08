@@ -44,6 +44,7 @@ Manufacturer Model, Android Version, Kernel Version
 
 ### Devices with problems
 - Xiaomi Redmi 5A, Android 10, Kernel 4.9.261, RROS 8.6.7
+- Xiaomi Redmi Note 13 4G, Android 13, Kernel 5.15.94, MIUI 14.0.9 Global
 
 ### Incompatible devices
 - Eltex NV-501-Wac, Android 4.4.4, Kernel 3.10.24
