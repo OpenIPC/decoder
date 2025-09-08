@@ -39,15 +39,30 @@ Manufacturer Model, Android Version, Kernel Version
 ```
 
 ### Verified devices
-- Blackview BV4900Pro, Android 12, Kernel 4.19.191
-- Samsung Galaxy A51, Android 13, kernel 4.14.113
-- Samsung S8, Android 9, Kernel 4.4.153
-- SberBox SBDV-00001, Custom ?, Kernel 4.9.228
-- Xiaomi Redmi 5A, Android 10, Kernel 4.9.261
-- Xiaomi Redmi Note 13 4G, Android 13, Kernel 5.15.94
+- Phone
+    - Blackview BV4900Pro, Android 12, Kernel 4.19.191
+    - Samsung Galaxy A51, Android 13, kernel 4.14.113
+    - Samsung S8, Android 9, Kernel 4.4.153
+    - Xiaomi Redmi 5A, Android 10, Kernel 4.9.261
+    - Xiaomi Redmi Note 13 4G, Android 13, Kernel 5.15.94
+- Tablet
+    - Lenovo TB-X304L, Android 8.1.0, Kernel 3.18.71 (the image is cut off at the edges)
+    - Lenovo TB-X606F, Android 10, Kernel unknown (the image is cut off at the edges)
+    - Lenovo Tab P11, Android 11, Kernel 4.19.157-perf+ (the image is cut off at the edges)
+- TV
+    - Haier Candy Android TV 2K, Android 11, Kernel 4.9.243+ (no icon in apps on device)
+    - SberBox SBDV-00001, Custom ?, Kernel 4.9.228
+    - Smart TV X96Q, Android 10, kernel 4.9.170
 
 ### Incompatible devices
-- Eltex NV-501-Wac, Android 4.4.4, Kernel 3.10.24
+- Tablet
+    - Pipo M6 Pro Android 4.4.2 Kernel 3.4.0 (Error parsing package)
+    - Ployer Momo8, Android 4.1.1 ,Kernel 3.0.8+ (Error parsing package)
+- TV
+    - Eltex NV-501-Wac, Android 4.4.4, Kernel 3.10.24
+    - TV box, Android 5.1.1, Kernel 3.14.29
+    - Yandex TV, Android 7.1.1, Kernel 4.4.3 (wrong install)
+
 
 
 
