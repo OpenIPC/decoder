@@ -42,10 +42,8 @@ Manufacturer Model, Android Version, Kernel Version
 - Blackview BV4900Pro, Android 12, Kernel 4.19.191
 - Samsung S8, Android 9, Kernel 4.4.153
 - SberBox SBDV-00001, Custom ?, Kernel 4.9.228
-
-### Devices with problems
-- Xiaomi Redmi 5A, Android 10, Kernel 4.9.261, RROS 8.6.7
-- Xiaomi Redmi Note 13 4G, Android 13, Kernel 5.15.94, MIUI 14.0.9 Global
+- Xiaomi Redmi 5A, Android 10, Kernel 4.9.261
+- Xiaomi Redmi Note 13 4G, Android 13, Kernel 5.15.94
 
 ### Incompatible devices
 - Eltex NV-501-Wac, Android 4.4.4, Kernel 3.10.24
