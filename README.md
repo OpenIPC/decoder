@@ -16,6 +16,7 @@ The application is designed for OpenIPC devices and can be used for:
 - Baby monitors
 - Radio-controlled toys
 
+The program is guaranteed to work on the latest firmware and uses some GAPPS, so do not disable them !
 
 _During the testing phase, the application is distributed only in binary form at the request of interested individuals and companies._
 
