@@ -31,6 +31,13 @@ _During the testing phase, the application is distributed only in binary form at
     - Experimental bluetooth button controller is temporarily disabled
     - The current size of the application is 23 kilobytes
 
+### Verified devices
+- Blackview BV4900Pro, Android 12, Kernel 4.19.191
+
+### Incompatible devices
+- Eltex NV-501-Wac, Android 4.4.4, Kernel 3.10.24
+
+
 
 [price]: https://openipc.org/support-open-source
 [firmware]: https://github.com/openipc/firmware
