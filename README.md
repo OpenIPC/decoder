@@ -31,9 +31,19 @@ _During the testing phase, the application is distributed only in binary form at
     - Experimental bluetooth button controller is temporarily disabled
     - The current size of the application is 23 kilobytes
 
+### Statistics
+**Please send information about devices where the program was tested only in this format:**
+```
+Manufacturer Model, Android Version, Kernel Version
+```
+
 ### Verified devices
 - Blackview BV4900Pro, Android 12, Kernel 4.19.191
-- SberBox SBDV-00001, Custom, Kernel 4.9.228
+- Samsung S8, Android 9, Kernel 4.4.153
+- SberBox SBDV-00001, Custom ?, Kernel 4.9.228
+
+### Devices with problems
+- Xiaomi Redmi 5A, Android 10, Kernel 4.9.261, RROS 8.6.7
 
 ### Incompatible devices
 - Eltex NV-501-Wac, Android 4.4.4, Kernel 3.10.24
