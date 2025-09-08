@@ -33,6 +33,7 @@ _During the testing phase, the application is distributed only in binary form at
 
 ### Verified devices
 - Blackview BV4900Pro, Android 12, Kernel 4.19.191
+- SberBox SBDV-00001, Custom, Kernel 4.9.228
 
 ### Incompatible devices
 - Eltex NV-501-Wac, Android 4.4.4, Kernel 3.10.24
