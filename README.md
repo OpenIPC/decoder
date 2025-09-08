@@ -40,6 +40,7 @@ Manufacturer Model, Android Version, Kernel Version
 
 ### Verified devices
 - Phone
+    - Asus ZC553KL, Android 8.1, Kernel 3.18.71
     - Blackview BV4900Pro, Android 12, Kernel 4.19.191
     - Samsung Galaxy A51, Android 13, kernel 4.14.113
     - Samsung S8, Android 9, Kernel 4.4.153
@@ -50,6 +51,7 @@ Manufacturer Model, Android Version, Kernel Version
     - Lenovo TB-X606F, Android 10, Kernel unknown (the image is cut off at the edges)
     - Lenovo Tab P11, Android 11, Kernel 4.19.157-perf+ (the image is cut off at the edges)
 - TV
+    - IE X3 Air, Android 9, Kernel 4.9.113, SlimBOXtv AOSP 9.14 without GAPPS
     - Haier Candy Android TV 2K, Android 11, Kernel 4.9.243+ (no icon in apps on device)
     - SberBox SBDV-00001, Custom ?, Kernel 4.9.228
     - Smart TV X96Q, Android 10, kernel 4.9.170
