@@ -48,7 +48,7 @@ Manufacturer Model, Android Version, Kernel Version
     - Blackview BV4900Pro, Android 12, Kernel 4.19.191
     - Samsung Galaxy A51, Android 13, kernel 4.14.113
     - Samsung S8, Android 9, Kernel 4.4.153
-    - Xiaomi Redmi 5A, Android 10, Kernel 4.9.261
+    - Xiaomi Redmi 7A, Android 10, Kernel 4.9.261
     - Xiaomi Redmi Note 13 4G, Android 13, Kernel 5.15.94
 - Tablet
     - Lenovo TB-X304L, Android 8.1.0, Kernel 3.18.71 (the image is cut off at the edges)
