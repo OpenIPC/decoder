@@ -60,6 +60,8 @@ Manufacturer Model, Android Version, Kernel Version
     - Haier Candy Android TV 2K, Android 11, Kernel 4.9.243+ (no icon in apps on device)
     - SberBox SBDV-00001, Custom ?, Kernel 4.9.228
     - Smart TV X96Q, Android 10, kernel 4.9.170
+- Car
+    - JCAC10003, Android 12, Kernel 3.18.79+ (SoC ac8227/ac8229)
 
 ### Incompatible devices
 - Tablet
