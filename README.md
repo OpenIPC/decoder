@@ -12,9 +12,12 @@
 ### Introduction
 The application is designed for OpenIPC devices and can be used for:
 - Any testing and experiments
+- Phones and Tablets
+- TVs and connected Boxes
+- Car Players and Mirrors
 - Intercom systems
-- Baby monitors
-- Radio-controlled toys
+- Baby Monitors
+- Radio-controlled Toys
 
 The program is guaranteed to work on the fresh Android OS 8-15 and uses some GAPPS components, so do not disable them !
 
@@ -24,11 +27,11 @@ _During the testing phase, the application is distributed only in binary form at
 ![Menu](photo_menu.jpg)
 
 ### Version history
-- [v1.03, 2025.09.08](#)
+- [v1.03, 2025.09.08](#), closed testing
     - Now we can specify the port next to the device address
     - Accepts external calls and can work together with OpenIPC Network
     - Many other features
-- [v1.02, 2025.09.03](#)
+- [v1.02, 2025.09.03](#), downloadable version
     - Announcement and first public release
     - New compact and convenient menu
     - Audio (PCM, 8k) is now available when receiving RTSP over TCP/UDP
