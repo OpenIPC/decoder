@@ -27,11 +27,11 @@ _During the testing phase, the application is distributed only in binary form at
 ![Menu](photo_menu.jpg)
 
 ### Version history
-- v1.03, 2025.09.08, closed testing
+- [v1.03, 2025.09.08](https://github.com/OpenIPC/decoder/releases/download/latest/decoder_v1.03_20250908.apk)
     - Now we can specify the port next to the device address
     - Accepts external calls and can work together with OpenIPC Network
     - Many other fixes
-- [v1.02, 2025.09.03](https://github.com/OpenIPC/decoder/releases/download/latest/decoder_v1.2_20250903.apk), downloadable version
+- [v1.02, 2025.09.03](https://github.com/OpenIPC/decoder/releases/download/latest/decoder_v1.02_20250903.apk)
     - Announcement and first public release
     - New compact and convenient menu
     - Audio (PCM, 8k) is now available when receiving RTSP over TCP/UDP
