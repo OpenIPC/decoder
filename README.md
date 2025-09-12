@@ -30,7 +30,7 @@ _During the testing phase, the application is distributed only in binary form at
 - [v1.03, 2025.09.08](#), closed testing
     - Now we can specify the port next to the device address
     - Accepts external calls and can work together with OpenIPC Network
-    - Many other features
+    - Many other fixes
 - [v1.02, 2025.09.03](https://github.com/OpenIPC/decoder/releases/download/latest/decoder_v1.2_20250903.apk), downloadable version
     - Announcement and first public release
     - New compact and convenient menu
