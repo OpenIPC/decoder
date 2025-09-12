@@ -49,7 +49,8 @@ Device type, Manufacturer and Model, Android Version, Kernel Version
 - Phones
     - Asus ZC553KL, Android 8.1, Kernel 3.18.71
     - Blackview BV4900Pro, Android 12, Kernel 4.19.191
-    - Samsung Galaxy A51, Android 13, kernel 4.14.113
+    - Samsung Galaxy A51, Android 13, Kernel 4.14.113
+    - Samsung Galaxy J7, Android 10 , Kernel 3.18.150
     - Samsung S8, Android 9, Kernel 4.4.153
     - Samsung S23 Ultra, Android 15, Kernel 5.15.153
     - Xiaomi Redmi 7A, Android 10, Kernel 4.9.261
@@ -58,12 +59,13 @@ Device type, Manufacturer and Model, Android Version, Kernel Version
     - Lenovo TB-X304L, Android 8.1.0, Kernel 3.18.71 (the image is cut off at the edges)
     - Lenovo TB-X606F, Android 10, Kernel unknown (the image is cut off at the edges)
     - Lenovo Tab P11, Android 11, Kernel 4.19.157-perf+ (the image is cut off at the edges)
+    - Samsung Galaxy Tab A, Android 11, Kernel 4.9.227
 - TV and Boxes
     - A95X F3 AIR, Android 9, Kernel 4.9.113, SlimBOXtv AOSP 9.14 without GAPPS
     - IE X3 Air, Android 9, Kernel 4.9.113, SlimBOXtv AOSP 9.14 without GAPPS
     - Haier Candy Android TV 2K, Android 11, Kernel 4.9.243+ (no icon in apps on device)
     - SberBox SBDV-00001, Custom ?, Kernel 4.9.228
-    - TV Box X96Q, Android 10, kernel 4.9.170 (original H313 SoC)
+    - TV Box X96Q, Android 10, Kernel 4.9.170 (original H313 SoC)
 - Car Devices
     - Media Center JCAC10003, Android 12, Kernel 3.18.79+ (SoC ac8227/ac8229)
     - Mirror Z55, Android 8.1.0, Kernel 4.4.83
@@ -72,6 +74,7 @@ Device type, Manufacturer and Model, Android Version, Kernel Version
 - Tablets
     - Pipo M6 Pro Android 4.4.2 Kernel 3.4.0 (Error parsing package)
     - Ployer Momo8, Android 4.1.1 ,Kernel 3.0.8+ (Error parsing package)
+    - Samsung Galaxy Tab A, Android 7.1.1, Kernel 3.10.49 (Error parsing package)
 - TV and Boxes
     - Eltex NV-501-Wac, Android 4.4.4, Kernel 3.10.24
     - TV box, Android 5.1.1, Kernel 3.14.29
