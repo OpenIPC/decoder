@@ -19,7 +19,7 @@ The application is designed for OpenIPC devices and can be used for:
 - Baby Monitors
 - Radio-controlled Toys
 
-The program is guaranteed to work on the fresh Android OS 8-15 and uses some GAPPS components, so do not disable them !
+**The program is guaranteed to work on the fresh Android OS 8-15**
 
 _During the testing phase, the application is distributed only in binary form at the request of interested individuals and companies._
 
@@ -42,7 +42,7 @@ _During the testing phase, the application is distributed only in binary form at
 ### Statistics
 **Please send information about devices where the program was tested only in this format:**
 ```
-Manufacturer Model, Android Version, Kernel Version
+Device type, Manufacturer and Model, Android Version, Kernel Version
 ```
 
 ### Verified devices
@@ -77,7 +77,9 @@ Manufacturer Model, Android Version, Kernel Version
     - TV box, Android 5.1.1, Kernel 3.14.29
     - Yandex TV, Android 7.1.1, Kernel 4.4.3 (wrong install)
 
+### Problems and explanations
 
+It has been noticed that the Decoder application may sometimes use some GAPPS components/libraries, so do not disable them or do it consciously, research in this area is highly encouraged !
 
 
 [price]: https://openipc.org/support-open-source
