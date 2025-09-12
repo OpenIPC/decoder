@@ -16,7 +16,7 @@ The application is designed for OpenIPC devices and can be used for:
 - Baby monitors
 - Radio-controlled toys
 
-The program is guaranteed to work on the fresh Android OS 8-16 and uses some GAPPS components, so do not disable them !
+The program is guaranteed to work on the fresh Android OS 8-15 and uses some GAPPS components, so do not disable them !
 
 _During the testing phase, the application is distributed only in binary form at the request of interested individuals and companies._
 
@@ -43,31 +43,33 @@ Manufacturer Model, Android Version, Kernel Version
 ```
 
 ### Verified devices
-- Phone
+- Phones
     - Asus ZC553KL, Android 8.1, Kernel 3.18.71
     - Blackview BV4900Pro, Android 12, Kernel 4.19.191
     - Samsung Galaxy A51, Android 13, kernel 4.14.113
     - Samsung S8, Android 9, Kernel 4.4.153
+    - Samsung S23 Ultra, Android 15, Kernel 5.15.153
     - Xiaomi Redmi 7A, Android 10, Kernel 4.9.261
     - Xiaomi Redmi Note 13 4G, Android 13, Kernel 5.15.94
-- Tablet
+- Tablets
     - Lenovo TB-X304L, Android 8.1.0, Kernel 3.18.71 (the image is cut off at the edges)
     - Lenovo TB-X606F, Android 10, Kernel unknown (the image is cut off at the edges)
     - Lenovo Tab P11, Android 11, Kernel 4.19.157-perf+ (the image is cut off at the edges)
-- TV
+- TV and Boxes
     - A95X F3 AIR, Android 9, Kernel 4.9.113, SlimBOXtv AOSP 9.14 without GAPPS
     - IE X3 Air, Android 9, Kernel 4.9.113, SlimBOXtv AOSP 9.14 without GAPPS
     - Haier Candy Android TV 2K, Android 11, Kernel 4.9.243+ (no icon in apps on device)
     - SberBox SBDV-00001, Custom ?, Kernel 4.9.228
     - Smart TV X96Q, Android 10, kernel 4.9.170
-- Car
-    - JCAC10003, Android 12, Kernel 3.18.79+ (SoC ac8227/ac8229)
+- Car Devices
+    - Media Center JCAC10003, Android 12, Kernel 3.18.79+ (SoC ac8227/ac8229)
+    - Mirror Z55, Android 8.1.0, Kernel 4.4.83
 
 ### Incompatible devices
-- Tablet
+- Tablets
     - Pipo M6 Pro Android 4.4.2 Kernel 3.4.0 (Error parsing package)
     - Ployer Momo8, Android 4.1.1 ,Kernel 3.0.8+ (Error parsing package)
-- TV
+- TV and Boxes
     - Eltex NV-501-Wac, Android 4.4.4, Kernel 3.10.24
     - TV box, Android 5.1.1, Kernel 3.14.29
     - Yandex TV, Android 7.1.1, Kernel 4.4.3 (wrong install)
