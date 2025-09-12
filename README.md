@@ -10,7 +10,7 @@
 [![Telegram](https://openipc.org/images/telegram_button.svg)][telegram]
 
 ### Introduction
-The application is designed for OpenIPC devices and can be used for:
+The very simple application (25kB!) is designed for OpenIPC devices and can be used for:
 - Any testing and experiments
 - Phones and Tablets
 - TVs and connected Boxes
