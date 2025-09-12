@@ -21,7 +21,7 @@ A very simple application (25 KB!) is designed to interact with devices that hav
 
 **The program is guaranteed to basic work on the fresh Android OS 8-15**
 
-_During the testing phase, the application is distributed only in binary form at the request of interested individuals and companies._
+_During the testing phase, the application is distributed only in binary form._
 
 
 ![Menu](photo_menu.jpg)
