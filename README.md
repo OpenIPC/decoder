@@ -11,7 +11,7 @@
 
 ### Introduction
 The very simple application (25kB!) is designed for OpenIPC devices and can be used for:
-- Any testing and experiments
+- Any testing and experiments with RTSP
 - Phones and Tablets
 - TVs and connected Boxes
 - Car Players and Mirrors
