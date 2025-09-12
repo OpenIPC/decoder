@@ -19,7 +19,7 @@ A very simple application (25 KB!) is designed to interact with devices that hav
 - Baby Monitors
 - Radio-controlled Toys
 
-**The program is guaranteed to work on the fresh Android OS 8-15**
+**The program is guaranteed to basic work on the fresh Android OS 8-15**
 
 _During the testing phase, the application is distributed only in binary form at the request of interested individuals and companies._
 
@@ -27,7 +27,7 @@ _During the testing phase, the application is distributed only in binary form at
 ![Menu](photo_menu.jpg)
 
 ### Version history
-- [v1.03, 2025.09.08](#), closed testing
+- v1.03, 2025.09.08, closed testing
     - Now we can specify the port next to the device address
     - Accepts external calls and can work together with OpenIPC Network
     - Many other fixes
