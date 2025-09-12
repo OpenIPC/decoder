@@ -10,7 +10,7 @@
 [![Telegram](https://openipc.org/images/telegram_button.svg)][telegram]
 
 ### Introduction
-The very simple application (25kB!) is designed for OpenIPC devices and can be used for:
+A very simple application (25 KB!) is designed to interact with devices that have OpenIPC firmware and can be used for the following purposes:
 - Any testing and experiments with RTSP
 - Phones and Tablets
 - TVs and connected Boxes
