@@ -31,7 +31,7 @@ _During the testing phase, the application is distributed only in binary form at
     - Now we can specify the port next to the device address
     - Accepts external calls and can work together with OpenIPC Network
     - Many other features
-- [v1.02, 2025.09.03](#), downloadable version
+- [v1.02, 2025.09.03](https://github.com/OpenIPC/decoder/releases/download/latest/decoder_v1.2_20250903.apk), downloadable version
     - Announcement and first public release
     - New compact and convenient menu
     - Audio (PCM, 8k) is now available when receiving RTSP over TCP/UDP
