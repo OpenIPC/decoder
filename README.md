@@ -63,7 +63,7 @@ Device type, Manufacturer and Model, Android Version, Kernel Version
     - IE X3 Air, Android 9, Kernel 4.9.113, SlimBOXtv AOSP 9.14 without GAPPS
     - Haier Candy Android TV 2K, Android 11, Kernel 4.9.243+ (no icon in apps on device)
     - SberBox SBDV-00001, Custom ?, Kernel 4.9.228
-    - Smart TV X96Q, Android 10, kernel 4.9.170
+    - TV Box X96Q, Android 10, kernel 4.9.170 (original H313 SoC)
 - Car Devices
     - Media Center JCAC10003, Android 12, Kernel 3.18.79+ (SoC ac8227/ac8229)
     - Mirror Z55, Android 8.1.0, Kernel 4.4.83
