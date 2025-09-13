@@ -19,7 +19,7 @@ A very simple application (25 KB!) is designed to interact with devices that hav
 - Baby Monitors
 - Radio-controlled Toys
 
-**The program is guaranteed to basic work on the Android OS from 8.0 (SDK/Level 26) to 15 (SDK/Level 35)**
+**The program is tested work on the Android OS from 8.0 (SDK/Level 26) to 15 (SDK/Level 35)**
 
 To understand the SDK version, Android version and other relationships, please see this [table](https://apilevels.com/).
 
@@ -30,7 +30,7 @@ _During the testing phase, the application is distributed only in binary form._
 
 ### Version history
 - [v1.03.2, 2025.09.14](https://github.com/OpenIPC/decoder/releases/download/latest/decoder_v1.03.2_20250914.apk)
-    - Alpha version for old devices 
+    - Alpha version for very old devices, Android OS from 4.0.1 (SDK/Level 14) to 15 (SDK/Level 35)
 - [v1.03, 2025.09.08](https://github.com/OpenIPC/decoder/releases/download/latest/decoder_v1.03_20250908.apk)
     - Now we can specify the port next to the device address
     - Accepts external calls and can work together with OpenIPC Network
