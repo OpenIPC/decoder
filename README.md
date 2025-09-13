@@ -72,6 +72,7 @@ Device type, Manufacturer and Model, Android Version, Kernel Version
 
 ### Incompatible devices
 - Tablets
+    - China fake Samsung Tablet, Android 4.2.2, Kernel 3.4.0+ (Error parsing package)
     - Pipo M6 Pro Android 4.4.2 Kernel 3.4.0 (Error parsing package)
     - Ployer Momo8, Android 4.1.1 ,Kernel 3.0.8+ (Error parsing package)
     - Samsung Galaxy Tab A, Android 7.1.1, Kernel 3.10.49 (Error parsing package)
