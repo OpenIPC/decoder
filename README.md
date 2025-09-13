@@ -19,7 +19,9 @@ A very simple application (25 KB!) is designed to interact with devices that hav
 - Baby Monitors
 - Radio-controlled Toys
 
-**The program is guaranteed to basic work on the fresh Android OS 8-15**
+**The program is guaranteed to basic work on the Android OS from 8.0 (SDK/Level 26) to 15 (SDK/Level 35)**
+
+To understand the SDK version, Android version and other relationships, please see this [table](https://apilevels.com/).
 
 _During the testing phase, the application is distributed only in binary form._
 
