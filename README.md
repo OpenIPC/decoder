@@ -10,7 +10,7 @@
 [![Telegram](https://openipc.org/images/telegram_button.svg)][telegram]
 
 ### Introduction
-A very simple application (25 KB!) is designed to interact with devices that have OpenIPC firmware and can be used for the following purposes:
+A very simple and lite application (~30 KB!) is designed to interact with devices that have OpenIPC firmware and can be used for the following purposes:
 - Any testing and experiments with RTSP
 - Phones and Tablets
 - TVs and connected Boxes
@@ -25,17 +25,18 @@ To understand the SDK version, Android version and other relationships, please s
 
 _During the testing phase, the application is distributed only in binary form._
 
-
 ![Menu](photo_menu.jpg)
 
 ### Version history
-- [v1.03.2, 2025.09.14](https://github.com/OpenIPC/decoder/releases/download/latest/decoder_v1.03.2_20250914.apk)
-    - Alpha version for very old devices, Android OS from 4.0.1 (SDK/Level 14) to 15 (SDK/Level 35)
-- [v1.03, 2025.09.08](https://github.com/OpenIPC/decoder/releases/download/latest/decoder_v1.03_20250908.apk)
+- [v1.04](https://play.google.com/apps/internaltest/4701231141824898735), 2025.09.15
+    - Now a unified RTSP string containing all parameters is used (requires deleting previous versions of the program or settings)
+    - First publication through closed tests on Google Play
+    - Alpha version to support more devices, Android OS from 5 (SDK/Level 21) to 15 (SDK/Level 35)
+- v1.03, 2025.09.08
     - Now we can specify the port next to the device address
     - Accepts external calls and can work together with OpenIPC Network
-    - Many other fixes
-- [v1.02, 2025.09.03](https://github.com/OpenIPC/decoder/releases/download/latest/decoder_v1.02_20250903.apk)
+    - Some other fixes
+- v1.02, 2025.09.03
     - Announcement and first public release
     - New compact and convenient menu
     - Audio (PCM, 8k) is now available when receiving RTSP over TCP/UDP
