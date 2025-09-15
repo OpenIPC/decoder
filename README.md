@@ -70,6 +70,7 @@ Device type, Manufacturer and Model, Android Version, Kernel Version
     - Lenovo TB-X304L, Android 8.1.0, Kernel 3.18.71 (the image is cut off at the edges)
     - Lenovo TB-X606F, Android 10, Kernel unknown (the image is cut off at the edges)
     - Lenovo Tab P11, Android 11, Kernel 4.19.157-perf+ (the image is cut off at the edges)
+    - Samsung Galaxy Tab A, Android 7.1.1, Kernel 3.10.49
     - Samsung Galaxy Tab A, Android 11, Kernel 4.9.227
 - TV and Boxes
     - A95X F3 AIR, Android 9, Kernel 4.9.113, SlimBOXtv AOSP 9.14 without GAPPS
@@ -77,20 +78,14 @@ Device type, Manufacturer and Model, Android Version, Kernel Version
     - Haier Candy Android TV 2K, Android 11, Kernel 4.9.243+ (no icon in apps on device)
     - SberBox SBDV-00001, Custom ?, Kernel 4.9.228
     - TV Box X96Q, Android 10, Kernel 4.9.170 (original H313 SoC)
+    - Yandex TV Novex NVX-55U169TSY, Android 7.1.1, Kernel 4.4.3
 - Car Devices
     - Media Center JCAC10003, Android 12, Kernel 3.18.79+ (SoC ac8227/ac8229)
     - Mirror Z55, Android 8.1.0, Kernel 4.4.83
 
 ### Incompatible devices
-- Tablets
-    - China fake Samsung Tablet, Android 4.2.2, Kernel 3.4.0+ (unsupported)
-    - Pipo M6 Pro Android 4.4.2 Kernel 3.4.0 (unsupported)
-    - Ployer Momo8, Android 4.1.1 ,Kernel 3.0.8+ (unsupported)
-    - Samsung Galaxy Tab A, Android 7.1.1, Kernel 3.10.49 (no video)
-- TV and Boxes
-    - Eltex NV-501-Wac, Android 4.4.4, Kernel 3.10.24 (unsupported)
+- Untested
     - TV box, Android 5.1.1, Kernel 3.14.29 (no video)
-    - Yandex TV, Android 7.1.1, Kernel 4.4.3 (no video)
 
 ### Problems and explanations
 
