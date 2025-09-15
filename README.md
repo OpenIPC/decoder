@@ -77,14 +77,14 @@ Device type, Manufacturer and Model, Android Version, Kernel Version
 
 ### Incompatible devices
 - Tablets
-    - China fake Samsung Tablet, Android 4.2.2, Kernel 3.4.0+ (Error parsing package)
-    - Pipo M6 Pro Android 4.4.2 Kernel 3.4.0 (Error parsing package)
-    - Ployer Momo8, Android 4.1.1 ,Kernel 3.0.8+ (Error parsing package)
-    - Samsung Galaxy Tab A, Android 7.1.1, Kernel 3.10.49 (Error parsing package)
+    - China fake Samsung Tablet, Android 4.2.2, Kernel 3.4.0+ (unsupported)
+    - Pipo M6 Pro Android 4.4.2 Kernel 3.4.0 (unsupported)
+    - Ployer Momo8, Android 4.1.1 ,Kernel 3.0.8+ (unsupported)
+    - Samsung Galaxy Tab A, Android 7.1.1, Kernel 3.10.49 (no video)
 - TV and Boxes
-    - Eltex NV-501-Wac, Android 4.4.4, Kernel 3.10.24
-    - TV box, Android 5.1.1, Kernel 3.14.29
-    - Yandex TV, Android 7.1.1, Kernel 4.4.3 (wrong install)
+    - Eltex NV-501-Wac, Android 4.4.4, Kernel 3.10.24 (unsupported)
+    - TV box, Android 5.1.1, Kernel 3.14.29 (no video)
+    - Yandex TV, Android 7.1.1, Kernel 4.4.3 (no video)
 
 ### Problems and explanations
 
