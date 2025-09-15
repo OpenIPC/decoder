@@ -28,7 +28,7 @@ _During the testing phase, the application is distributed only in binary form._
 ![Menu](photo_menu.jpg)
 
 ### Version history
-- [v1.04](https://play.google.com/apps/internaltest/4701231141824898735), 2025.09.15
+- [v1.04](https://play.google.com/apps/internaltest/4701231141824898735), 2025.09.15 (Google Play neet your Email via developer)
     - Now a unified RTSP string containing all parameters is used (requires deleting previous versions of the program or settings)
     - First publication through closed tests on Google Play
     - Alpha version to support more devices, Android OS from 5 (SDK/Level 21) to 15 (SDK/Level 35)
