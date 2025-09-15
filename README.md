@@ -32,10 +32,12 @@ _During the testing phase, the application is distributed only in binary form._
     - Now a unified RTSP string containing all parameters is used (requires deleting previous versions of the program or settings)
     - First publication through closed tests on Google Play
     - Alpha version to support more devices, Android OS from 5 (SDK/Level 21) to 15 (SDK/Level 35)
+    - The current size of the application is 25 kilobytes
 - v1.03, 2025.09.08
     - Now we can specify the port next to the device address
     - Accepts external calls and can work together with OpenIPC Network
     - Some other fixes
+    - The current size of the application is 23 kilobytes
 - v1.02, 2025.09.03
     - Announcement and first public release
     - New compact and convenient menu
@@ -43,6 +45,9 @@ _During the testing phase, the application is distributed only in binary form._
     - RTP UDP receiving is temporarily disabled
     - Experimental bluetooth button controller is temporarily disabled
     - The current size of the application is 23 kilobytes
+- v1.01, 2025.09.01
+    - First unofficial testing version where RTSP and other features were enabled
+    - The current size of the application is 25 kilobytes
 
 ### Statistics
 **Please send information about devices where the program was tested only in this format:**
@@ -55,6 +60,7 @@ Device type, Manufacturer and Model, Android Version, Kernel Version
     - Asus ZC553KL, Android 8.1, Kernel 3.18.71
     - Blackview BV4900Pro, Android 12, Kernel 4.19.191
     - Samsung Galaxy A51, Android 13, Kernel 4.14.113
+    - Samsung A55 5G, Android 14, Kernel 6.1.93
     - Samsung Galaxy J7, Android 10 , Kernel 3.18.150
     - Samsung S8, Android 9, Kernel 4.4.153
     - Samsung S23 Ultra, Android 15, Kernel 5.15.153
