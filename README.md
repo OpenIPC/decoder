@@ -59,6 +59,7 @@ Device type, Manufacturer and Model, Android Version, Kernel Version
 - Phones
     - Asus ZC553KL, Android 8.1, Kernel 3.18.71
     - Blackview BV4900Pro, Android 12, Kernel 4.19.191
+    - Oppo 5X, ColorOS 15.0, Kernel 5.15.149
     - Samsung Galaxy A51, Android 13, Kernel 4.14.113
     - Samsung Galaxy S25, Android 15, Kernel 6.6.30
     - Samsung A55 5G, Android 14, Kernel 6.1.93
