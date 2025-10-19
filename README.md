@@ -68,6 +68,7 @@ Device type, Manufacturer and Model, Android Version, Kernel Version
     - Samsung S8, Android 9, Kernel 4.4.153
     - Samsung S23 Ultra, Android 15, Kernel 5.15.153
     - Xiaomi Redmi 7A, Android 10, Kernel 4.9.261
+    - Xiaomi Redmi Note 7 (M1901F7G), Android 10, Kernel 4.4.192
     - Xiaomi Redmi Note 13 4G, Android 13, Kernel 5.15.94
 - Tablets
     - Lenovo TB-X304L, Android 8.1.0, Kernel 3.18.71 (the image is cut off at the edges)
@@ -75,6 +76,7 @@ Device type, Manufacturer and Model, Android Version, Kernel Version
     - Lenovo Tab P11, Android 11, Kernel 4.19.157-perf+ (the image is cut off at the edges)
     - Samsung Galaxy Tab A, Android 7.1.1, Kernel 3.10.49
     - Samsung Galaxy Tab A, Android 11, Kernel 4.9.227
+    - Samsung Tab A7 (SM-T505), Android 12, Kernel 4.19.157-perf-
 - TV and Boxes
     - A95X F3 AIR, Android 9, Kernel 4.9.113, SlimBOXtv AOSP 9.14 without GAPPS
     - IE X3 Air, Android 9, Kernel 4.9.113, SlimBOXtv AOSP 9.14 without GAPPS
