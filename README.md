@@ -62,6 +62,7 @@ Device type, Manufacturer and Model, Android Version, Kernel Version
     - Oppo 5X, ColorOS 15.0, Kernel 5.15.149
     - Oppo A17, ColorOS 12.1, Kernel 4.19.191
     - Samsung Galaxy A51, Android 13, Kernel 4.14.113
+    - Samsung Galaxy M21 (SM-M215F/DSN), Android 12, Kernel 4.14.113
     - Samsung Galaxy S25, Android 15, Kernel 6.6.30
     - Samsung A55 5G, Android 14, Kernel 6.1.93
     - Samsung Galaxy J7, Android 10 , Kernel 3.18.150
