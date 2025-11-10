@@ -28,10 +28,12 @@ _During the testing phase, the application is distributed only in binary form, s
 ![Menu](photo_menu.jpg)
 
 ### Version history
-- [v1.07](https://play.google.com/apps/internaltest/4701231141824898735), 2025.11.11
-- To receive or update this app, you need to provide your email through [OpenIPC](https://t.me/openipc) to be added to the Google Play testers list
+
+**To [receive](https://play.google.com/apps/internaltest/4701231141824898735) or update this app, you need to provide your email through [OpenIPC](https://t.me/openipc) to be added to the Google Play testers list.**
+
+- v1.07, 2025.11.11
     - Fixed the WebUI window on older devices
-- [v1.06](https://play.google.com/apps/internaltest/4701231141824898735), 2025.11.10
+- v1.06, 2025.11.10
     - Fixed a problem with a occasional mediacodec crash
     - The compass icon is gone now, a click on the screen will open the menu instead
     - There is a blue outline on the selected item
