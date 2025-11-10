@@ -23,7 +23,7 @@ A very simple and lite application (~30 KB!) is designed to interact with device
 
 To understand the SDK version, Android version and other relationships, please see this [table](https://apilevels.com/).
 
-_During the testing phase, the application is distributed only in binary form._
+_During the testing phase, the application is distributed only in binary form, sorry._
 
 ![Menu](photo_menu.jpg)
 
