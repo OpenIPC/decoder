@@ -3,7 +3,7 @@ on:
   push:
     branches:
       - master
-      - ystinia
+      - decoder-ng
   workflow_dispatch:
 
 jobs:
@@ -17,9 +17,9 @@ jobs:
         id: vars
         run: |
           if [ "${{ github.ref_name }}" = "master" ]; then
-            echo "name=Decoder" >> $GITHUB_OUTPUT
+            echo "name=decoder" >> $GITHUB_OUTPUT
           else
-            echo "name=Decoder-NG" >> $GITHUB_OUTPUT
+            echo "name=decoder-ng" >> $GITHUB_OUTPUT
           fi
 
       - name: Set up JDK 17
