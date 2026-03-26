@@ -1,3 +1,13 @@
 <resources>
     <string name="app_name">Decoder</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_connected">Connected</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="status_buffering">Buffering…</string>
+    <string name="quality_good">Good</string>
+    <string name="quality_fair">Fair</string>
+    <string name="quality_poor">Poor</string>
+    <string name="menu_screenshot">Screenshot</string>
+    <string name="menu_record">Record</string>
+    <string name="menu_settings">Settings</string>
 </resources>
