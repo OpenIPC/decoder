@@ -19,7 +19,7 @@ jobs:
           if [ "${{ github.ref_name }}" = "master" ]; then
             echo "name=decoder" >> $GITHUB_OUTPUT
           else
-            echo "name=decoder-ng" >> $GITHUB_OUTPUT
+            echo "name=decoder-v3" >> $GITHUB_OUTPUT
           fi
 
       - name: Set up JDK 17
