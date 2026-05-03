@@ -87,12 +87,13 @@ public class Decoder extends Activity {
     private final BlockingQueue<Frame> nalQueue = new ArrayBlockingQueue<>(32);
     private final BlockingQueue<Frame> pcmQueue = new ArrayBlockingQueue<>(32);
     private final BlockingQueue<byte[]> aacQueue = new ArrayBlockingQueue<>(32);
-    private final byte[] nalBuffer = new byte[1024 * 1024];
-
     // Object pools for memory optimization
     private final FramePool framePool = new FramePool(50);
+    private final NalAssembler nalAssembler = new NalAssembler(1024 * 1024, () -> {
+        closeDecoder();
+        nalQueue.clear();
+    });
 
-    private int nalSize;            // only touched on the network thread — no volatile needed
     private volatile MediaCodec mDecoder;
     // Surface captured on the UI thread via TextureView.SurfaceTextureListener; volatile so the
     // network thread can safely read it in createDecoder() without holding any UI lock.
@@ -118,7 +119,6 @@ public class Decoder extends Activity {
     private volatile AudioTrack audioTrack;
 
     private volatile boolean codecH265;
-    private boolean lastCodec; // only accessed on the network thread — volatile not needed
     private boolean listener;       // only accessed on the UI thread — no volatile needed
     private volatile boolean activeStream;
     private volatile int lastWidth;
@@ -957,129 +957,8 @@ public class Decoder extends Activity {
         }
     }
 
-    private int getFragment(byte data) {
-        return codecH265 ? (data >> 1) & 0x3F : data & 0x1F;
-    }
-
     private Frame buildFrame(Frame frame) {
-        byte[] rxBuffer = frame.data();
-        int rxSize = frame.length();
-        int cpSize = 12;
-        rxSize -= cpSize;
-
-        if (rxSize <= 0) {  // packet must have at least 1 byte of RTP payload
-            Log.w(TAG, "RTP payload too short: " + frame.length());
-            return null;
-        }
-
-        int staBit;
-        int endBit;
-        int nalBit = 4;
-
-        if (lastCodec != codecH265) {
-            lastCodec = codecH265;
-            nalSize = 0;   // discard partial NAL fragment from the previous codec
-            nalQueue.clear(); // discard fully-assembled frames from the previous codec —
-                              // feeding H.264 frames to an H.265 decoder (or vice versa)
-                              // causes decoding errors and visual corruption
-            closeDecoder();
-            Log.d(TAG, "Set codec to " + (codecH265 ? "H265" : "H264"));
-        }
-
-        int fragment = getFragment(rxBuffer[cpSize]);
-        if (fragment == RTP_FU_H264 || fragment == RTP_FU_H265) {
-            // fragmented NAL: H.265 FU needs 3 bytes header, H.264 FU-A needs 2
-            int minPayload = codecH265 ? 3 : 2;
-            if (rxSize < minPayload) {
-                Log.w(TAG, "FU header too short: " + rxSize);
-                return null;
-            }
-
-            if (codecH265) {
-                staBit = rxBuffer[cpSize + 2] & 0x80;
-                endBit = rxBuffer[cpSize + 2] & 0x40;
-                int type = (rxBuffer[cpSize] & 0x81) | (rxBuffer[cpSize + 2] & 0x3F) << 1;
-                nalBuffer[4] = (byte) type;
-                nalBuffer[5] = 1;
-
-                nalBit++;
-                cpSize++;
-                rxSize--;
-            } else {
-                staBit = rxBuffer[cpSize + 1] & 0x80;
-                endBit = rxBuffer[cpSize + 1] & 0x40;
-                int type = (rxBuffer[cpSize] & 0xE0) | (rxBuffer[cpSize + 1] & 0x1F);
-                nalBuffer[4] = (byte) type;
-            }
-
-            cpSize++;
-            rxSize--;
-
-            if (staBit > 0) {
-                nalBuffer[0] = 0;
-                nalBuffer[1] = 0;
-                nalBuffer[2] = 0;
-                nalBuffer[3] = 1;
-
-                // Skip the FU header byte whose type bits were already extracted above.
-                // nalBit++ also steps past the NAL header byte(s) already placed in
-                // nalBuffer[4] (H.264) or nalBuffer[4,5] (H.265) — keeping them intact.
-                nalBit++;
-                cpSize++;
-                rxSize--;
-
-                if (nalBit + rxSize > nalBuffer.length) {  // guard: start fragment overflow
-                    Log.e(TAG, "NAL start fragment too large, dropping");
-                    nalSize = 0;
-                    return null;
-                }
-                System.arraycopy(rxBuffer, cpSize, nalBuffer, nalBit, rxSize);
-                nalSize = rxSize + nalBit;
-
-                if (endBit > 0) {
-                    // single-fragment NAL (start and end both set): flush as a complete frame
-                    byte[] output = new byte[nalSize];
-                    System.arraycopy(nalBuffer, 0, output, 0, nalSize);
-                    return new Frame(output, nalSize);
-                }
-            } else {
-                cpSize++;
-                rxSize--;
-
-                if (nalSize + rxSize > nalBuffer.length) {  // guard: accumulated overflow
-                    Log.e(TAG, "NAL buffer overflow, dropping frame");
-                    nalSize = 0;
-                    return null;
-                }
-                System.arraycopy(rxBuffer, cpSize, nalBuffer, nalSize, rxSize);
-                nalSize += rxSize;
-
-                if (endBit > 0) {
-                    byte[] output = new byte[nalSize];
-                    System.arraycopy(nalBuffer, 0, output, 0, nalSize);
-                    return new Frame(output, nalSize);
-                }
-            }
-        } else {
-            nalBuffer[0] = 0;
-            nalBuffer[1] = 0;
-            nalBuffer[2] = 0;
-            nalBuffer[3] = 1;
-
-            if (nalBit + rxSize > nalBuffer.length) {  // guard: single-NAL overflow
-                Log.e(TAG, "Single NAL too large (" + rxSize + " bytes), dropping");
-                return null;
-            }
-            System.arraycopy(rxBuffer, cpSize, nalBuffer, nalBit, rxSize);
-            nalSize = rxSize + nalBit;
-
-            byte[] output = new byte[nalSize];
-            System.arraycopy(nalBuffer, 0, output, 0, nalSize);
-            return new Frame(output, nalSize);
-        }
-
-        // middle fragment: accumulating, frame not yet complete
-        return null;
+        return nalAssembler.assemble(frame, codecH265);
     }
 
     private void playAudio(Frame data) {
@@ -1336,7 +1215,7 @@ public class Decoder extends Activity {
         lastFrame = SystemClock.elapsedRealtime();
 
         int flag = 0;
-        int fragment = getFragment(buffer.data()[4]);
+        int fragment = NalAssembler.fragment(buffer.data()[4], codecH265);
         // mark parameter-set NALs so the decoder can configure itself before the first frame
         boolean isConfigNal = codecH265
                 ? (fragment == H265_NAL_VPS || fragment == H265_NAL_SPS || fragment == H265_NAL_PPS)
@@ -1617,7 +1496,7 @@ public class Decoder extends Activity {
     }
 
     private void rtspConnect() throws Exception {
-        nalSize = 0; // discard any partial NAL fragment from the previous session
+        nalAssembler.reset(); // discard any partial NAL fragment from the previous session
         lastUnknownPayload = -1; // reset so warnings appear for each new session
         String currentHost = mHost;
         if (currentHost == null || currentHost.isEmpty()) {
@@ -1635,6 +1514,7 @@ public class Decoder extends Activity {
             s = new Socket();
             int port = uri.getPort();
             s.connect(new InetSocketAddress(host, port < 0 ? 554 : port), 1000);
+            s.setTcpNoDelay(true);
             s.setSoTimeout(1000);
             // use the raw InputStream — a BufferedReader would pre-read RTP stream bytes
             // into its internal buffer, making them unavailable to tcpStream()
@@ -1690,9 +1570,11 @@ public class Decoder extends Activity {
             if (mType) {
                 udpVideo = new DatagramSocket(null);
                 udpVideo.setReuseAddress(true);
+                try { udpVideo.setReceiveBufferSize(512 * 1024); } catch (Exception ignored) {}
                 udpVideo.bind(new InetSocketAddress(5000));
                 udpAudio = new DatagramSocket(null);
                 udpAudio.setReuseAddress(true);
+                try { udpAudio.setReceiveBufferSize(512 * 1024); } catch (Exception ignored) {}
                 udpAudio.bind(new InetSocketAddress(5002));
             }
             try {
@@ -1871,6 +1753,7 @@ public class Decoder extends Activity {
             }
         }
     }
+
 
     private void processPacket(Frame frame) {
         try {
@@ -2214,7 +2097,6 @@ public class Decoder extends Activity {
         private volatile boolean activeStream;
         private volatile long lastFrame;
         private volatile boolean codecH265;
-        private boolean lastCodec;
 
         private volatile Surface surface;
         private volatile MediaCodec decoder;
@@ -2222,9 +2104,18 @@ public class Decoder extends Activity {
         private final Object decoderLock = new Object();
 
         private final BlockingQueue<Frame> nalQueue = new ArrayBlockingQueue<>(30);
-        private final byte[] nalBuffer = new byte[512 * 1024];
-        // Reuse main decoder's frame pool
-        private int nalSize;
+        private final NalAssembler nalAssembler = new NalAssembler(512 * 1024, () -> {
+            nalQueue.clear();
+            synchronized (decoderLock) {
+                MediaCodec c = decoder;
+                if (c != null) {
+                    decoder = null;
+                    try { c.stop(); } catch (Exception ignored) {}
+                    try { c.release(); } catch (Exception ignored) {}
+                    decoderFailed = false;
+                }
+            }
+        });
         private int lastUnknownPayload = -1;
 
         private volatile Socket tcpSocket;
@@ -2315,16 +2206,26 @@ public class Decoder extends Activity {
             executor.execute(() -> {
                 Thread.currentThread().setName(tag + "-net");
                 int retryDelay = 1000;
+                int consecutiveFailures = 0;
+                final int MAX_RETRY_DELAY = 30000;
+                final int MAX_CONSECUTIVE_FAILURES = 10;
                 while (running) {
                     try {
                         connect();
                         retryDelay = 1000;
+                        consecutiveFailures = 0;
                         SystemClock.sleep(1000);
                     } catch (Exception e) {
                         activeStream = false;
                         Log.w(TAG, tag + ": " + e.getMessage());
+                        consecutiveFailures++;
+                        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+                            Log.e(TAG, tag + ": too many consecutive failures, giving up");
+                            running = false;
+                            break;
+                        }
                         SystemClock.sleep(retryDelay);
-                        retryDelay = Math.min(retryDelay * 2, 8000);
+                        retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
                     }
                 }
             });
@@ -2416,7 +2317,7 @@ public class Decoder extends Activity {
         }
 
         private void connect() throws Exception {
-            nalSize = 0;
+            nalAssembler.reset();
             lastUnknownPayload = -1;
             if (host == null || host.isEmpty()) {
                 SystemClock.sleep(5000);
@@ -2432,6 +2333,7 @@ public class Decoder extends Activity {
                 s = new Socket();
                 int port = uri.getPort();
                 s.connect(new InetSocketAddress(h, port < 0 ? 554 : port), 5000);
+                s.setTcpNoDelay(true);
                 s.setSoTimeout(5000);
 
                 InputStream input = s.getInputStream();
@@ -2595,7 +2497,7 @@ public class Decoder extends Activity {
             int pt = data[1] & 0x7F;
             if (pt == RTP_PT_H265 || pt == RTP_PT_H264) {
                 codecH265 = (pt == RTP_PT_H265);
-                Frame output = assembleNal(frame);
+                Frame output = nalAssembler.assemble(frame, codecH265);
                 if (output != null) nalQueue.offer(output);
             } else if (pt != lastUnknownPayload) {
                 lastUnknownPayload = pt;
@@ -2603,102 +2505,12 @@ public class Decoder extends Activity {
             }
         }
 
-        private int fragment(byte data) {
-            return codecH265 ? (data >> 1) & 0x3F : data & 0x1F;
-        }
-
-        /** NAL reassembly from RTP fragmentation units. */
-        private Frame assembleNal(Frame frame) {
-            byte[] rx = frame.data();
-            int rxSize = frame.length();
-            int cp = 12;
-            rxSize -= cp;
-            if (rxSize <= 0) return null;
-
-            int nalBit = 4;
-
-            if (lastCodec != codecH265) {
-                lastCodec = codecH265;
-                nalSize = 0;
-                nalQueue.clear();
-                synchronized (decoderLock) {
-                    MediaCodec c = decoder;
-                    if (c != null) {
-                        decoder = null;
-                        try { c.stop(); } catch (Exception ignored) {}
-                        try { c.release(); } catch (Exception ignored) {}
-                        decoderFailed = false;
-                    }
-                }
-            }
-
-            int frag = fragment(rx[cp]);
-            if (frag == RTP_FU_H264 || frag == RTP_FU_H265) {
-                int minPayload = codecH265 ? 3 : 2;
-                if (rxSize < minPayload) return null;
-
-                int staBit, endBit;
-                if (codecH265) {
-                    staBit = rx[cp + 2] & 0x80;
-                    endBit = rx[cp + 2] & 0x40;
-                    nalBuffer[4] = (byte) ((rx[cp] & 0x81) | (rx[cp + 2] & 0x3F) << 1);
-                    nalBuffer[5] = 1;
-                    nalBit++;
-                    cp++;
-                    rxSize--;
-                } else {
-                    staBit = rx[cp + 1] & 0x80;
-                    endBit = rx[cp + 1] & 0x40;
-                    nalBuffer[4] = (byte) ((rx[cp] & 0xE0) | (rx[cp + 1] & 0x1F));
-                }
-
-                cp++;
-                rxSize--;
-
-                if (staBit > 0) {
-                    nalBuffer[0] = 0; nalBuffer[1] = 0; nalBuffer[2] = 0; nalBuffer[3] = 1;
-                    nalBit++;
-                    cp++;
-                    rxSize--;
-                    if (nalBit + rxSize > nalBuffer.length) { nalSize = 0; return null; }
-                    System.arraycopy(rx, cp, nalBuffer, nalBit, rxSize);
-                    nalSize = rxSize + nalBit;
-                    if (endBit > 0) {
-                        byte[] out = new byte[nalSize];
-                        System.arraycopy(nalBuffer, 0, out, 0, nalSize);
-                        return new Frame(out, nalSize);
-                    }
-                } else {
-                    cp++;
-                    rxSize--;
-                    if (nalSize + rxSize > nalBuffer.length) { nalSize = 0; return null; }
-                    System.arraycopy(rx, cp, nalBuffer, nalSize, rxSize);
-                    nalSize += rxSize;
-                    if (endBit > 0) {
-                        byte[] out = new byte[nalSize];
-                        System.arraycopy(nalBuffer, 0, out, 0, nalSize);
-                        return new Frame(out, nalSize);
-                    }
-                }
-            } else {
-                nalBuffer[0] = 0; nalBuffer[1] = 0; nalBuffer[2] = 0; nalBuffer[3] = 1;
-                if (nalBit + rxSize > nalBuffer.length) return null;
-                System.arraycopy(rx, cp, nalBuffer, nalBit, rxSize);
-                nalSize = rxSize + nalBit;
-                byte[] out = new byte[nalSize];
-                System.arraycopy(nalBuffer, 0, out, 0, nalSize);
-                return new Frame(out, nalSize);
-            }
-
-            return null; // middle fragment — accumulating
-        }
-
         private void decode(Frame buffer) {
             if (buffer.length() < 5) return;
             lastFrame = SystemClock.elapsedRealtime();
 
             int flag = 0;
-            int frag = fragment(buffer.data()[4]);
+            int frag = NalAssembler.fragment(buffer.data()[4], codecH265);
             boolean config = codecH265
                     ? (frag == H265_NAL_VPS || frag == H265_NAL_SPS || frag == H265_NAL_PPS)
                     : (frag == H264_NAL_SPS || frag == H264_NAL_PPS);
@@ -2772,19 +2584,101 @@ public class Decoder extends Activity {
         }
     }
 
-    private static class Frame {
-        private final byte[] data;
-        private int length;
+    /**
+     * Reusable NAL unit reassembler from RTP fragmentation units.
+     * Replaces the duplicated buildFrame()/assembleNal() methods with a single
+     * implementation shared by the main decoder and QuadCell streams.
+     */
+    private static class NalAssembler {
+        private final byte[] nalBuffer;
+        private int nalSize;
+        private boolean lastCodec; // tracks codec switches to flush stale state
+        private final Runnable onCodecSwitch;
 
-        Frame(byte[] data, int length) {
-            this.data = data;
-            this.length = length;
+        NalAssembler(int bufferSize, Runnable onCodecSwitch) {
+            this.nalBuffer = new byte[bufferSize];
+            this.onCodecSwitch = onCodecSwitch;
         }
 
-        byte[] data() { return data; }
-        int length() { return length; }
-        void setLength(int length) { this.length = length; }
+        void reset() { nalSize = 0; }
+
+        /** Reassemble one RTP packet into (possibly null) NAL frame. */
+        Frame assemble(Frame frame, boolean codecH265) {
+            byte[] rx = frame.data();
+            int rxSize = frame.length();
+            int cp = 12;
+            rxSize -= cp;
+            if (rxSize <= 0) return null;
+
+            int nalBit = 4;
+            if (lastCodec != codecH265) {
+                lastCodec = codecH265;
+                nalSize = 0;
+                onCodecSwitch.run();
+            }
+
+            int frag = fragment(rx[cp], codecH265);
+            if (frag == RTP_FU_H264 || frag == RTP_FU_H265) {
+                int minPayload = codecH265 ? 3 : 2;
+                if (rxSize < minPayload) return null;
+
+                int staBit, endBit;
+                if (codecH265) {
+                    staBit = rx[cp + 2] & 0x80;
+                    endBit = rx[cp + 2] & 0x40;
+                    nalBuffer[4] = (byte) ((rx[cp] & 0x81) | (rx[cp + 2] & 0x3F) << 1);
+                    nalBuffer[5] = 1;
+                    nalBit++;
+                    cp++; rxSize--;
+                } else {
+                    staBit = rx[cp + 1] & 0x80;
+                    endBit = rx[cp + 1] & 0x40;
+                    nalBuffer[4] = (byte) ((rx[cp] & 0xE0) | (rx[cp + 1] & 0x1F));
+                }
+                cp++; rxSize--;
+
+                if (staBit > 0) {
+                    nalBuffer[0] = 0; nalBuffer[1] = 0; nalBuffer[2] = 0; nalBuffer[3] = 1;
+                    nalBit++;
+                    cp++; rxSize--;
+                    if (nalBit + rxSize > nalBuffer.length) { nalSize = 0; return null; }
+                    System.arraycopy(rx, cp, nalBuffer, nalBit, rxSize);
+                    nalSize = rxSize + nalBit;
+                    if (endBit > 0) {
+                        byte[] out = new byte[nalSize];
+                        System.arraycopy(nalBuffer, 0, out, 0, nalSize);
+                        return new Frame(out, nalSize);
+                    }
+                } else {
+                    cp++; rxSize--;
+                    if (nalSize + rxSize > nalBuffer.length) { nalSize = 0; return null; }
+                    System.arraycopy(rx, cp, nalBuffer, nalSize, rxSize);
+                    nalSize += rxSize;
+                    if (endBit > 0) {
+                        byte[] out = new byte[nalSize];
+                        System.arraycopy(nalBuffer, 0, out, 0, nalSize);
+                        return new Frame(out, nalSize);
+                    }
+                }
+            } else {
+                nalBuffer[0] = 0; nalBuffer[1] = 0; nalBuffer[2] = 0; nalBuffer[3] = 1;
+                if (nalBit + rxSize > nalBuffer.length) return null;
+                System.arraycopy(rx, cp, nalBuffer, nalBit, rxSize);
+                nalSize = rxSize + nalBit;
+                byte[] out = new byte[nalSize];
+                System.arraycopy(nalBuffer, 0, out, 0, nalSize);
+                return new Frame(out, nalSize);
+            }
+            return null; // middle fragment — still accumulating
+        }
+
+        /** Extract NAL unit type from a byte at the FU indicator / NAL header position. */
+        static int fragment(byte data, boolean codecH265) {
+            return codecH265 ? (data >> 1) & 0x3F : data & 0x1F;
+        }
     }
+
+    private static class Frame {
 
     /**
      * Simple object pool for Frame objects to reduce GC pressure
