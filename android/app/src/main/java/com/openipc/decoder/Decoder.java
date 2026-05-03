@@ -27,6 +27,7 @@ import android.media.MediaFormat;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.SystemClock;
 import android.text.InputType;
 import android.text.SpannableString;
@@ -59,12 +60,9 @@ import android.widget.PopupWindow;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.graphics.Bitmap;
-import android.os.Environment;
 import android.provider.MediaStore;
 
 import java.io.BufferedInputStream;
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -509,23 +507,18 @@ public class Decoder extends Activity {
                 }
             }
         } else {
-            // API < 29 — legacy file-based approach
-            File storageDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES);
-            File screenshotFile = new File(storageDir, "OpenIPC/" + fileName);
-            screenshotFile.getParentFile().mkdirs();
-
+            // API < 29 — use MediaStore insertImage (via ContentResolver, no runtime permission needed)
             try {
-                FileOutputStream fos = new FileOutputStream(screenshotFile);
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
-                fos.flush();
-                fos.close();
-                // Notify MediaScanner
-                MediaStore.Images.Media.insertImage(getContentResolver(),
-                    screenshotFile.getAbsolutePath(), fileName, null);
-                runOnUiThread(() ->
-                    Toast.makeText(this, "Screenshot saved: " + fileName, Toast.LENGTH_LONG).show()
-                );
-            } catch (IOException e) {
+                String saved = MediaStore.Images.Media.insertImage(
+                    getContentResolver(), bitmap, fileName, "OpenIPC Decoder screenshot");
+                if (saved != null) {
+                    runOnUiThread(() ->
+                        Toast.makeText(this, "Screenshot saved: " + fileName, Toast.LENGTH_LONG).show()
+                    );
+                } else {
+                    throw new IOException("MediaStore insertImage returned null");
+                }
+            } catch (Exception e) {
                 Log.e(TAG, "Error saving screenshot", e);
                 runOnUiThread(() ->
                     Toast.makeText(this, "Failed to save screenshot", Toast.LENGTH_SHORT).show()
@@ -1342,47 +1335,6 @@ public class Decoder extends Activity {
 
         lastFrame = SystemClock.elapsedRealtime();
 
-        // Update quality indicator based on RTP timestamp jitter
-        long now = SystemClock.elapsedRealtime();
-        if (now - lastQualityUpdateTime > 1000) { // Update every second
-            lastQualityUpdateTime = now;
-            int avgJitter = (jitterSampleCount > 0)
-                    ? (int)(jitterAccumulator / jitterSampleCount / 1000000) // ns to ms
-                    : -1;
-            updateQuality(avgJitter);
-            jitterAccumulator = 0;
-            jitterSampleCount = 0;
-        }
-
-        // Calculate jitter: difference between packet inter-arrival time
-        // and RTP timestamp delta (converted to ms via clock rate)
-        if (lastRtpTimestamp >= 0 && lastRtpArrivalNs >= 0) {
-            // Extract RTP timestamp from bytes 4-7 (big-endian)
-            int rtpTs = 0;
-            if (buffer.length() >= 8) {
-                rtpTs = ((buffer.data()[4] & 0xFF) << 24)
-                      | ((buffer.data()[5] & 0xFF) << 16)
-                      | ((buffer.data()[6] & 0xFF) << 8)
-                      | (buffer.data()[7] & 0xFF);
-            }
-            int rtpDeltaMs = (int)((rtpTs - lastRtpTimestamp) / 90L); // 90 kHz clock for video
-            long arrivalDeltaNs = System.nanoTime() - lastRtpArrivalNs;
-            long arrivalDeltaMs = arrivalDeltaNs / 1000000;
-            long jitter = Math.abs(arrivalDeltaMs - rtpDeltaMs);
-            if (jitter < 5000) { // sanity check: ignore outliers > 5s
-                jitterAccumulator += jitter;
-                jitterSampleCount++;
-            }
-        }
-        // Store RTP timestamp for next calculation (bytes 4-7 big-endian)
-        if (buffer.length() >= 8) {
-            lastRtpTimestamp = ((buffer.data()[4] & 0xFF) << 24)
-                             | ((buffer.data()[5] & 0xFF) << 16)
-                             | ((buffer.data()[6] & 0xFF) << 8)
-                             | (buffer.data()[7] & 0xFF);
-        }
-        lastRtpArrivalNs = System.nanoTime();
-
         int flag = 0;
         int fragment = getFragment(buffer.data()[4]);
         // mark parameter-set NALs so the decoder can configure itself before the first frame
@@ -1780,6 +1732,7 @@ public class Decoder extends Activity {
                 w.flush();
 
                 readRtspResponse(input, null);
+                updateStatus("buffering");
 
                 // disable read timeout before streaming: keyframe intervals often exceed 1 second
                 s.setSoTimeout(0);
@@ -1870,10 +1823,9 @@ public class Decoder extends Activity {
             }
             int length = packet.getLength();
             Frame frame = obtainFrame(length);
-            byte[] data = frame.data();
-            System.arraycopy(packet.getData(), 0, data, 0, length);
-            // Set length on the obtained Frame so processPacket recycles it properly
-            processPacket(new Frame(data, length));
+            System.arraycopy(packet.getData(), 0, frame.data(), 0, length);
+            frame.setLength(length);
+            processPacket(frame);
         }
     }
 
@@ -1913,9 +1865,9 @@ public class Decoder extends Activity {
 
             if (channel == 0 || channel == 2) {
                 Frame frame = obtainFrame(len);
-                byte[] data = frame.data();
-                System.arraycopy(pktBuf, 0, data, 0, len);
-                processPacket(new Frame(data, len));
+                System.arraycopy(pktBuf, 0, frame.data(), 0, len);
+                frame.setLength(len);
+                processPacket(frame);
             }
         }
     }
@@ -1940,6 +1892,36 @@ public class Decoder extends Activity {
                 processAudio(frame);
                 return;
             } else if (payload == RTP_PT_H265 || payload == RTP_PT_H264) {
+                // Calculate jitter from RTP timestamp (bytes 4-7, big-endian, 90 kHz clock)
+                long now = SystemClock.elapsedRealtime();
+                if (now - lastQualityUpdateTime > 1000) {
+                    lastQualityUpdateTime = now;
+                    int avgJitter = (jitterSampleCount > 0)
+                            ? (int)(jitterAccumulator / jitterSampleCount)
+                            : -1;
+                    updateQuality(avgJitter);
+                    jitterAccumulator = 0;
+                    jitterSampleCount = 0;
+                }
+                if (lastRtpTimestamp >= 0 && lastRtpArrivalNs >= 0) {
+                    int rtpTs = ((data[4] & 0xFF) << 24)
+                              | ((data[5] & 0xFF) << 16)
+                              | ((data[6] & 0xFF) << 8)
+                              | (data[7] & 0xFF);
+                    int rtpDeltaMs = (int)((rtpTs - lastRtpTimestamp) / 90L);
+                    long arrivalDeltaMs = (System.nanoTime() - lastRtpArrivalNs) / 1000000;
+                    long jitter = Math.abs(arrivalDeltaMs - rtpDeltaMs);
+                    if (jitter < 5000) {
+                        jitterAccumulator += jitter;
+                        jitterSampleCount++;
+                    }
+                }
+                lastRtpTimestamp = ((data[4] & 0xFF) << 24)
+                                 | ((data[5] & 0xFF) << 16)
+                                 | ((data[6] & 0xFF) << 8)
+                                 | (data[7] & 0xFF);
+                lastRtpArrivalNs = System.nanoTime();
+
                 codecH265 = payload == RTP_PT_H265;
                 Frame output = buildFrame(frame);
                 if (output != null) {
@@ -2790,7 +2772,18 @@ public class Decoder extends Activity {
         }
     }
 
-    private record Frame(byte[] data, int length) {
+    private static class Frame {
+        private final byte[] data;
+        private int length;
+
+        Frame(byte[] data, int length) {
+            this.data = data;
+            this.length = length;
+        }
+
+        byte[] data() { return data; }
+        int length() { return length; }
+        void setLength(int length) { this.length = length; }
     }
 
     /**
@@ -2845,6 +2838,7 @@ public class Decoder extends Activity {
                 }
                 return true;
             case KeyEvent.KEYCODE_BACK:
+            case KeyEvent.KEYCODE_ESCAPE:
                 PopupWindow popup = mMenuPopup;
                 if (popup != null) {
                     popup.dismiss();
