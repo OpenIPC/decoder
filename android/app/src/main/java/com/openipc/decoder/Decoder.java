@@ -607,8 +607,21 @@ public class Decoder extends Activity {
         edit.apply();
 
         applyActiveCamera();
+        // If in quad mode, just save — don't restart the single-stream listener
+        if (quadEnabled) return;
+        // Force-stop the current network thread and restart immediately
         activeStream = false;
         closeSockets();
+        closeDecoder();
+        closeAudio();
+        nalQueue.clear();
+        pcmQueue.clear();
+        if (executor != null) {
+            executor.shutdownNow();
+            executor = null;
+        }
+        listener = true;
+        startListener();
         clearVideo();
     }
 
@@ -840,24 +853,34 @@ public class Decoder extends Activity {
 
     /** Clear the video view by drawing black so no stale frame lingers. */
     private void clearVideo() {
-        if (mSurface == null || !mSurface.isAvailable()) return;
-        Canvas canvas = mSurface.lockCanvas();
-        if (canvas != null) {
-            canvas.drawColor(Color.BLACK);
-            mSurface.unlockCanvasAndPost(canvas);
+        if (mSurface == null) return;
+        if (mSurface.isAvailable()) {
+            Canvas canvas = mSurface.lockCanvas();
+            if (canvas != null) {
+                canvas.drawColor(Color.BLACK);
+                mSurface.unlockCanvasAndPost(canvas);
+            }
         }
+        // Fallback: set a background color that shows while the TextureView
+        // has no surface (after setVisibility(VISIBLE) the surface is not ready yet).
+        // Once the first video frame arrives, the TextureView content covers it.
+        mSurface.setBackgroundColor(Color.BLACK);
     }
 
     /** Clear all quad views so stale frames are erased before restart. */
     private void clearQuadViews() {
         for (int i = 0; i < 4; i++) {
             TextureView t = quadViews[i];
-            if (t == null || !t.isAvailable()) continue;
-            Canvas c = t.lockCanvas();
-            if (c != null) {
-                c.drawColor(Color.BLACK);
-                t.unlockCanvasAndPost(c);
+            if (t == null) continue;
+            if (t.isAvailable()) {
+                Canvas c = t.lockCanvas();
+                if (c != null) {
+                    c.drawColor(Color.BLACK);
+                    t.unlockCanvasAndPost(c);
+                }
             }
+            // fallback: black background until the first decoded frame arrives
+            t.setBackgroundColor(Color.BLACK);
         }
     }
 
