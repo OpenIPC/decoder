@@ -7,7 +7,7 @@
 # OpenIPC Decoder
 
 [![Build](https://github.com/OpenIPC/decoder/actions/workflows/build.yml/badge.svg)](https://github.com/OpenIPC/decoder/actions/workflows/build.yml)
-[![License](https://img.shields.io/github/license/OpenIPC/decoder)](https://opensource.org/license/mit)
+[![License](https://img.shields.io/badge/license-Prosperity%203.0-blue)](LICENSE.md)
 [![Platform](https://img.shields.io/badge/platform-Android%205.0%2B-brightgreen)](https://developer.android.com/about/versions/lollipop)
 [![Telegram](https://img.shields.io/badge/Telegram-OpenIPC-blue)](https://openipc.org/our-channels)
 
@@ -180,7 +180,7 @@ It has been noticed that the Decoder application may sometimes use some GAPPS co
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+[The Prosperity Public License 3.0.0](LICENSE.md). See [LICENSE.md](LICENSE.md) for details.
 
 ## Support
 
