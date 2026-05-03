@@ -4,49 +4,35 @@
   <img alt="OpenIPC logo" src="https://openipc.org/assets/openipc-logo-black.svg">
 </picture>
 
-## OpenIPC Decoder
+# OpenIPC Decoder
 
-Android application for viewing RTSP streams from IP cameras.
+[![Build](https://github.com/OpenIPC/decoder/actions/workflows/build.yml/badge.svg)](https://github.com/OpenIPC/decoder/actions/workflows/build.yml)
+[![License](https://img.shields.io/github/license/OpenIPC/decoder)](https://opensource.org/license/mit)
+[![Platform](https://img.shields.io/badge/platform-Android%205.0%2B-brightgreen)](https://developer.android.com/about/versions/lollipop)
+[![Telegram](https://img.shields.io/badge/Telegram-OpenIPC-blue)](https://openipc.org/our-channels)
 
-### Features
+Android application for viewing RTSP streams from IP cameras with hardware-accelerated H.264/H.265 decoding.
 
-#### Core
-- RTSP stream playback from IP cameras
-- Support for H.264 and H.265 (HEVC) codecs
-- Hardware decoding via MediaCodec
-- Audio support (PCM, AAC, G.711)
-- Multiple display modes:
-  - Single camera
-  - Carousel (automatic switching between cameras)
-  - Quad mode (4 cameras simultaneously)
+<p align="center">
+  <img src="screenshots/photo_menu.jpg" alt="Application screenshot" width="640">
+</p>
 
-#### Controls
-- Pinch-to-zoom gesture
-- Pan by dragging
-- Double-tap to reset zoom
-- Settings menu with touch control
-- Android TV (Leanback) support
+## Features
 
-#### Network capabilities
-- TCP/UDP connectivity
-- Automatic reconnection with exponential backoff
-- Basic authentication support
-- Built-in WebUI for camera interface access
-- Connection status and quality indicators
+- **Video**: RTSP playback, H.264/H.265 hardware decoding via MediaCodec
+- **Audio**: PCM, AAC (ADTS), G.711
+- **Display modes**: Single camera, Carousel (auto-switch), Quad (4 cameras simultaneously)
+- **Controls**: Pinch-to-zoom, pan, double-tap reset, Android TV remote (Leanback)
+- **Network**: TCP/UDP, automatic reconnection with exponential backoff, Basic auth
+- **WebUI**: Built-in browser for camera web interface access
+- **Additional**: Screenshot capture, status/quality indicators, object pooling, 8 camera slots
 
-#### Additional features
-- Screenshot capture of current video
-- Memory optimization with object pooling
-- Real-time status indicators
-- Carousel interval configuration
-- Support for up to 8 cameras with individual settings
+## Requirements
 
-### Requirements
 - Android 5.0 (API 21) or higher
-- Network connection
 - IP camera with RTSP support
 
-### Quick Start
+## Quick Start
 
 1. Install the application on your Android device
 2. Launch the application
@@ -58,124 +44,63 @@ Android application for viewing RTSP streams from IP cameras.
 5. Select transport (TCP/UDP)
 6. Tap camera number to activate
 
-### Settings
-
-#### Camera Menu
-- **1-8** - camera slot selection
-- **Settings** - advanced settings
-- **Transport** - toggle between TCP/UDP
-- **Carousel** - enable/disable carousel mode
-- **Quad** - enable/disable quad mode
-- **WebUI** - open camera web interface
-- **Screenshot** - take screenshot
-- **Exit** - exit application
-
-#### Carousel Mode
-- Automatic switching between selected cameras
-- Configurable interval (3-120 seconds)
-- Active camera indicator
-
-#### Quad Mode
-- Simultaneous viewing of 4 cameras
-- Individual settings for each camera
-- Optimized resource usage
-
-### Technical Details
-
-#### Architecture
-- Multi-threaded processing (network, decoding, audio)
-- Object pool to minimize GC pressure
-- Separation of responsibilities between components
-
-#### Security
-- Credential removal from URLs in RTSP requests
-- Basic authentication support
-- Resource cleanup on pause/stop
-
-#### Performance
-- Hardware video decoding
-- Audio buffering for smooth playback
-- Memory usage optimization
-
-### Building
+## Building
 
 ```bash
 cd android && ./gradlew assembleRelease
 ```
 
-#### Signing
-To sign the release build, set environment variables:
+### Signing
+
+Set environment variables for release signing:
+
 ```bash
 export KEYSTORE_PASS=your_password
 export KEY_ALIAS=your_alias
 export KEY_PASS=your_key_password
 ```
 
-### Project Structure
+## Settings
 
-```
-decoder/
-├── android/              # Android application source
-│   ├── app/              # Main application module
-│   │   └── src/          # Java source + resources
-│   ├── gradle/           # Gradle wrapper files
-│   ├── build.gradle      # Module build script
-│   ├── settings.gradle   # Project settings
-│   └── gradlew*          # Gradle wrapper (Linux)
-├── screenshots/          # App screenshots for README
-├── .github/workflows/    # CI/CD configuration
-└── README.md             # This file
-```
+### Camera Menu
 
-### License
-MIT License. See LICENSE file for details.
+- **1-8** — camera slot selection
+- **Settings** — advanced settings
+- **Transport** — toggle between TCP/UDP
+- **Carousel** — enable/disable carousel mode
+- **Quad** — enable/disable quad mode
+- **WebUI** — open camera web interface
+- **Screenshot** — take screenshot
+- **Exit** — exit application
 
-### Support
-- Documentation: https://openipc.org
-- Source code: https://github.com/openipc/decoder
-- Questions and suggestions: via GitHub Issues
+### Carousel Mode
 
-### Version History
+Automatic switching between selected cameras with configurable interval (3–120 seconds) and active camera indicator.
 
-#### 1.22 (Current)
-- Fixed screenshot on Android 10+ via MediaStore API (API 29+)
-- Added onDestroy() lifecycle cleanup
-- Added Back key handling for Android TV (dismiss menu)
-- Fixed AAC decode loop: replaced deprecated getInputBuffers(), release codec on error
-- Added menu popup dismiss on Back key
-- Removed misleading "Digest" auth claim from README
+### Quad Mode
 
-#### 1.21
-- Improved reconnection with exponential backoff
-- Added AAC audio support
-- Memory optimization with object pooling
-- Removed trailing whitespace
-- Updated documentation
+Simultaneous viewing of up to 4 cameras with individual settings per cell. TCP-only (UDP ports cannot be shared). Audio is disabled to reduce resource usage.
 
-#### 1.20
-- Added status and quality indicators
-- Screenshot functionality
-- User interface improvements
+## Architecture
 
-#### 1.19
-- Resource leak fixes
-- Improved error handling
-- Network stability
+Multi-threaded processing on a fixed thread pool (5 threads): network I/O, watchdog, video decoding, audio playback, AAC decoding. Hardware video decoding via MediaCodec. Object pooling (`FramePool`) minimizes GC pressure. Quad mode creates dedicated per-cell pipelines (3 threads each).
 
-#### 1.0-1.18
-- Basic playback functionality
-- H.264/H.265 support
-- Carousel and quad modes
-- Gesture controls
-- Android TV support
+## Security
 
-### Statistics
+- Credentials stripped from RTSP request URIs, sent only in `Authorization: Basic` header
+- Resource cleanup on pause/stop: sockets closed, executor threads shut down, codecs stopped/released
+- Global `UncaughtExceptionHandler` prevents silent crashes
+
+## Device Compatibility
+
 **Please send information about devices where the program was tested only in this format:**
+
 ```
 Device type, Manufacturer and Model, Android Version, Kernel Version
 ```
 
 ### Verified Devices
+
 - Phones
     - Asus ZC553KL, Android 8.1, Kernel 3.18.71
     - Blackview BV4900Pro, Android 12, Kernel 4.19.191
@@ -185,7 +110,7 @@ Device type, Manufacturer and Model, Android Version, Kernel Version
     - Samsung Galaxy M21 (SM-M215F/DSN), Android 12, Kernel 4.14.113
     - Samsung Galaxy S25, Android 15, Kernel 6.6.30
     - Samsung A55 5G, Android 14, Kernel 6.1.93
-    - Samsung Galaxy J7, Android 10 , Kernel 3.18.150
+    - Samsung Galaxy J7, Android 10, Kernel 3.18.150
     - Samsung S8, Android 9, Kernel 4.4.153
     - Samsung S23 Ultra, Android 15, Kernel 5.15.153
     - Xiaomi Redmi 7A, Android 10, Kernel 4.9.261
@@ -209,23 +134,59 @@ Device type, Manufacturer and Model, Android Version, Kernel Version
     - Media Center JCAC10003, Android 12, Kernel 3.18.79+ (SoC ac8227/ac8229)
     - Mirror Z55, Android 8.1.0, Kernel 4.4.83
 
-### Incompatible Devices
-- Untested
-    - TV box, Android 5.1.1, Kernel 3.14.29 (no video)
+## GAPPS Compatibility Note
 
-### Issues and Explanations
+It has been noticed that the Decoder application may sometimes use some GAPPS components/libraries, so do not disable them or do it consciously. Research in this area is highly encouraged!
 
-It has been noticed that the Decoder application may sometimes use some GAPPS components/libraries, so do not disable them or do it consciously, research in this area is highly encouraged!
+## Version History
 
-[![Telegram](https://openipc.org/images/telegram_button.svg)][telegram]
+<details>
+<summary>Click to expand</summary>
 
-[price]: https://openipc.org/support-open-source
-[firmware]: https://github.com/openipc/firmware
-[logo]: https://openipc.org/assets/openipc-logo-black.svg
-[mit]: https://opensource.org/license/mit
-[opencollective]: https://opencollective.com/openipc
-[paypal]: https://www.paypal.com/donate/?hosted_button_id=C6F7UJLA58MBS
-[project]: https://github.com/openipc
-[telegram]: https://openipc.org/our-channels
-[website]: https://openipc.org
-[wiki]: https://github.com/openipc/wiki
+#### 1.22 (Current)
+- Fixed screenshot on Android 10+ via MediaStore API (API 29+)
+- Added `onDestroy()` lifecycle cleanup
+- Added Back key handling for Android TV (dismiss menu)
+- Fixed AAC decode loop: replaced deprecated `getInputBuffers()`, release codec on error
+- Added menu popup dismiss on Back key
+- Removed misleading "Digest" auth claim from README
+- Restructured project: Android source moved to `android/` subdirectory
+
+#### 1.21
+- Improved reconnection with exponential backoff
+- Added AAC audio support
+- Memory optimization with object pooling
+- Removed trailing whitespace
+- Updated documentation
+
+#### 1.20
+- Added status and quality indicators
+- Screenshot functionality
+- User interface improvements
+
+#### 1.19
+- Resource leak fixes
+- Improved error handling
+- Network stability
+
+#### 1.0–1.18
+- Basic playback functionality
+- H.264/H.265 support
+- Carousel and quad modes
+- Gesture controls
+- Android TV support
+
+</details>
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.
+
+## Support
+
+- Documentation: [openipc.org](https://openipc.org)
+- Source code: [github.com/OpenIPC/decoder](https://github.com/OpenIPC/decoder)
+- Questions and suggestions: via [GitHub Issues](https://github.com/OpenIPC/decoder/issues)
+- Telegram: [OpenIPC Channels](https://openipc.org/our-channels)
+
+[![Telegram](https://openipc.org/images/telegram_button.svg)](https://openipc.org/our-channels)
