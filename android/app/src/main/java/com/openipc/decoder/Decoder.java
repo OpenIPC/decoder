@@ -60,6 +60,7 @@ import android.widget.PopupWindow;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.provider.MediaStore;
 
 import java.io.BufferedInputStream;
@@ -548,6 +549,9 @@ public class Decoder extends Activity {
         mSurface.setVisibility(View.GONE);
         quadContainer.setVisibility(View.VISIBLE);
 
+        // clear stale quad frames
+        clearQuadViews();
+
         // collect first 4 cameras with quad enabled
         quadCells = new QuadCell[4];
         int count = 0;
@@ -581,6 +585,9 @@ public class Decoder extends Activity {
         quadContainer.setVisibility(View.GONE);
         mSurface.setVisibility(View.VISIBLE);
 
+        // clear stale frame before reconnect
+        clearVideo();
+
         // restart single-stream playback
         if (!listener) {
             listener = true;
@@ -602,6 +609,7 @@ public class Decoder extends Activity {
         applyActiveCamera();
         activeStream = false;
         closeSockets();
+        clearVideo();
     }
 
     /** Close all active network sockets to unblock I/O threads. */
@@ -830,7 +838,29 @@ public class Decoder extends Activity {
         });
     }
 
-    /** Converts dp units to pixels using cached display density. */
+    /** Clear the video view by drawing black so no stale frame lingers. */
+    private void clearVideo() {
+        if (mSurface == null || !mSurface.isAvailable()) return;
+        Canvas canvas = mSurface.lockCanvas();
+        if (canvas != null) {
+            canvas.drawColor(Color.BLACK);
+            mSurface.unlockCanvasAndPost(canvas);
+        }
+    }
+
+    /** Clear all quad views so stale frames are erased before restart. */
+    private void clearQuadViews() {
+        for (int i = 0; i < 4; i++) {
+            TextureView t = quadViews[i];
+            if (t == null || !t.isAvailable()) continue;
+            Canvas c = t.lockCanvas();
+            if (c != null) {
+                c.drawColor(Color.BLACK);
+                t.unlockCanvasAndPost(c);
+            }
+        }
+    }
+
     private int dp(float dp) {
         return (int) (dp * mDensity + 0.5f);
     }
@@ -2021,6 +2051,8 @@ public class Decoder extends Activity {
                 }
                 quadCells = null;
             }
+            // clear stale quad frames
+            clearQuadViews();
             quadCells = new QuadCell[4];
             int count = 0;
             for (int i = 0; i < CAM_COUNT && count < 4; i++) {
@@ -2041,6 +2073,8 @@ public class Decoder extends Activity {
                 }
                 quadCells = null;
             }
+            // clear stale frame before reconnect
+            clearVideo();
             if (!listener) {
                 listener = true;
                 startListener();
