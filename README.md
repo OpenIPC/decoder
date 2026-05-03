@@ -21,7 +21,7 @@ Android application for viewing RTSP streams from IP cameras with hardware-accel
 
 - **Video**: RTSP playback, H.264/H.265 hardware decoding via MediaCodec
 - **Audio**: PCM, AAC (ADTS), G.711
-- **Display modes**: Single camera, Carousel (auto-switch), Quad (4 cameras simultaneously)
+- **Display modes**: Single camera, Quad (4 cameras simultaneously)
 - **Controls**: Pinch-to-zoom, pan, double-tap reset, Android TV remote (Leanback)
 - **Network**: TCP/UDP, automatic reconnection with exponential backoff, Basic auth
 - **WebUI**: Built-in browser for camera web interface access
@@ -67,15 +67,10 @@ export KEY_PASS=your_key_password
 - **1-8** — camera slot selection
 - **Settings** — advanced settings
 - **Transport** — toggle between TCP/UDP
-- **Carousel** — enable/disable carousel mode
 - **Quad** — enable/disable quad mode
 - **WebUI** — open camera web interface
 - **Screenshot** — take screenshot
 - **Exit** — exit application
-
-### Carousel Mode
-
-Automatic switching between selected cameras with configurable interval (3–120 seconds) and active camera indicator.
 
 ### Quad Mode
 

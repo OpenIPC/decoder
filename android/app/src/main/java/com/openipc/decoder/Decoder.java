@@ -27,8 +27,6 @@ import android.media.MediaFormat;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.os.SystemClock;
 import android.text.InputType;
 import android.text.SpannableString;
@@ -152,7 +150,6 @@ public class Decoder extends Activity {
     private static final String DEFAULT_URL = "rtsp://root:12345@192.168.1.10:554/stream=0";
     private final String[] mHosts = new String[CAM_COUNT];
     private final boolean[] mTypes = new boolean[CAM_COUNT]; // false = TCP, true = UDP
-    private final boolean[] mCarousel = new boolean[CAM_COUNT]; // per-camera carousel participation
     private final boolean[] mQuad = new boolean[CAM_COUNT]; // per-camera quad participation
     private int mActive; // only accessed on the UI thread — no volatile needed
     private volatile String mHost;
@@ -203,26 +200,6 @@ public class Decoder extends Activity {
 
     // reference kept so onKeyDown can dismiss the menu popup on Back key press
     private PopupWindow mMenuPopup; // only accessed on the UI thread — no volatile needed
-
-    // carousel auto-switch state — all accessed on the UI thread only
-    private static final int CAROUSEL_MIN_SEC = 3;
-    private static final int CAROUSEL_MAX_SEC = 120;
-    private static final int CAROUSEL_DEFAULT_SEC = 10;
-    private boolean carouselEnabled;
-    private int carouselInterval = CAROUSEL_DEFAULT_SEC;
-    private final Handler carouselHandler = new Handler(Looper.getMainLooper());
-    private final Runnable carouselRunnable = new Runnable() {
-        @Override public void run() {
-            if (!carouselEnabled) return;
-            // skip this tick if the stream has not delivered any frames yet;
-            // let the current camera settle before switching
-            if (activeStream && lastFrame > 0
-                    && SystemClock.elapsedRealtime() - lastFrame < WATCHDOG_MS) {
-                carouselSwitch();
-            }
-            carouselHandler.postDelayed(this, carouselInterval * 1000L);
-        }
-    };
 
     private ExecutorService executor; // only accessed on the UI thread — no volatile needed
 
@@ -382,13 +359,10 @@ public class Decoder extends Activity {
         }
 
         mActive = pref.getInt("active", 0);
-        carouselEnabled = pref.getBoolean("carousel_enabled", false);
-        carouselInterval = pref.getInt("carousel_interval", CAROUSEL_DEFAULT_SEC);
         quadEnabled = pref.getBoolean("quad_enabled", false);
         for (int i = 0; i < CAM_COUNT; i++) {
             mHosts[i] = pref.getString("host_" + i, DEFAULT_URL);
             mTypes[i] = pref.getBoolean("type_" + i, false);
-            mCarousel[i] = pref.getBoolean("carousel_" + i, false);
             mQuad[i] = pref.getBoolean("quad_" + i, false);
         }
         applyActiveCamera();
@@ -562,69 +536,8 @@ public class Decoder extends Activity {
         isTakingScreenshot = false;
     }
 
-    /**
-     * Lightweight camera switch for carousel mode.
-     * Avoids full saveSettings() overhead — only updates the active slot,
-     * tears down the current stream, and lets the network thread reconnect.
-     */
-    private void carouselSwitch() {
-        int start = mActive;
-        int next = -1;
-        for (int i = 1; i <= CAM_COUNT; i++) {
-            int candidate = (start + i) % CAM_COUNT;
-            if (!mCarousel[candidate]) continue;
-            String url = mHosts[candidate];
-            if (url != null && !url.isEmpty() && !url.equals(DEFAULT_URL)) {
-                next = candidate;
-                break;
-            }
-        }
-        if (next < 0 || next == mActive) return;
-
-        mActive = next;
-        applyActiveCamera();
-
-        // tear down current stream so the network thread reconnects to the new host
-        activeStream = false;
-        closeSockets();
-
-        // discard stale frames from the previous camera
-        nalQueue.clear();
-        pcmQueue.clear();
-        closeDecoder();
-        closeAudio();
-
-        // reset frame timestamp so the watchdog and next carousel tick
-        // wait for actual data from the new camera
-        lastFrame = 0;
-        lastWidth = 0;
-        lastHeight = 0;
-    }
-
-    private void startCarousel() {
-        carouselEnabled = true;
-        carouselHandler.removeCallbacks(carouselRunnable);
-        carouselHandler.postDelayed(carouselRunnable, carouselInterval * 1000L);
-        saveCarouselPrefs();
-    }
-
-    private void stopCarousel() {
-        carouselEnabled = false;
-        carouselHandler.removeCallbacks(carouselRunnable);
-        saveCarouselPrefs();
-    }
-
-    private void saveCarouselPrefs() {
-        SharedPreferences pref = getSharedPreferences("settings", MODE_PRIVATE);
-        pref.edit()
-            .putBoolean("carousel_enabled", carouselEnabled)
-            .putInt("carousel_interval", carouselInterval)
-            .apply();
-    }
-
     /** Enter quad mode: stop single stream, show 2x2 grid, start 4 independent cells. */
     private void startQuad() {
-        if (carouselEnabled) stopCarousel();
 
         // stop single-stream playback
         if (listener) {
@@ -686,12 +599,9 @@ public class Decoder extends Activity {
         SharedPreferences pref = getSharedPreferences("settings", MODE_PRIVATE);
         SharedPreferences.Editor edit = pref.edit();
         edit.putInt("active", mActive);
-        edit.putBoolean("carousel_enabled", carouselEnabled);
-        edit.putInt("carousel_interval", carouselInterval);
         for (int i = 0; i < CAM_COUNT; i++) {
             edit.putString("host_" + i, mHosts[i]);
             edit.putBoolean("type_" + i, mTypes[i]);
-            edit.putBoolean("carousel_" + i, mCarousel[i]);
             edit.putBoolean("quad_" + i, mQuad[i]);
         }
         edit.apply();
@@ -779,18 +689,6 @@ public class Decoder extends Activity {
             saveSettings();
         });
 
-        TextView carouselCamToggle = createItem(mCarousel[mActive]
-                ? "Carousel: YES" : "Carousel: NO");
-        header.addView(carouselCamToggle);
-        carouselCamToggle.setOnClickListener(v -> {
-            mCarousel[mActive] = !mCarousel[mActive];
-            carouselCamToggle.setText(mCarousel[mActive]
-                    ? "Carousel: YES" : "Carousel: NO");
-            // save only the carousel flag — no need to disconnect the active stream
-            getSharedPreferences("settings", MODE_PRIVATE).edit()
-                    .putBoolean("carousel_" + mActive, mCarousel[mActive]).apply();
-        });
-
         TextView quadCamToggle = createItem(mQuad[mActive] ? "Quad: YES" : "Quad: NO");
         header.addView(quadCamToggle);
         quadCamToggle.setOnClickListener(v -> {
@@ -814,7 +712,6 @@ public class Decoder extends Activity {
 
             camButtons[i].setOnClickListener(v -> {
                 if (slot == mActive) return;
-                if (carouselEnabled) stopCarousel();
                 mActive = slot;
                 for (int j = 0; j < CAM_COUNT; j++) {
                     if (j == mActive) highlightItem(camButtons[j]);
@@ -823,90 +720,10 @@ public class Decoder extends Activity {
                 host.setText(mHosts[mActive]);
                 host.setSelection(host.getText().length());
                 typeToggle.setText(mTypes[mActive] ? "Transport: UDP" : "Transport: TCP");
-                carouselCamToggle.setText(mCarousel[mActive]
-                        ? "Carousel: YES" : "Carousel: NO");
                 quadCamToggle.setText(mQuad[mActive] ? "Quad: YES" : "Quad: NO");
                 saveSettings();
             });
         }
-
-        // carousel controls
-        LinearLayout carouselPanel = new LinearLayout(this);
-        carouselPanel.setOrientation(LinearLayout.VERTICAL);
-        carouselPanel.setVisibility(View.GONE);
-
-        TextView carouselToggle = createItem(carouselEnabled
-                ? "Carousel: ON" : "Carousel: OFF");
-
-        LinearLayout intervalRow = new LinearLayout(this);
-        intervalRow.setOrientation(LinearLayout.HORIZONTAL);
-        intervalRow.setGravity(Gravity.CENTER_VERTICAL);
-        carouselPanel.addView(intervalRow);
-
-        TextView intervalLabel = createItem("Interval:");
-        intervalLabel.setPadding(dp(8), dp(6), dp(4), dp(6));
-        intervalRow.addView(intervalLabel);
-
-        EditText intervalEdit = new EditText(this);
-        intervalEdit.setText(String.valueOf(carouselInterval));
-        intervalEdit.setInputType(InputType.TYPE_CLASS_NUMBER);
-        intervalEdit.setTextColor(Color.WHITE);
-        intervalEdit.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-        intervalEdit.setPadding(dp(4), dp(6), dp(8), dp(6));
-        // Use setMaxLines instead of setSingleLine — setSingleLine breaks IME_ACTION_DONE
-        // on numeric keyboards (Android TV); matches the pattern from createEdit (URL field)
-        intervalEdit.setMaxLines(1);
-        intervalEdit.setImeOptions(EditorInfo.IME_ACTION_DONE);
-        intervalRow.addView(intervalEdit, new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-
-        // apply interval: triggered by IME Done, Enter key, or focus loss
-        Runnable applyInterval = () -> {
-            try {
-                int val = Integer.parseInt(intervalEdit.getText().toString().trim());
-                carouselInterval = Math.max(CAROUSEL_MIN_SEC, Math.min(CAROUSEL_MAX_SEC, val));
-            } catch (NumberFormatException ignored) {
-                carouselInterval = CAROUSEL_DEFAULT_SEC;
-            }
-            intervalEdit.setText(String.valueOf(carouselInterval));
-            saveCarouselPrefs();
-            if (carouselEnabled) {
-                carouselHandler.removeCallbacks(carouselRunnable);
-                carouselHandler.postDelayed(carouselRunnable, carouselInterval * 1000L);
-            }
-        };
-
-        intervalEdit.setOnEditorActionListener((v, actionId, event) -> {
-            if (actionId == EditorInfo.IME_ACTION_DONE
-                    || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER
-                        && event.getAction() == KeyEvent.ACTION_DOWN)) {
-                applyInterval.run();
-                return true;
-            }
-            return false;
-        });
-
-        // border highlight + apply value on focus loss (D-pad navigation away)
-        GradientDrawable intervalBorder = new GradientDrawable();
-        intervalBorder.setColor(Color.BLACK);
-        intervalBorder.setStroke(1, Color.GRAY);
-        intervalEdit.setBackground(intervalBorder);
-        intervalEdit.setOnFocusChangeListener((v, hasFocus) -> {
-            intervalBorder.setStroke(1, hasFocus ? Color.BLUE : Color.GRAY);
-            v.setBackground(intervalBorder);
-            if (!hasFocus) applyInterval.run();
-        });
-
-        carouselToggle.setOnClickListener(v -> {
-            boolean show = carouselPanel.getVisibility() != View.VISIBLE;
-            carouselPanel.setVisibility(show ? View.VISIBLE : View.GONE);
-            if (!show) {
-                if (carouselEnabled) stopCarousel();
-                else startCarousel();
-                carouselToggle.setText(carouselEnabled
-                        ? "Carousel: ON" : "Carousel: OFF");
-            }
-        });
 
         TextView webui = createItem("WebUI");
         layout.addView(webui);
@@ -922,9 +739,6 @@ public class Decoder extends Activity {
             popup.dismiss();
             takeScreenshot();
         });
-
-        layout.addView(carouselToggle);
-        layout.addView(carouselPanel);
 
         TextView quadToggle = createItem(quadEnabled ? "Quadrator: ON" : "Quadrator: OFF");
         layout.addView(quadToggle);
@@ -955,8 +769,6 @@ public class Decoder extends Activity {
             settings.setVisibility(closing ? View.VISIBLE : View.GONE);
             camRow.setVisibility(closing ? View.VISIBLE : View.GONE);
             webui.setVisibility(closing ? View.VISIBLE : View.GONE);
-            carouselToggle.setVisibility(closing ? View.VISIBLE : View.GONE);
-            carouselPanel.setVisibility(View.GONE);
             quadToggle.setVisibility(closing ? View.VISIBLE : View.GONE);
             divider.setVisibility(closing ? View.VISIBLE : View.GONE);
             exit.setVisibility(closing ? View.VISIBLE : View.GONE);
@@ -2275,7 +2087,6 @@ public class Decoder extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
-        carouselHandler.removeCallbacks(carouselRunnable);
         // dismiss any open browser dialog; its OnDismissListener will call view.destroy()
         // preventing a WebView native-resource leak when the Activity is rotated
         Dialog browser = mBrowserDialog;
@@ -2357,10 +2168,6 @@ public class Decoder extends Activity {
             if (!listener) {
                 listener = true;
                 startListener();
-            }
-            if (carouselEnabled) {
-                carouselHandler.removeCallbacks(carouselRunnable);
-                carouselHandler.postDelayed(carouselRunnable, carouselInterval * 1000L);
             }
         }
     }
