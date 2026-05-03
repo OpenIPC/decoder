@@ -843,6 +843,10 @@ public class Decoder extends Activity {
             Log.w(TAG, "Cannot open WebUI: invalid host in URL");
             return;
         }
+        int port = uri.getPort();
+        if (port >= 0) {
+            link = link + ":" + port;
+        }
 
         WebView view = new WebView(this);
         view.getSettings().setJavaScriptEnabled(true);
@@ -1120,6 +1124,11 @@ public class Decoder extends Activity {
                 try {
                     byte[] aacData = aacQueue.poll(100, TimeUnit.MILLISECONDS);
                     if (aacData == null) continue;
+
+                    // Check if the codec was released by closeAudio() while we were waiting
+                    synchronized (aacDecoderLock) {
+                        if (aacDecoder != codec) break;
+                    }
 
                     // Check if the frame already has ADTS header (starts with 0xFFF)
                     boolean hasAdts = (aacData.length >= 2
@@ -1570,10 +1579,12 @@ public class Decoder extends Activity {
             if (mType) {
                 udpVideo = new DatagramSocket(null);
                 udpVideo.setReuseAddress(true);
+                mUdpSocket = udpVideo;  // assign immediately to close race
                 try { udpVideo.setReceiveBufferSize(512 * 1024); } catch (Exception ignored) {}
                 udpVideo.bind(new InetSocketAddress(5000));
                 udpAudio = new DatagramSocket(null);
                 udpAudio.setReuseAddress(true);
+                mUdpAudioSocket = udpAudio;  // assign immediately to close race
                 try { udpAudio.setReceiveBufferSize(512 * 1024); } catch (Exception ignored) {}
                 udpAudio.bind(new InetSocketAddress(5002));
             }
@@ -2100,7 +2111,7 @@ public class Decoder extends Activity {
 
         private volatile Surface surface;
         private volatile MediaCodec decoder;
-        private boolean decoderFailed;
+        private volatile boolean decoderFailed;
         private final Object decoderLock = new Object();
 
         private final BlockingQueue<Frame> nalQueue = new ArrayBlockingQueue<>(30);
@@ -2146,9 +2157,16 @@ public class Decoder extends Activity {
                 }
                 @Override
                 public void onSurfaceTextureSizeChanged(android.graphics.SurfaceTexture st, int w, int h) {
+                    // Swap surface reference immediately so the decoder thread sees
+                    // the new Surface; release the old Surface synchronised via decoderLock
+                    // to avoid a use-after-free while the decoder is mid-render.
                     Surface old = surface;
                     surface = new Surface(st);
                     if (old != null) {
+                        synchronized (decoderLock) {
+                            // decoderLock guarantees the decoder thread has finished
+                            // with any prior releaseOutputBuffer(..., true) call
+                        }
                         try {
                             old.release();
                         } catch (Exception e) {
@@ -2270,6 +2288,7 @@ public class Decoder extends Activity {
         void stop() {
             running = false;
             activeStream = false;
+            nalAssembler.reset();
             view.setSurfaceTextureListener(null);
             Socket tcp = tcpSocket;
             if (tcp != null) {
@@ -2481,27 +2500,33 @@ public class Decoder extends Activity {
 
                 // channel 0 = video RTP; skip audio (channel 2)
                 if (channel == 0) {
-                    byte[] copy = new byte[len];
-                    System.arraycopy(pktBuf, 0, copy, 0, len);
-                    Frame f = new Frame(copy, len);
+                    Frame f = obtainFrame(len);
+                    System.arraycopy(pktBuf, 0, f.data(), 0, len);
+                    f.setLength(len);
                     handlePacket(f);
                 }
             }
         }
 
         private void handlePacket(Frame frame) {
-            if (frame.length() < 12) return;
+            if (frame.length() < 12) { recycleFrame(frame); return; }
             byte[] data = frame.data();
-            if ((data[0] & 0x0F) != 0 || (data[0] & 0x10) != 0) return;
+            if ((data[0] & 0x0F) != 0 || (data[0] & 0x10) != 0) { recycleFrame(frame); return; }
 
             int pt = data[1] & 0x7F;
             if (pt == RTP_PT_H265 || pt == RTP_PT_H264) {
                 codecH265 = (pt == RTP_PT_H265);
                 Frame output = nalAssembler.assemble(frame, codecH265);
-                if (output != null) nalQueue.offer(output);
+                recycleFrame(frame);  // assemble() copies what it needs
+                if (output != null && !nalQueue.offer(output)) {
+                    Log.w(TAG, tag + " queue full, dropping frame");
+                }
             } else if (pt != lastUnknownPayload) {
                 lastUnknownPayload = pt;
                 Log.w(TAG, tag + " unknown PT: " + pt);
+                recycleFrame(frame);
+            } else {
+                recycleFrame(frame);
             }
         }
 
@@ -2707,6 +2732,7 @@ public class Decoder extends Activity {
         Frame obtain(int size) {
             Frame frame = pool.poll();
             if (frame != null && frame.data().length >= size) {
+                frame.setLength(0);  // clear stale length from prior use
                 return frame;
             }
             return new Frame(new byte[size], 0);

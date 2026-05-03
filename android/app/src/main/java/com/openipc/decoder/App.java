@@ -24,7 +24,7 @@ public class App extends Application {
             intent.putExtra("error", Log.getStackTraceString(throwable));
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
             startActivity(intent);
-            System.exit(1);
+            // Process will terminate naturally with the crash activity visible
         });
     }
 }
