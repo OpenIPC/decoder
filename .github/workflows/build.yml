@@ -14,7 +14,7 @@ jobs:
         id: vars
         run: |
           case "${{ github.ref_name }}" in
-            master) echo "name=decoder" ;;
+            basic) echo "name=decoder" ;;
             v2)     echo "name=decoder-v2" ;;
             v3)     echo "name=decoder-v3" ;;
             *)      echo "name=decoder-${{ github.ref_name }}" ;;
