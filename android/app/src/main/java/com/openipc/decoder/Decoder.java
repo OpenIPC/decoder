@@ -602,20 +602,32 @@ public class Decoder extends Activity {
 
         applyActiveCamera();
         if (quadEnabled) return;
-        // Force-stop the current network thread and restart immediately
+
+        // 1. Invalidate old threads — they check gen == listenerGen at loop top
+        listenerGen++;
+        listener = false;
         activeStream = false;
+
+        // 2. Unblock I/O (read()/receive()) so network threads exit promptly
         closeSockets();
-        closeDecoder();
-        closeAudio();
-        nalQueue.clear();
-        pcmQueue.clear();
+
+        // 3. Interrupt executor threads FIRST. The video decode thread may be
+        //    blocked inside synchronized(decoderLock) at dequeueInputBuffer(5000).
+        //    shutdownNow() sends interrupt() which lets it exit the lock quickly.
         if (executor != null) {
             executor.shutdownNow();
             executor = null;
         }
+
+        // 4. NOW close decoder/audio — decoderLock will be quickly available
+        //    because the interrupted video thread has exited its synchronized block.
+        closeDecoder();
+        closeAudio();
+        nalQueue.clear();
+        pcmQueue.clear();
+
         listener = true;
         startListener();
-        clearVideo();
     }
 
     /** Close all active network sockets to unblock I/O threads. */
