@@ -60,7 +60,6 @@ import android.widget.PopupWindow;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.graphics.Bitmap;
-import android.graphics.Canvas;
 import android.provider.MediaStore;
 
 import java.io.BufferedInputStream;
@@ -852,35 +851,23 @@ public class Decoder extends Activity {
         });
     }
 
-    /** Clear the video view by drawing black so no stale frame lingers. */
+    /** Clear the video view by drawing black so no stale frame lingers.
+     *  Uses setBackgroundColor only — lockCanvas() is intentionally avoided
+     *  because it can block the UI thread indefinitely when the SurfaceTexture
+     *  was just created (SurfaceFlinger transaction pending). The first decoded
+     *  frame from the MediaCodec will overwrite the background. */
     private void clearVideo() {
         if (mSurface == null) return;
-        if (mSurface.isAvailable()) {
-            Canvas canvas = mSurface.lockCanvas();
-            if (canvas != null) {
-                canvas.drawColor(Color.BLACK);
-                mSurface.unlockCanvasAndPost(canvas);
-            }
-        }
-        // Fallback: set a background color that shows while the TextureView
-        // has no surface (after setVisibility(VISIBLE) the surface is not ready yet).
-        // Once the first video frame arrives, the TextureView content covers it.
         mSurface.setBackgroundColor(Color.BLACK);
     }
 
-    /** Clear all quad views so stale frames are erased before restart. */
+    /** Clear all quad views so stale frames are erased before restart.
+     *  Uses setBackgroundColor only — lockCanvas() can block the UI thread
+     *  when the TextureView surface was just created. */
     private void clearQuadViews() {
         for (int i = 0; i < 4; i++) {
             TextureView t = quadViews[i];
             if (t == null) continue;
-            if (t.isAvailable()) {
-                Canvas c = t.lockCanvas();
-                if (c != null) {
-                    c.drawColor(Color.BLACK);
-                    t.unlockCanvasAndPost(c);
-                }
-            }
-            // fallback: black background until the first decoded frame arrives
             t.setBackgroundColor(Color.BLACK);
         }
     }
