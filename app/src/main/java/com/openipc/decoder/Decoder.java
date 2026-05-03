@@ -999,7 +999,8 @@ public class Decoder extends Activity {
 
     @SuppressLint("SetJavaScriptEnabled")
     private void startBrowser() {
-        String link = Uri.parse(mHost).getHost();
+        Uri uri = Uri.parse(mHost);
+        String link = uri.getHost();
         if (link == null) {
             Log.w(TAG, "Cannot open WebUI: invalid host in URL");
             return;
@@ -1010,11 +1011,12 @@ public class Decoder extends Activity {
 
         // Set the auth-capable client BEFORE loadUrl so credentials are
         // available on the very first HTTP 401 challenge.
+        final Uri finalUri = uri;
         view.setWebViewClient(new WebViewClient() {
             @Override
             public void onReceivedHttpAuthRequest(
                     WebView view, HttpAuthHandler handler, String host, String realm) {
-                String userInfo = Uri.parse(mHost).getUserInfo();
+                String userInfo = finalUri.getUserInfo();
                 if (userInfo != null) {
                     String[] part = userInfo.split(":", 2);
                     if (part.length == 2) {
