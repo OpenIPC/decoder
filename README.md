@@ -138,46 +138,6 @@ Device type, Manufacturer and Model, Android Version, Kernel Version
 
 It has been noticed that the Decoder application may sometimes use some GAPPS components/libraries, so do not disable them or do it consciously. Research in this area is highly encouraged!
 
-## Version History
-
-<details>
-<summary>Click to expand</summary>
-
-#### 1.22 (Current)
-- Fixed screenshot on Android 10+ via MediaStore API (API 29+)
-- Added `onDestroy()` lifecycle cleanup
-- Added Back key handling for Android TV (dismiss menu)
-- Fixed AAC decode loop: replaced deprecated `getInputBuffers()`, release codec on error
-- Added menu popup dismiss on Back key
-- Removed misleading "Digest" auth claim from README
-- Restructured project: Android source moved to `android/` subdirectory
-
-#### 1.21
-- Improved reconnection with exponential backoff
-- Added AAC audio support
-- Memory optimization with object pooling
-- Removed trailing whitespace
-- Updated documentation
-
-#### 1.20
-- Added status and quality indicators
-- Screenshot functionality
-- User interface improvements
-
-#### 1.19
-- Resource leak fixes
-- Improved error handling
-- Network stability
-
-#### 1.0–1.18
-- Basic playback functionality
-- H.264/H.265 support
-- Carousel and quad modes
-- Gesture controls
-- Android TV support
-
-</details>
-
 ## License
 
 [The Prosperity Public License 3.0.0](LICENSE.md). See [LICENSE.md](LICENSE.md) for details.
