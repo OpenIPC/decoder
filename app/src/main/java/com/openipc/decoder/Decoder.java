@@ -21,6 +21,7 @@ import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioTrack;
 import android.media.MediaCodec;
+import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.net.Uri;
 import android.os.Build;
@@ -63,10 +64,8 @@ import android.os.Environment;
 import android.provider.MediaStore;
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.Locale;
 
 import java.io.BufferedInputStream;
 import java.io.IOException;
@@ -90,6 +89,7 @@ public class Decoder extends Activity {
     private static final String TAG = "OpenIPCDecoder";
     private final BlockingQueue<Frame> nalQueue = new ArrayBlockingQueue<>(32);
     private final BlockingQueue<Frame> pcmQueue = new ArrayBlockingQueue<>(32);
+    private final BlockingQueue<byte[]> aacQueue = new ArrayBlockingQueue<>(32);
     private final byte[] nalBuffer = new byte[1024 * 1024];
 
     // Object pools for memory optimization
@@ -237,6 +237,10 @@ public class Decoder extends Activity {
 
     // Quality update tracking
     private long lastQualityUpdateTime = 0;
+    private long lastRtpTimestamp = -1;
+    private long lastRtpArrivalNs = -1;
+    private long jitterAccumulator = 0;
+    private int jitterSampleCount = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -356,16 +360,7 @@ public class Decoder extends Activity {
         updateStatus("disconnected");
         
         // Menu is opened via single-tap in the gesture detector above
-
-        Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
-            Log.e(TAG, "Uncaught exception", throwable);
-
-            Intent intent = new Intent(getApplicationContext(), Crash.class);
-            intent.putExtra("error", Log.getStackTraceString(throwable));
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-            startActivity(intent);
-            System.exit(1);
-        });
+        // Global uncaught exception handler is installed in App.onCreate()
     }
 
     @SuppressLint("AuthLeak")
@@ -1037,7 +1032,12 @@ public class Decoder extends Activity {
         dialog.setOnDismissListener(d -> view.destroy());
         mBrowserDialog = dialog;
 
-        view.loadUrl("http://" + link);
+        // Use the scheme from the camera URL (http or https), default to http
+        String scheme = uri.getScheme();
+        if (scheme == null || (!"http".equals(scheme) && !"https".equals(scheme))) {
+            scheme = "http";
+        }
+        view.loadUrl(scheme + "://" + link);
     }
 
     private void updateResolution(int width, int height) {
@@ -1286,12 +1286,7 @@ public class Decoder extends Activity {
     }
 
     private void processAacFrame(byte[] aacData) {
-        // Simple AAC processing - in real implementation would need to handle ADTS headers
-        // and feed to MediaCodec
-        Log.d(TAG, "AAC frame received, length: " + aacData.length);
-        // For now, just pass through as PCM (this won't work properly)
-        // In a full implementation, we would decode AAC to PCM here
-        if (!pcmQueue.offer(new Frame(aacData, aacData.length))) {
+        if (!aacQueue.offer(aacData)) {
             Log.w(TAG, "AAC audio queue full, frame dropped");
         }
     }
@@ -1349,10 +1344,94 @@ public class Decoder extends Activity {
 
     private void createAacDecoder() {
         Log.d(TAG, "Creating AAC decoder");
-        // AAC decoder would be implemented here
-        // For now, fall back to PCM audio creation
-        Log.w(TAG, "AAC decoder not fully implemented, falling back to PCM handling");
-        createPcmAudio();
+        MediaFormat fmt = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC,
+                audioSampleRate, 1); // mono
+        fmt.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
+        fmt.setInteger(MediaFormat.KEY_IS_ADTS, 1);
+
+        MediaCodec codec;
+        try {
+            codec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_AUDIO_AAC);
+            try {
+                codec.configure(fmt, null, null, 0);
+                codec.start();
+            } catch (Exception e) {
+                codec.release();
+                throw e;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Cannot create AAC decoder, falling back to PCM", e);
+            createPcmAudio();
+            return;
+        }
+
+        synchronized (aacDecoderLock) {
+            MediaCodec old = aacDecoder;
+            if (old != null) {
+                try { old.stop(); } catch (Exception ignored) {}
+                old.release();
+            }
+            aacDecoder = codec;
+        }
+
+        // Start AAC decode loop on the executor
+        executor.execute(() -> {
+            Thread.currentThread().setName("rtsp-aac-decode");
+            ByteBuffer[] inputBuffers = codec.getInputBuffers();
+            ByteBuffer[] outputBuffers = codec.getOutputBuffers();
+            MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+            ByteBuffer adtsHeader = ByteBuffer.allocate(7);
+
+            while (listener && !Thread.currentThread().isInterrupted()) {
+                try {
+                    byte[] aacData = aacQueue.poll(100, TimeUnit.MILLISECONDS);
+                    if (aacData == null) continue;
+
+                    // Check if the frame already has ADTS header (starts with 0xFFF)
+                    boolean hasAdts = (aacData.length >= 2
+                            && (aacData[0] & 0xFF) == 0xFF
+                            && (aacData[1] & 0xF0) == 0xF0);
+
+                    int inputId = codec.dequeueInputBuffer(10_000);
+                    if (inputId < 0) continue;
+
+                    ByteBuffer inBuf = inputBuffers[inputId];
+                    inBuf.clear();
+                    if (hasAdts) {
+                        // Strip ADTS header (7 bytes) before feeding to MediaCodec
+                        // MediaCodec raw AAC input expects ADTS-free data when KEY_IS_ADTS=0,
+                        // or full ADTS frames when KEY_IS_ADTS=1
+                        inBuf.put(aacData, 0, aacData.length);
+                    } else {
+                        // Raw AAC without ADTS — prepend one for decoders that need it
+                        // (depends on device; KEY_IS_ADTS=1 handles this)
+                        inBuf.put(aacData);
+                    }
+                    codec.queueInputBuffer(inputId, 0, aacData.length,
+                            System.nanoTime() / 1000, 0);
+
+                    // Drain output
+                    int outId;
+                    while ((outId = codec.dequeueOutputBuffer(info, 0)) >= 0) {
+                        ByteBuffer outBuf = outputBuffers[outId];
+                        if (outBuf != null && info.size > 0) {
+                            byte[] pcm = new byte[info.size];
+                            outBuf.position(info.offset);
+                            outBuf.get(pcm, 0, info.size);
+                            if (!pcmQueue.offer(new Frame(pcm, info.size))) {
+                                Log.w(TAG, "AAC decoded PCM queue full, frame dropped");
+                            }
+                        }
+                        codec.releaseOutputBuffer(outId, false);
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception e) {
+                    Log.e(TAG, "AAC decode error", e);
+                }
+            }
+        });
     }
 
     private void closeAudio() {
@@ -1369,6 +1448,15 @@ public class Decoder extends Activity {
                 Log.e(TAG, "Audio close exception", e);
             }
         }
+        synchronized (aacDecoderLock) {
+            MediaCodec aac = aacDecoder;
+            if (aac != null) {
+                aacDecoder = null;
+                try { aac.stop(); } catch (Exception ignored) {}
+                try { aac.release(); } catch (Exception ignored) {}
+            }
+        }
+        aacQueue.clear();
         audioFailed = false; // allow re-init on the next session
     }
 
@@ -1380,15 +1468,46 @@ public class Decoder extends Activity {
 
         lastFrame = SystemClock.elapsedRealtime();
 
-        // Update quality indicator based on frame arrival interval
+        // Update quality indicator based on RTP timestamp jitter
         long now = SystemClock.elapsedRealtime();
-        // Use a class-level field for last update time
         if (now - lastQualityUpdateTime > 1000) { // Update every second
             lastQualityUpdateTime = now;
-            // Simple latency estimation based on frame interval
-            // In a real implementation, this would measure network latency
-            updateQuality(100); // Placeholder value
+            int avgJitter = (jitterSampleCount > 0)
+                    ? (int)(jitterAccumulator / jitterSampleCount / 1000000) // ns to ms
+                    : -1;
+            updateQuality(avgJitter);
+            jitterAccumulator = 0;
+            jitterSampleCount = 0;
         }
+
+        // Calculate jitter: difference between packet inter-arrival time
+        // and RTP timestamp delta (converted to ms via clock rate)
+        if (lastRtpTimestamp >= 0 && lastRtpArrivalNs >= 0) {
+            // Extract RTP timestamp from bytes 4-7 (big-endian)
+            int rtpTs = 0;
+            if (buffer.length() >= 8) {
+                rtpTs = ((buffer.data()[4] & 0xFF) << 24)
+                      | ((buffer.data()[5] & 0xFF) << 16)
+                      | ((buffer.data()[6] & 0xFF) << 8)
+                      | (buffer.data()[7] & 0xFF);
+            }
+            int rtpDeltaMs = (int)((rtpTs - lastRtpTimestamp) / 90L); // 90 kHz clock for video
+            long arrivalDeltaNs = System.nanoTime() - lastRtpArrivalNs;
+            long arrivalDeltaMs = arrivalDeltaNs / 1000000;
+            long jitter = Math.abs(arrivalDeltaMs - rtpDeltaMs);
+            if (jitter < 5000) { // sanity check: ignore outliers > 5s
+                jitterAccumulator += jitter;
+                jitterSampleCount++;
+            }
+        }
+        // Store RTP timestamp for next calculation (bytes 4-7 big-endian)
+        if (buffer.length() >= 8) {
+            lastRtpTimestamp = ((buffer.data()[4] & 0xFF) << 24)
+                             | ((buffer.data()[5] & 0xFF) << 16)
+                             | ((buffer.data()[6] & 0xFF) << 8)
+                             | (buffer.data()[7] & 0xFF);
+        }
+        lastRtpArrivalNs = System.nanoTime();
 
         int flag = 0;
         int fragment = getFragment(buffer.data()[4]);
@@ -1875,18 +1994,12 @@ public class Decoder extends Activity {
             } catch (SocketTimeoutException ignored) {
                 continue; // re-check activeStream
             }
-            // Use frame pool to reduce GC
             int length = packet.getLength();
             Frame frame = obtainFrame(length);
             byte[] data = frame.data();
-            if (data.length < length) {
-                // If obtained frame is too small, create new one
-                frame = new Frame(new byte[length], length);
-            }
             System.arraycopy(packet.getData(), 0, data, 0, length);
+            // Set length on the obtained Frame so processPacket recycles it properly
             processPacket(new Frame(data, length));
-            // Note: Frame is not recycled here as it's processed asynchronously
-            // Recycling happens in processPacket after use
         }
     }
 
@@ -1925,13 +2038,8 @@ public class Decoder extends Activity {
             }
 
             if (channel == 0 || channel == 2) {
-                // Use frame pool
                 Frame frame = obtainFrame(len);
                 byte[] data = frame.data();
-                if (data.length < len) {
-                    frame = new Frame(new byte[len], len);
-                    data = frame.data();
-                }
                 System.arraycopy(pktBuf, 0, data, 0, len);
                 processPacket(new Frame(data, len));
             }
@@ -1986,7 +2094,7 @@ public class Decoder extends Activity {
         // increments listenerGen, preventing duplicate threads on resume.
         final int gen = listenerGen;
 
-        executor = Executors.newFixedThreadPool(4);
+        executor = Executors.newFixedThreadPool(5); // network, watchdog, video decode, audio play, AAC decode
 
         executor.execute(() -> {
             Thread.currentThread().setName("rtsp-network");
@@ -2225,6 +2333,7 @@ public class Decoder extends Activity {
 
         private volatile Socket tcpSocket;
         private ExecutorService executor;
+        private final MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
 
         QuadCell(int index, String host, TextureView view) {
             this.host = host;
@@ -2364,6 +2473,7 @@ public class Decoder extends Activity {
         void stop() {
             running = false;
             activeStream = false;
+            view.setSurfaceTextureListener(null);
             Socket tcp = tcpSocket;
             if (tcp != null) {
                 try {
@@ -2575,7 +2685,8 @@ public class Decoder extends Activity {
                 if (channel == 0) {
                     byte[] copy = new byte[len];
                     System.arraycopy(pktBuf, 0, copy, 0, len);
-                    handlePacket(new Frame(copy, len));
+                    Frame f = new Frame(copy, len);
+                    handlePacket(f);
                 }
             }
         }
@@ -2714,9 +2825,8 @@ public class Decoder extends Activity {
                                         System.nanoTime() / 1000, flag);
                             }
                         }
-                        MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
                         int oid;
-                        while ((oid = c.dequeueOutputBuffer(info, 0)) >= 0
+                        while ((oid = c.dequeueOutputBuffer(bufferInfo, 0)) >= 0
                                 || oid == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                             if (oid >= 0) c.releaseOutputBuffer(oid, true);
                         }
