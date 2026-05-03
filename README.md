@@ -110,14 +110,9 @@ Device type, Manufacturer and Model, Android Version, Kernel Version
 
 It has been noticed that the Decoder application may sometimes use some GAPPS components/libraries, so do not disable them or do it consciously, research in this area is highly encouraged !
 
+### License
 
-[price]: https://openipc.org/support-open-source
-[firmware]: https://github.com/openipc/firmware
-[logo]: https://openipc.org/assets/openipc-logo-black.svg
-[mit]: https://opensource.org/license/mit
-[opencollective]: https://opencollective.com/openipc
-[paypal]: https://www.paypal.com/donate/?hosted_button_id=C6F7UJLA58MBS
-[project]: https://github.com/openipc
+[The Prosperity Public License 3.0.0](LICENSE.md). See [LICENSE.md](LICENSE.md) for details.
 [telegram]: https://openipc.org/our-channels
 [website]: https://openipc.org
 [wiki]: https://github.com/openipc/wiki
