@@ -12,7 +12,13 @@ jobs:
 
       - name: Set artifact name
         id: vars
-        run: echo "name=decoder-v2" >> $GITHUB_OUTPUT
+        run: |
+          case "${{ github.ref_name }}" in
+            master) echo "name=decoder" ;;
+            v2)     echo "name=decoder-v2" ;;
+            v3)     echo "name=decoder-v3" ;;
+            *)      echo "name=decoder-${{ github.ref_name }}" ;;
+          esac >> $GITHUB_OUTPUT
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
