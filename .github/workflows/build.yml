@@ -28,6 +28,7 @@ jobs:
           cache: gradle
 
       - name: Build
+        working-directory: android
         env:
           KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
           KEY_ALIAS:     ${{ secrets.KEY_ALIAS }}
@@ -35,9 +36,9 @@ jobs:
         run: |
           echo "${{ secrets.KEY }}" | base64 -d > key.jks
           ./gradlew bundleRelease
-          mv app/build/outputs/bundle/release/app-release.aab ${{ steps.vars.outputs.name }}.aab
+          mv app/build/outputs/bundle/release/app-release.aab ../${{ steps.vars.outputs.name }}.aab
           ./gradlew assembleRelease
-          mv app/build/outputs/apk/release/app-release.apk ${{ steps.vars.outputs.name }}.apk
+          mv app/build/outputs/apk/release/app-release.apk ../${{ steps.vars.outputs.name }}.apk
 
       - name: Upload
         uses: softprops/action-gh-release@v2

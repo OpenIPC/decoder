@@ -100,7 +100,7 @@ Android application for viewing RTSP streams from IP cameras.
 ### Building
 
 ```bash
-./gradlew assembleRelease
+cd android && ./gradlew assembleRelease
 ```
 
 #### Signing
@@ -109,6 +109,22 @@ To sign the release build, set environment variables:
 export KEYSTORE_PASS=your_password
 export KEY_ALIAS=your_alias
 export KEY_PASS=your_key_password
+```
+
+### Project Structure
+
+```
+decoder/
+├── android/              # Android application source
+│   ├── app/              # Main application module
+│   │   └── src/          # Java source + resources
+│   ├── gradle/           # Gradle wrapper files
+│   ├── build.gradle      # Module build script
+│   ├── settings.gradle   # Project settings
+│   └── gradlew*          # Gradle wrapper (Linux)
+├── screenshots/          # App screenshots for README
+├── .github/workflows/    # CI/CD configuration
+└── README.md             # This file
 ```
 
 ### License

@@ -2,4 +2,6 @@
 .idea
 local.properties
 /build
-/app/build
+/android/build
+/android/app/build
+key.jks
