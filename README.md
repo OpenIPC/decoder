@@ -30,7 +30,7 @@ Android application for viewing RTSP streams from IP cameras.
 #### Network capabilities
 - TCP/UDP connectivity
 - Automatic reconnection with exponential backoff
-- Basic and Digest authentication support
+- Basic authentication support
 - Built-in WebUI for camera interface access
 - Connection status and quality indicators
 
@@ -89,7 +89,7 @@ Android application for viewing RTSP streams from IP cameras.
 
 #### Security
 - Credential removal from URLs in RTSP requests
-- Basic and Digest authentication support
+- Basic authentication support
 - Resource cleanup on pause/stop
 
 #### Performance
@@ -121,7 +121,15 @@ MIT License. See LICENSE file for details.
 
 ### Version History
 
-#### 1.21 (Current)
+#### 1.22 (Current)
+- Fixed screenshot on Android 10+ via MediaStore API (API 29+)
+- Added onDestroy() lifecycle cleanup
+- Added Back key handling for Android TV (dismiss menu)
+- Fixed AAC decode loop: replaced deprecated getInputBuffers(), release codec on error
+- Added menu popup dismiss on Back key
+- Removed misleading "Digest" auth claim from README
+
+#### 1.21
 - Improved reconnection with exponential backoff
 - Added AAC audio support
 - Memory optimization with object pooling

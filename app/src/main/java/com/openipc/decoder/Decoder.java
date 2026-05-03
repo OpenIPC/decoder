@@ -11,6 +11,7 @@ package com.openipc.decoder;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.Dialog;
+import android.content.ContentValues;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -62,12 +63,10 @@ import android.widget.Toast;
 import android.graphics.Bitmap;
 import android.os.Environment;
 import android.provider.MediaStore;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.text.SimpleDateFormat;
-import java.util.Date;
 
 import java.io.BufferedInputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -78,6 +77,8 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.Locale;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -156,7 +157,7 @@ public class Decoder extends Activity {
     private int mActive; // only accessed on the UI thread — no volatile needed
     private volatile String mHost;
     private volatile boolean mType;
-    private String mVersion = "1.21";
+    private String mVersion = "1.22";
     private String mUserAgent = "User-Agent: OpenIPC-Decoder/1.0\r\n";
 
     // tracks last warned unknown RTP payload type to suppress log spam on the network thread
@@ -199,6 +200,9 @@ public class Decoder extends Activity {
 
     // reference kept so we can dismiss the dialog (and destroy the WebView) on rotation
     private Dialog mBrowserDialog; // only accessed on the UI thread — no volatile needed
+
+    // reference kept so onKeyDown can dismiss the menu popup on Back key press
+    private PopupWindow mMenuPopup; // only accessed on the UI thread — no volatile needed
 
     // carousel auto-switch state — all accessed on the UI thread only
     private static final int CAROUSEL_MIN_SEC = 3;
@@ -486,9 +490,9 @@ public class Decoder extends Activity {
     /** Take screenshot of current video frame */
     private void takeScreenshot() {
         if (isTakingScreenshot) return;
-        
+
         isTakingScreenshot = true;
-        
+
         // Get bitmap from TextureView
         Bitmap bitmap = mSurface.getBitmap();
         if (bitmap == null) {
@@ -496,39 +500,66 @@ public class Decoder extends Activity {
             isTakingScreenshot = false;
             return;
         }
-        
-        // Save bitmap to file
+
         String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
         String fileName = "Screenshot_" + timeStamp + ".png";
-        
-        File storageDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES);
-        File screenshotFile = new File(storageDir, "OpenIPC/" + fileName);
-        
-        // Create directories if they don't exist
-        screenshotFile.getParentFile().mkdirs();
-        
-        try {
-            FileOutputStream fos = new FileOutputStream(screenshotFile);
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
-            fos.flush();
-            fos.close();
-            
-            // Notify MediaScanner
-            MediaStore.Images.Media.insertImage(getContentResolver(),
-                screenshotFile.getAbsolutePath(), fileName, null);
-            
-            runOnUiThread(() -> {
-                Toast.makeText(this, "Screenshot saved: " + fileName, Toast.LENGTH_LONG).show();
-            });
-        } catch (IOException e) {
-            Log.e(TAG, "Error saving screenshot", e);
-            runOnUiThread(() -> {
-                Toast.makeText(this, "Failed to save screenshot", Toast.LENGTH_SHORT).show();
-            });
-        } finally {
-            bitmap.recycle();
-            isTakingScreenshot = false;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // API 29+ — use MediaStore via ContentResolver
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.Images.Media.DISPLAY_NAME, fileName);
+            values.put(MediaStore.Images.Media.MIME_TYPE, "image/png");
+            values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/OpenIPC");
+            values.put(MediaStore.Images.Media.IS_PENDING, 1);
+
+            Uri uri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+            if (uri != null) {
+                try {
+                    OutputStream fos = getContentResolver().openOutputStream(uri);
+                    if (fos != null) {
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
+                        fos.close();
+                    }
+                    values.clear();
+                    values.put(MediaStore.Images.Media.IS_PENDING, 0);
+                    getContentResolver().update(uri, values, null, null);
+                    runOnUiThread(() ->
+                        Toast.makeText(this, "Screenshot saved: " + fileName, Toast.LENGTH_LONG).show()
+                    );
+                } catch (IOException e) {
+                    Log.e(TAG, "Error saving screenshot via MediaStore", e);
+                    getContentResolver().delete(uri, null, null);
+                    runOnUiThread(() ->
+                        Toast.makeText(this, "Failed to save screenshot", Toast.LENGTH_SHORT).show()
+                    );
+                }
+            }
+        } else {
+            // API < 29 — legacy file-based approach
+            File storageDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES);
+            File screenshotFile = new File(storageDir, "OpenIPC/" + fileName);
+            screenshotFile.getParentFile().mkdirs();
+
+            try {
+                FileOutputStream fos = new FileOutputStream(screenshotFile);
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
+                fos.flush();
+                fos.close();
+                // Notify MediaScanner
+                MediaStore.Images.Media.insertImage(getContentResolver(),
+                    screenshotFile.getAbsolutePath(), fileName, null);
+                runOnUiThread(() ->
+                    Toast.makeText(this, "Screenshot saved: " + fileName, Toast.LENGTH_LONG).show()
+                );
+            } catch (IOException e) {
+                Log.e(TAG, "Error saving screenshot", e);
+                runOnUiThread(() ->
+                    Toast.makeText(this, "Failed to save screenshot", Toast.LENGTH_SHORT).show()
+                );
+            }
         }
+        bitmap.recycle();
+        isTakingScreenshot = false;
     }
 
     /**
@@ -708,6 +739,8 @@ public class Decoder extends Activity {
         // add margin so the menu doesn't touch the screen edge — issue #4
         int margin = dp(12);
         popup.showAtLocation(menu, Gravity.TOP | Gravity.START, margin, margin);
+        mMenuPopup = popup;
+        popup.setOnDismissListener(() -> mMenuPopup = null);
 
         // camRow must be WRAP_CONTENT to anchor the popup width to all 8 buttons;
         // other menu items use default MATCH_PARENT to stretch and align uniformly
@@ -1397,10 +1430,7 @@ public class Decoder extends Activity {
         // Start AAC decode loop on the executor
         executor.execute(() -> {
             Thread.currentThread().setName("rtsp-aac-decode");
-            ByteBuffer[] inputBuffers = codec.getInputBuffers();
-            ByteBuffer[] outputBuffers = codec.getOutputBuffers();
             MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
-            ByteBuffer adtsHeader = ByteBuffer.allocate(7);
 
             while (listener && !Thread.currentThread().isInterrupted()) {
                 try {
@@ -1415,7 +1445,8 @@ public class Decoder extends Activity {
                     int inputId = codec.dequeueInputBuffer(10_000);
                     if (inputId < 0) continue;
 
-                    ByteBuffer inBuf = inputBuffers[inputId];
+                    ByteBuffer inBuf = codec.getInputBuffer(inputId);
+                    if (inBuf == null) continue;
                     inBuf.clear();
                     if (hasAdts) {
                         // Strip ADTS header (7 bytes) before feeding to MediaCodec
@@ -1433,13 +1464,15 @@ public class Decoder extends Activity {
                     // Drain output
                     int outId;
                     while ((outId = codec.dequeueOutputBuffer(info, 0)) >= 0) {
-                        ByteBuffer outBuf = outputBuffers[outId];
-                        if (outBuf != null && info.size > 0) {
-                            byte[] pcm = new byte[info.size];
-                            outBuf.position(info.offset);
-                            outBuf.get(pcm, 0, info.size);
-                            if (!pcmQueue.offer(new Frame(pcm, info.size))) {
-                                Log.w(TAG, "AAC decoded PCM queue full, frame dropped");
+                        if (info.size > 0) {
+                            ByteBuffer outBuf = codec.getOutputBuffer(outId);
+                            if (outBuf != null) {
+                                byte[] pcm = new byte[info.size];
+                                outBuf.position(info.offset);
+                                outBuf.get(pcm, 0, info.size);
+                                if (!pcmQueue.offer(new Frame(pcm, info.size))) {
+                                    Log.w(TAG, "AAC decoded PCM queue full, frame dropped");
+                                }
                             }
                         }
                         codec.releaseOutputBuffer(outId, false);
@@ -1449,6 +1482,15 @@ public class Decoder extends Activity {
                     break;
                 } catch (Exception e) {
                     Log.e(TAG, "AAC decode error", e);
+                    // Close and release the codec to avoid leaking resources
+                    synchronized (aacDecoderLock) {
+                        if (aacDecoder == codec) {
+                            aacDecoder = null;
+                        }
+                    }
+                    try { codec.stop(); } catch (Exception ignored) {}
+                    try { codec.release(); } catch (Exception ignored) {}
+                    break;
                 }
             }
         });
@@ -2323,6 +2365,51 @@ public class Decoder extends Activity {
         }
     }
 
+    @Override
+    protected void onDestroy() {
+        // Guard: if the Activity is killed directly (e.g. finishAndRemoveTask)
+        // without onPause, perform cleanup here.
+        if (listener) {
+            listenerGen++;
+            listener = false;
+            activeStream = false;
+            closeSockets();
+            if (executor != null) {
+                executor.shutdownNow();
+                try {
+                    if (!executor.awaitTermination(2, TimeUnit.SECONDS)) {
+                        executor.shutdownNow();
+                    }
+                } catch (InterruptedException e) {
+                    executor.shutdownNow();
+                    Thread.currentThread().interrupt();
+                }
+                executor = null;
+            }
+            closeDecoder();
+            closeAudio();
+            nalQueue.clear();
+            pcmQueue.clear();
+        }
+        if (quadCells != null) {
+            for (QuadCell cell : quadCells) {
+                if (cell != null) cell.stop();
+            }
+            quadCells = null;
+        }
+        PopupWindow popup = mMenuPopup;
+        if (popup != null) {
+            popup.dismiss();
+            mMenuPopup = null;
+        }
+        Dialog browser = mBrowserDialog;
+        if (browser != null) {
+            browser.dismiss();
+            mBrowserDialog = null;
+        }
+        super.onDestroy();
+    }
+
     /**
      * Self-contained RTSP video-only player for one quadrant cell.
      * Uses TCP exclusively — UDP fixed ports (5000/5002) cannot be shared
@@ -2946,8 +3033,17 @@ public class Decoder extends Activity {
         switch (keyCode) {
             case KeyEvent.KEYCODE_DPAD_CENTER:
             case KeyEvent.KEYCODE_ENTER:
-                createMenu(findViewById(R.id.decoder));
+                if (mMenuPopup == null) {
+                    createMenu(findViewById(R.id.decoder));
+                }
                 return true;
+            case KeyEvent.KEYCODE_BACK:
+                PopupWindow popup = mMenuPopup;
+                if (popup != null) {
+                    popup.dismiss();
+                    return true;
+                }
+                // fall through to default if no popup is open
             default:
                 return super.onKeyDown(keyCode, event);
         }
