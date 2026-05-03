@@ -1,9 +1,6 @@
 name: Build
 on:
   push:
-    branches:
-      - master
-      - ystinia
   workflow_dispatch:
 
 jobs:
@@ -16,11 +13,19 @@ jobs:
       - name: Set artifact name
         id: vars
         run: |
-          if [ "${{ github.ref_name }}" = "master" ]; then
-            echo "name=Decoder" >> $GITHUB_OUTPUT
-          else
-            echo "name=Decoder-NG" >> $GITHUB_OUTPUT
-          fi
+          case "${{ github.ref_name }}" in
+            master) echo "name=decoder" ;;
+            v2)     echo "name=decoder-v2" ;;
+            v3)     echo "name=decoder-v3" ;;
+            *)      echo "name=decoder-${{ github.ref_name }}" ;;
+          esac >> $GITHUB_OUTPUT
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
 
       - name: Build
         env:
@@ -28,10 +33,7 @@ jobs:
           KEY_ALIAS:     ${{ secrets.KEY_ALIAS }}
           KEY_PASS:      ${{ secrets.KEY_PASS }}
         run: |
-          sudo apt-get update
-          sudo apt-get install openjdk-17-jdk
-          export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-          echo ${{secrets.KEY}} | base64 -d > key.jks
+          echo "${{ secrets.KEY }}" | base64 -d > key.jks
           ./gradlew bundleRelease
           mv app/build/outputs/bundle/release/app-release.aab ${{ steps.vars.outputs.name }}.aab
           ./gradlew assembleRelease
@@ -44,3 +46,13 @@ jobs:
           files: |
             ${{ steps.vars.outputs.name }}.aab
             ${{ steps.vars.outputs.name }}.apk
+
+      - name: Telegram
+        run: |
+          TG_MSG="Commit: ${GIT_HASH}\nBranch: ${GIT_BRANCH}\nTag: ${TAG_NAME}\nTime: ${TIME}\n\n"
+          TG_ICON="\xE2\x9C\x85 GitHub Actions"
+          TG_HEADER=$(echo -e ${TG_MSG}${TG_ICON})
+          TG_TOKEN=${{secrets.TELEGRAM_TOKEN_BOT_OPENIPC}}
+          TG_CHANNEL=${{secrets.TELEGRAM_CHANNEL_OPENIPC_DEV}}
+          HTTP=$(curl -s -o /dev/null -w %{http_code} https://api.telegram.org/bot${TG_TOKEN}/sendDocument -F chat_id=${TG_CHANNEL} -F caption="${TG_HEADER}" -F document=@${{ steps.vars.outputs.name }}.apk)
+          echo Telegram response: ${HTTP}
