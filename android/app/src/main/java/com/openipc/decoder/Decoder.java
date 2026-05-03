@@ -873,10 +873,9 @@ public class Decoder extends Activity {
             Log.w(TAG, "Cannot open WebUI: invalid host in URL");
             return;
         }
-        int port = uri.getPort();
-        if (port >= 0) {
-            link = link + ":" + port;
-        }
+        // WebUI runs on HTTP port 80, not the RTSP port (554).
+        // If the URL has a non-default RTSP port, the WebUI is still on :80.
+        // Don't append the RTSP port to the WebUI URL.
 
         WebView view = new WebView(this);
         view.getSettings().setJavaScriptEnabled(true);
