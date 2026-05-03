@@ -2679,6 +2679,18 @@ public class Decoder extends Activity {
     }
 
     private static class Frame {
+        private final byte[] data;
+        private int length;
+
+        Frame(byte[] data, int length) {
+            this.data = data;
+            this.length = length;
+        }
+
+        byte[] data() { return data; }
+        int length() { return length; }
+        void setLength(int length) { this.length = length; }
+    }
 
     /**
      * Simple object pool for Frame objects to reduce GC pressure
