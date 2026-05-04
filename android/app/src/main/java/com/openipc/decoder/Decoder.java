@@ -146,7 +146,7 @@ public class Decoder extends Activity {
     private final String[] mHosts = new String[CAM_COUNT];
     private int mActive; // only accessed on the UI thread — no volatile needed
     private volatile String mHost;
-    private String mVersion = "1.22";
+    private String mVersion = "1.23";
     private String mUserAgent = "User-Agent: OpenIPC-Decoder/1.0\r\n";
 
     // tracks last warned unknown RTP payload type to suppress log spam on the network thread
@@ -729,7 +729,7 @@ public class Decoder extends Activity {
             if (newState) startQuad(); else stopQuad();
         });
 
-        String code = "Exit [V" + mVersion + ", " + BuildConfig.GIT_HASH + "]";
+        String code = "Exit [v" + mVersion + ", " + BuildConfig.GIT_HASH + "]";
 
         SpannableString s = new SpannableString(code);
         s.setSpan(new SuperscriptSpan(),    5, s.length(), 0);
