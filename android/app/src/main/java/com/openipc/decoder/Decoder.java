@@ -625,10 +625,9 @@ public class Decoder extends Activity {
         nalQueue.clear();
         pcmQueue.clear();
 
-        // 5. Start fresh listener; safe clearVideo() uses setBackgroundColor only
+        // 5. Start fresh listener
         listener = true;
         startListener();
-        clearVideo();
     }
 
     /** Close all active network sockets to unblock I/O threads. */
