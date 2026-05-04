@@ -198,6 +198,7 @@ public class Decoder extends Activity {
     // quad mode: 4 simultaneous video streams in a 2x2 grid — all UI thread only
     private boolean quadEnabled;
     private QuadCell[] quadCells;
+    private TextView mSettingsBtn;
     private LinearLayout quadContainer;
     private final TextureView[] quadViews = new TextureView[4];
 
@@ -653,8 +654,9 @@ public class Decoder extends Activity {
         layout.addView(camRow, wrapParams);
         layout.setMinimumWidth(dp(280));
 
-        TextView settings = createItem("Settings");
-        layout.addView(settings);
+        mSettingsBtn = createItem("Settings");
+        layout.addView(mSettingsBtn);
+        mSettingsBtn.setVisibility(quadEnabled ? View.GONE : View.VISIBLE);
 
         // Quad toggle button "K" — declared first so camera-buttons handler can reference it
         final TextView quadBtn = createItem("K");
@@ -717,6 +719,7 @@ public class Decoder extends Activity {
                 highlightItem(camButtons[mActive]);
                 applyQualityColor(camButtons[mActive], mActive);
             }
+            mSettingsBtn.setVisibility(newState ? View.GONE : View.VISIBLE);
             if (newState) startQuad(); else stopQuad();
         });
 
@@ -743,7 +746,7 @@ public class Decoder extends Activity {
         exit.setText(s);
         exit.setOnClickListener(v -> finishAndRemoveTask());
 
-        settings.setOnClickListener(v -> {
+        mSettingsBtn.setOnClickListener(v -> {
             popup.dismiss();
             showUrlEditor();
         });
