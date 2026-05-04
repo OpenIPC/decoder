@@ -2072,6 +2072,8 @@ public class Decoder extends Activity {
         private volatile boolean activeStream;
         private volatile long lastFrame;
         private volatile boolean codecH265;
+        private volatile boolean started;
+        private volatile boolean threadsStarted;
 
         private volatile Surface surface;
         private volatile MediaCodec decoder;
@@ -2104,10 +2106,13 @@ public class Decoder extends Activity {
         }
 
         void start() {
+            if (started) return;
+            started = true;
             running = true;
             view.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
                 @Override
                 public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture st, int w, int h) {
+                    if (threadsStarted) return;
                     Surface old = surface;
                     surface = new Surface(st);
                     if (old != null) {
@@ -2152,6 +2157,8 @@ public class Decoder extends Activity {
                 @Override
                 public void onSurfaceTextureUpdated(android.graphics.SurfaceTexture st) {}
             });
+            // SurfaceTexture persists across visibility toggles, so onSurfaceTextureAvailable
+            // may NOT fire again. Start threads immediately if the texture is ready.
             if (view.isAvailable()) {
                 surface = new Surface(view.getSurfaceTexture());
                 startThreads();
@@ -2159,6 +2166,8 @@ public class Decoder extends Activity {
         }
 
         private void startThreads() {
+            if (threadsStarted) return;
+            threadsStarted = true;
             if (executor != null) {
                 // Ensure previous executor is shut down
                 executor.shutdownNow();
@@ -2240,10 +2249,11 @@ public class Decoder extends Activity {
         }
 
         void stop() {
+            started = false;
+            threadsStarted = false;
             running = false;
             activeStream = false;
             nalAssembler.reset();
-            view.setSurfaceTextureListener(null);
             Socket tcp = tcpSocket;
             if (tcp != null) {
                 try {
