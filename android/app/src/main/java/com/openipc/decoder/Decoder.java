@@ -1780,56 +1780,52 @@ public class Decoder extends Activity {
 
     /**
      * Read one RTP-over-TCP interleaved packet from the stream.
-     * Returns the raw packet bytes (including the 4-byte $ marker header),
-     * or null if the stream ended cleanly.
-     * @throws IOException on truncated data
+     * The packet body is written directly into {@code pktBuf} (starting at index 4) and
+     * the 4-byte $ header is written at indices 0-3.
+     * Returns the total packet length (including 4-byte header), or -1 on clean EOF.
+     * @throws IOException on truncated data or socket error
      */
-    private byte[] readInterleavedPacket(BufferedInputStream input, byte[] pktBuf, boolean active)
+    private int readInterleavedPacket(BufferedInputStream input, byte[] pktBuf)
             throws IOException {
-        while (active) {
+        while (true) {
             int b = input.read();
-            if (b == -1) return null;
+            if (b == -1) return -1;
             if (b != 0x24) continue;
 
             int channel = input.read();
             int hi = input.read();
             int lo = input.read();
-            if (channel == -1 || hi == -1 || lo == -1) return null;
+            if (channel == -1 || hi == -1 || lo == -1) return -1;
 
             int len = (hi << 8) | lo;
-            if (len <= 0 || len > pktBuf.length) continue;
+            if (len <= 0 || len > pktBuf.length - 4) continue;
 
             int read = 0;
             while (read < len) {
-                int n = input.read(pktBuf, read, len - read);
+                int n = input.read(pktBuf, 4 + read, len - read);
                 if (n == -1) throw new IOException("stream truncated mid-packet");
                 read += n;
             }
 
-            // Return a copy with channel + header
-            byte[] pkt = new byte[len + 4];
-            pkt[0] = 0x24;
-            pkt[1] = (byte) channel;
-            pkt[2] = (byte) hi;
-            pkt[3] = (byte) lo;
-            System.arraycopy(pktBuf, 0, pkt, 4, len);
-            return pkt;
+            pktBuf[0] = 0x24;
+            pktBuf[1] = (byte) channel;
+            pktBuf[2] = (byte) hi;
+            pktBuf[3] = (byte) lo;
+            return len + 4;
         }
-        return null;
     }
 
     private void tcpStream(InputStream rawInput) throws IOException {
-        // wrap in BufferedInputStream to batch OS-level reads
         BufferedInputStream input = new BufferedInputStream(rawInput, 65536);
         byte[] pktBuf = new byte[65535];
         while (activeStream) {
-            byte[] pkt = readInterleavedPacket(input, pktBuf, activeStream);
-            if (pkt == null) { activeStream = false; break; }
+            int total = readInterleavedPacket(input, pktBuf);
+            if (total < 0) { activeStream = false; break; }
 
-            int channel = pkt[1];
-            int len = pkt.length - 4;
+            int channel = pktBuf[1];
+            int len = total - 4;
             Frame frame = obtainFrame(len);
-            System.arraycopy(pkt, 4, frame.data(), 0, len);
+            System.arraycopy(pktBuf, 4, frame.data(), 0, len);
             frame.setLength(len);
 
             if (channel == 0) {
@@ -2558,15 +2554,15 @@ public class Decoder extends Activity {
             BufferedInputStream input = new BufferedInputStream(rawInput, 65536);
             byte[] pktBuf = new byte[65535];
             while (activeStream && running) {
-                byte[] pkt = readInterleavedPacket(input, pktBuf, activeStream && running);
-                if (pkt == null) { activeStream = false; break; }
+                int total = readInterleavedPacket(input, pktBuf);
+                if (total < 0) { activeStream = false; break; }
 
-                int channel = pkt[1];
-                int len = pkt.length - 4;
+                int channel = pktBuf[1];
+                int len = total - 4;
                 // channel 0 = video RTP; skip audio (channel 2)
                 if (channel == 0) {
                     Frame f = obtainFrame(len);
-                    System.arraycopy(pkt, 4, f.data(), 0, len);
+                    System.arraycopy(pktBuf, 4, f.data(), 0, len);
                     f.setLength(len);
                     handlePacket(f);
                 }
