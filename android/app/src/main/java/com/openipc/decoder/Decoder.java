@@ -283,7 +283,15 @@ public class Decoder extends Activity
     @Override
     public void onToggleQuad() {
         boolean newState = !quadEnabled;
-        if (newState) startQuad(); else stopQuad();
+        if (newState) startQuad(); else {
+            stopQuad();
+            boolean configured = mHost != null && !mHost.isEmpty() && !mHost.equals(DEFAULT_URL);
+            if (configured) {
+                rtspClient.configure(mHost, mUserAgent);
+                startListener();
+                rtspClient.start();
+            }
+        }
     }
 
     @Override
@@ -490,13 +498,6 @@ public class Decoder extends Activity
 
         quadContainer.setVisibility(View.GONE);
         mSurface.setVisibility(View.VISIBLE);
-
-        boolean configured = mHost != null && !mHost.isEmpty() && !mHost.equals(DEFAULT_URL);
-        if (configured) {
-            rtspClient.configure(mHost, mUserAgent);
-            startListener();
-            rtspClient.start();
-        }
     }
 
     /** Clear the video view so no stale frame lingers. */

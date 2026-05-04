@@ -45,7 +45,7 @@ class RtspClient {
     private FramePool framePool;
     private NalAssembler nalAssembler;
     private BlockingQueue<Frame> nalQueue;
-    private Socket mTcpSocket;
+    private volatile Socket mTcpSocket;
     private ExecutorService executor;
 
     // Decoder state
@@ -62,6 +62,9 @@ class RtspClient {
     private long jitterAccumulator;
     private int jitterSampleCount;
     private int lastUnknownPayload = -1;
+
+    // First-frame tracking for status transition
+    private boolean firstFrameReceived;
 
     // Bitrate tracking
     private volatile long streamBytes;
@@ -123,8 +126,7 @@ class RtspClient {
                         consecutiveFailures = 0;
                         streamBytes = 0;
                         bitrateMarkNs = System.nanoTime();
-                        if (listenerCb != null) listenerCb.onStatusChanged("connected");
-                SystemClock.sleep(2000);
+                        if (listenerCb != null) listenerCb.onStatusChanged("disconnected");
                     } else {
                         SystemClock.sleep(1000);
                     }
@@ -216,9 +218,9 @@ class RtspClient {
         try {
             s = new Socket();
             int port = uri.getPort();
-            s.connect(new InetSocketAddress(h, port < 0 ? 554 : port), 1000);
+            s.connect(new InetSocketAddress(h, port < 0 ? 554 : port), 5000);
             s.setTcpNoDelay(true);
-            s.setSoTimeout(1000);
+            s.setSoTimeout(5000);
             InputStream input = s.getInputStream();
             OutputStream w = s.getOutputStream();
 
@@ -290,7 +292,8 @@ class RtspClient {
             w.flush();
 
             readRtspResponse(input, null);
-            if (listenerCb != null) listenerCb.onStatusChanged("buffering");
+            firstFrameReceived = false;
+        if (listenerCb != null) listenerCb.onStatusChanged("buffering");
 
             s.setSoTimeout(0);
             lastFrame = SystemClock.elapsedRealtime();
@@ -394,6 +397,10 @@ class RtspClient {
             framePool.recycle(frame);
             return;
         } else if (payload == RTP_PT_H265 || payload == RTP_PT_H264) {
+            if (!firstFrameReceived) {
+                firstFrameReceived = true;
+                if (listenerCb != null) listenerCb.onStatusChanged("connected");
+            }
             lastFrame = SystemClock.elapsedRealtime();
             long now = SystemClock.elapsedRealtime();
             if (now - lastQualityUpdateTime > 1000) {
