@@ -274,7 +274,7 @@ public class Decoder extends Activity {
                 return true;
             }
         });
-        // Pan (scroll) and double-tap to reset zoom, single tap opens menu
+        // Pan (scroll), double-tap to reset zoom, single tap opens menu, long-press screenshot
         final View menuAnchor = findViewById(R.id.decoder);
         mGestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onScroll(MotionEvent e1, MotionEvent e2, float dx, float dy) {
@@ -294,6 +294,9 @@ public class Decoder extends Activity {
             @Override public boolean onSingleTapConfirmed(MotionEvent e) {
                 createMenu(menuAnchor);
                 return true;
+            }
+            @Override public void onLongPress(MotionEvent e) {
+                takeScreenshot();
             }
         });
         mSurface.setOnTouchListener((v, event) -> {
@@ -781,14 +784,6 @@ public class Decoder extends Activity {
             popup.dismiss();
         });
 
-        // Screenshot button — hidden when settings submenu is open
-        TextView screenshotBtn = createItem(getString(R.string.menu_screenshot));
-        layout.addView(screenshotBtn);
-        screenshotBtn.setOnClickListener(v -> {
-            popup.dismiss();
-            takeScreenshot();
-        });
-
         String code = "Exit [V" + mVersion + ", " + BuildConfig.GIT_HASH + "]";
 
         SpannableString s = new SpannableString(code);
@@ -811,7 +806,6 @@ public class Decoder extends Activity {
             settings.setVisibility(closing ? View.VISIBLE : View.GONE);
             camRow.setVisibility(closing ? View.VISIBLE : View.GONE);
             webui.setVisibility(closing ? View.VISIBLE : View.GONE);
-            screenshotBtn.setVisibility(closing ? View.VISIBLE : View.GONE);
             divider.setVisibility(closing ? View.VISIBLE : View.GONE);
             exit.setVisibility(closing ? View.VISIBLE : View.GONE);
             // expand to full width for the URL field; shrink back for the main menu

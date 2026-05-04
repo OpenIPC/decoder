@@ -25,7 +25,7 @@ Android application for viewing RTSP streams from IP cameras with hardware-accel
 - **Controls**: Pinch-to-zoom, pan, double-tap reset, Android TV remote (Leanback)
 - **Network**: TCP/UDP, automatic reconnection with exponential backoff, Basic auth
 - **WebUI**: Built-in browser for camera web interface access
-- **Additional**: Screenshot capture, status/quality indicators, object pooling, 8 camera slots
+- **Additional**: Long-press screenshot, status indicators, object pooling, 4 camera slots
 
 ## Requirements
 
@@ -69,7 +69,7 @@ export KEY_PASS=your_key_password
 - **Transport** — toggle between TCP/UDP
 - **Quad** — enable/disable quad mode
 - **WebUI** — open camera web interface
-- **Screenshot** — take screenshot
+- **Long-press** — take screenshot
 - **Exit** — exit application
 
 ### Quad Mode
