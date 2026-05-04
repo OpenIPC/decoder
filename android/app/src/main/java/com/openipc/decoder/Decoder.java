@@ -686,9 +686,16 @@ public class Decoder extends Activity {
             }
 
             camButtons[i].setOnClickListener(v -> {
-                if (slot == mActive) return;
-                // de-highlight K when switching to a camera
-                resetItem(quadBtn);
+                if (slot == mActive && !quadEnabled) return;
+                if (quadEnabled) {
+                    // exit quad mode, switch to selected camera
+                    popup.dismiss();
+                    stopQuad();
+                    quadEnabled = false;
+                    mSettingsBtn.setVisibility(View.VISIBLE);
+                    mWebUiBtn.setVisibility(View.VISIBLE);
+                    resetItem(quadBtn);
+                }
                 mActive = slot;
                 for (int j = 0; j < CAM_COUNT; j++) {
                     if (j == mActive) {
