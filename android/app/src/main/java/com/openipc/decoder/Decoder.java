@@ -648,9 +648,8 @@ public class Decoder extends Activity {
         LinearLayout camRow = new LinearLayout(this);
         camRow.setOrientation(LinearLayout.HORIZONTAL);
         layout.addView(camRow, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
-        layout.setMinimumWidth(dp(280));
 
         mSettingsBtn = createItem("Settings");
         layout.addView(mSettingsBtn);
@@ -676,7 +675,8 @@ public class Decoder extends Activity {
             camButtons[i].setGravity(Gravity.CENTER);
             camButtons[i].setPadding(dp(12), dp(8), dp(12), dp(8));
             camRow.addView(camButtons[i], new LinearLayout.LayoutParams(
-                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT));
 
             if (i == mActive && !quadEnabled) {
                 highlightItem(camButtons[i]);
@@ -705,7 +705,8 @@ public class Decoder extends Activity {
 
         // Add K to the start of the camera row (already declared above; add now)
         camRow.addView(quadBtn, 0, new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
         if (quadEnabled) highlightItem(quadBtn);
         quadBtn.setOnClickListener(v -> {
             popup.dismiss();
