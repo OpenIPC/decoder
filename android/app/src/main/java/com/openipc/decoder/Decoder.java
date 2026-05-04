@@ -581,7 +581,8 @@ public class Decoder extends Activity {
         clearVideo();
 
         // restart single-stream playback
-        if (!listener) {
+        boolean configured = mHost != null && !mHost.isEmpty() && !mHost.equals(DEFAULT_URL);
+        if (!listener && configured) {
             listener = true;
             startListener();
         }
@@ -622,6 +623,14 @@ public class Decoder extends Activity {
         closeAudio();
         nalQueue.clear();
         pcmQueue.clear();
+
+        // 5. Clear stale frame AFTER all old threads have been stopped.
+        clearVideo();
+
+        if (mHost == null || mHost.isEmpty() || mHost.equals(DEFAULT_URL)) {
+            // Don't start listener for unconfigured slot — just show the status
+            return;
+        }
 
         listener = true;
         startListener();
@@ -2121,7 +2130,9 @@ public class Decoder extends Activity {
             }
             // clear stale frame before reconnect
             clearVideo();
-            if (!listener) {
+            // Don't start listener for unconfigured slots
+            boolean configured = mHost != null && !mHost.isEmpty() && !mHost.equals(DEFAULT_URL);
+            if (!listener && configured) {
                 listener = true;
                 startListener();
             }
