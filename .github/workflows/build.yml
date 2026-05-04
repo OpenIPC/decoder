@@ -57,6 +57,10 @@ jobs:
 
       - name: Telegram
         run: |
+          GIT_HASH=$(git rev-parse --short HEAD)
+          GIT_BRANCH="${{ github.ref_name }}"
+          TAG_NAME="${{ github.ref_type == 'tag' && github.ref_name || '' }}"
+          TIME=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
           TG_MSG="Commit: ${GIT_HASH}\nBranch: ${GIT_BRANCH}\nTag: ${TAG_NAME}\nTime: ${TIME}\n\n"
           TG_ICON="\xE2\x9C\x85 GitHub Actions"
           TG_HEADER=$(echo -e ${TG_MSG}${TG_ICON})
