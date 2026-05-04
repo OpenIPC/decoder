@@ -710,6 +710,19 @@ public class Decoder extends Activity {
             });
         }
 
+        // Quad toggle button "K" at the start of the camera row
+        TextView quadBtn = createItem("K");
+        quadBtn.setGravity(Gravity.CENTER);
+        quadBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
+        camRow.addView(quadBtn, 0, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        if (quadEnabled) highlightItem(quadBtn);
+        quadBtn.setOnClickListener(v -> {
+            popup.dismiss();
+            if (quadEnabled) stopQuad(); else startQuad();
+        });
+
         TextView webui = createItem("WebUI");
         layout.addView(webui);
         webui.setOnClickListener(v -> {
@@ -717,19 +730,12 @@ public class Decoder extends Activity {
             popup.dismiss();
         });
 
-        // Screenshot button
+        // Screenshot button — hidden when settings submenu is open
         TextView screenshotBtn = createItem(getString(R.string.menu_screenshot));
         layout.addView(screenshotBtn);
         screenshotBtn.setOnClickListener(v -> {
             popup.dismiss();
             takeScreenshot();
-        });
-
-        TextView quadToggle = createItem(quadEnabled ? "Quadrator: ON" : "Quadrator: OFF");
-        layout.addView(quadToggle);
-        quadToggle.setOnClickListener(v -> {
-            popup.dismiss();
-            if (quadEnabled) stopQuad(); else startQuad();
         });
 
         String code = "Exit [V" + mVersion + ", " + BuildConfig.GIT_HASH + "]";
@@ -754,7 +760,7 @@ public class Decoder extends Activity {
             settings.setVisibility(closing ? View.VISIBLE : View.GONE);
             camRow.setVisibility(closing ? View.VISIBLE : View.GONE);
             webui.setVisibility(closing ? View.VISIBLE : View.GONE);
-            quadToggle.setVisibility(closing ? View.VISIBLE : View.GONE);
+            screenshotBtn.setVisibility(closing ? View.VISIBLE : View.GONE);
             divider.setVisibility(closing ? View.VISIBLE : View.GONE);
             exit.setVisibility(closing ? View.VISIBLE : View.GONE);
             // expand to full width for the URL field; shrink back for the main menu
