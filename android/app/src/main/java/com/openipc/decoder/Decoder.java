@@ -2603,7 +2603,8 @@ public class Decoder extends Activity {
             }
             lastFrame = SystemClock.elapsedRealtime();
             // Remove the black overlay now that the decoder pipeline is active
-            runOnUiThread(() -> removeQuadOverlay(index));
+            final int idx = index;
+            runOnUiThread(() -> removeQuadOverlay(idx));
         }
     }
 
