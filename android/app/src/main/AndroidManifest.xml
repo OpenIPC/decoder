@@ -10,6 +10,7 @@
     <!-- For Android 10+ -->
     <application
         android:name=".App"
+        android:allowBackup="false"
         android:requestLegacyExternalStorage="true"
         android:banner="@mipmap/ic_launcher"
         android:icon="@mipmap/ic_launcher"

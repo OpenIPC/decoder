@@ -748,7 +748,7 @@ public class Decoder extends Activity {
             if (quadEnabled) stopQuad(); else startQuad();
         });
 
-        String code = "Exit [V" + mVersion + " " + BuildConfig.GIT_HASH + "]";
+        String code = "Exit [V" + mVersion + ", " + BuildConfig.GIT_HASH + "]";
 
         SpannableString s = new SpannableString(code);
         s.setSpan(new SuperscriptSpan(),    5, s.length(), 0);
