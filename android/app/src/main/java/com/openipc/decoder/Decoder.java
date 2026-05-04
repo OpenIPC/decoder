@@ -358,8 +358,9 @@ public class Decoder extends Activity {
             edit.apply();
         }
 
-        mActive = pref.getInt("active", 0);
-        quadEnabled = pref.getBoolean("quad_enabled", false);
+        // Always start on camera 1 regardless of saved state
+        mActive = 0;
+        quadEnabled = false;
         for (int i = 0; i < CAM_COUNT; i++) {
             mHosts[i] = pref.getString("host_" + i, DEFAULT_URL);
             mTypes[i] = pref.getBoolean("type_" + i, false);
