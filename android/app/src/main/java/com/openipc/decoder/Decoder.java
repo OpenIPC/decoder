@@ -534,6 +534,7 @@ public class Decoder extends Activity {
 
         mSurface.setVisibility(View.GONE);
         quadContainer.setVisibility(View.VISIBLE);
+        removeClearOverlay();
 
         quadCells = new QuadCell[4];
         for (int i = 0; i < 4; i++) {
@@ -849,13 +850,29 @@ public class Decoder extends Activity {
         });
     }
 
-    /** Clear the video view by drawing black so no stale frame lingers. */
+    /** Clear the video view so no stale frame lingers. Adds a black overlay
+     *  View instead of touching the TextureView (which would break the hardware
+     *  rendering pipeline). The overlay is removed when updateQuality() signals
+     *  an active stream. */
     private void clearVideo() {
-        if (mSurface == null || !mSurface.isAvailable()) return;
-        Canvas canvas = mSurface.lockCanvas();
-        if (canvas != null) {
-            canvas.drawColor(Color.BLACK);
-            mSurface.unlockCanvasAndPost(canvas);
+        if (mSurface == null) return;
+        // Remove existing overlay if any
+        removeClearOverlay();
+        final View overlay = new View(this);
+        overlay.setLayoutParams(new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+        overlay.setBackgroundColor(Color.BLACK);
+        overlay.setTag("clear_overlay");
+        ((FrameLayout) mSurface.getParent()).addView(overlay);
+    }
+
+    private void removeClearOverlay() {
+        if (mSurface == null) return;
+        FrameLayout parent = (FrameLayout) mSurface.getParent();
+        View overlay = parent.findViewWithTag("clear_overlay");
+        if (overlay != null) {
+            parent.removeView(overlay);
         }
     }
 
@@ -1359,6 +1376,7 @@ public class Decoder extends Activity {
             try {
                 local.configure(format, mVideo, null, 0);
                 local.start();
+                runOnUiThread(this::removeClearOverlay);
             } catch (Exception e) {
                 local.release(); // prevent native MediaCodec handle leak
                 throw e;
