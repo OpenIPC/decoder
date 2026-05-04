@@ -61,7 +61,6 @@ import android.widget.PopupWindow;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.graphics.Bitmap;
-import android.graphics.Canvas;
 import android.provider.MediaStore;
 
 import java.io.BufferedInputStream;
@@ -876,16 +875,35 @@ public class Decoder extends Activity {
         }
     }
 
-    /** Clear all quad views so stale frames are erased before restart. */
+    /** Clear all quad views via black overlays so stale frames are erased before restart.
+     *  Uses View overlay instead of lockCanvas() which breaks the MediaCodec rendering pipeline. */
     private void clearQuadViews() {
         for (int i = 0; i < 4; i++) {
             TextureView t = quadViews[i];
-            if (t == null || !t.isAvailable()) continue;
-            Canvas c = t.lockCanvas();
-            if (c != null) {
-                c.drawColor(Color.BLACK);
-                t.unlockCanvasAndPost(c);
+            if (t == null) continue;
+            // Find or create a black overlay child
+            View overlay = t.findViewWithTag("quad_overlay_" + i);
+            if (overlay == null) {
+                overlay = new View(this);
+                overlay.setTag("quad_overlay_" + i);
+                overlay.setLayoutParams(new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT));
+                overlay.setBackgroundColor(Color.BLACK);
+                ((FrameLayout) t.getParent()).addView(overlay);
             }
+            overlay.setVisibility(View.VISIBLE);
+            overlay.bringToFront();
+        }
+    }
+
+    /** Remove quad overlays (called from QuadCell when a frame is decoded). */
+    private void removeQuadOverlay(int index) {
+        if (index < 0 || index >= quadViews.length || quadViews[index] == null) return;
+        TextureView t = quadViews[index];
+        View overlay = t.findViewWithTag("quad_overlay_" + index);
+        if (overlay != null) {
+            overlay.setVisibility(View.GONE);
         }
     }
 
@@ -2584,6 +2602,8 @@ public class Decoder extends Activity {
                 decoder = local;
             }
             lastFrame = SystemClock.elapsedRealtime();
+            // Remove the black overlay now that the decoder pipeline is active
+            runOnUiThread(() -> removeQuadOverlay(index));
         }
     }
 
