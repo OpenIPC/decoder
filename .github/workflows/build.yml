@@ -12,16 +12,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout branch (full history)
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref }}
-          fetch-depth: ${{ inputs.commit_hash && 0 || 1 }}
 
       - name: Switch to specified commit (keep latest workflow files)
         if: inputs.commit_hash != ''
         run: |
-          git fetch origin ${{ inputs.commit_hash }}
+          git fetch --unshallow
           git checkout ${{ inputs.commit_hash }}
           git checkout ${{ github.ref_name }} -- .github/
 
