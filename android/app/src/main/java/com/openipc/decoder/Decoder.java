@@ -624,11 +624,10 @@ public class Decoder extends Activity {
         nalQueue.clear();
         pcmQueue.clear();
 
-        // 5. Clear stale frame AFTER all old threads have been stopped.
-        clearVideo();
-
-        if (mHost == null || mHost.isEmpty() || mHost.equals(DEFAULT_URL)) {
-            // Don't start listener for unconfigured slot — just show the status
+        // 5. Detect unconfigured slot — clear stale frame but don't start listener
+        boolean configured = mHost != null && !mHost.isEmpty() && !mHost.equals(DEFAULT_URL);
+        if (!configured) {
+            clearVideo();
             return;
         }
 
