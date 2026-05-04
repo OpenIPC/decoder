@@ -145,7 +145,7 @@ public class Decoder extends Activity {
     private final String[] mHosts = new String[CAM_COUNT];
     private int mActive; // only accessed on the UI thread — no volatile needed
     private volatile String mHost;
-    private String mVersion = "1.23";
+    private String mVersion;
     private String mUserAgent = "User-Agent: OpenIPC-Decoder/1.0\r\n";
 
     // tracks last warned unknown RTP payload type to suppress log spam on the network thread
@@ -192,6 +192,12 @@ public class Decoder extends Activity {
     // reference kept so onKeyDown can dismiss the menu popup on Back key press
     private PopupWindow mMenuPopup; // only accessed on the UI thread — no volatile needed
 
+    // Cached menu views for reuse (avoid rebuilding on every tap)
+    private LinearLayout mMenuLayout;
+    private TextView[] mCachedCamButtons;
+    private TextView mCachedQuadBtn;
+    private boolean mMenuIsCached;
+
     private ExecutorService executor; // only accessed on the UI thread — no volatile needed
 
     // quad mode: 4 simultaneous video streams in a 2x2 grid — all UI thread only
@@ -208,6 +214,9 @@ public class Decoder extends Activity {
     private TextView[] camButtons;
     // Current quality color for active camera (green/yellow/red, or WHITE if unknown)
     private int mActiveQualityColor = Color.WHITE;
+
+    // Reusable black overlay for clearVideo() — created once, toggled via visibility
+    private View mClearOverlay;
 
     // Screenshot state
     private boolean isTakingScreenshot = false;
@@ -631,6 +640,19 @@ public class Decoder extends Activity {
     }
 
     private void createMenu(View menu) {
+        if (mMenuIsCached) {
+            // Update cached components and show
+            updateCachedMenu();
+            if (mMenuPopup != null) return;
+            mMenuPopup = new PopupWindow(mMenuLayout,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, true);
+            int margin = dp(12);
+            mMenuPopup.showAtLocation(menu, Gravity.TOP | Gravity.START, margin, margin);
+            mMenuPopup.setOnDismissListener(() -> mMenuPopup = null);
+            return;
+        }
+
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
 
@@ -653,7 +675,7 @@ public class Decoder extends Activity {
         layout.addView(mSettingsBtn);
         mSettingsBtn.setVisibility(quadEnabled ? View.GONE : View.VISIBLE);
 
-        // Quad toggle button "K" — declared first so camera-buttons handler can reference it
+        // Quad toggle button "K"
         final TextView quadBtn = createItem("K");
         quadBtn.setGravity(Gravity.CENTER);
         quadBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
@@ -663,13 +685,16 @@ public class Decoder extends Activity {
         mWebUiBtn.setVisibility(quadEnabled ? View.GONE : View.VISIBLE);
         mWebUiBtn.setOnClickListener(v -> {
             startBrowser();
-            popup.dismiss();
+            PopupWindow p = mMenuPopup;
+            if (p != null) p.dismiss();
         });
 
         camButtons = new TextView[CAM_COUNT];
+        mCachedCamButtons = new TextView[CAM_COUNT];
         for (int i = 0; i < CAM_COUNT; i++) {
             final int slot = i;
             camButtons[i] = createItem(String.valueOf(i + 1));
+            mCachedCamButtons[i] = camButtons[i];
             camButtons[i].setGravity(Gravity.CENTER);
             camButtons[i].setPadding(dp(12), dp(8), dp(12), dp(8));
             camRow.addView(camButtons[i], new LinearLayout.LayoutParams(
@@ -686,8 +711,8 @@ public class Decoder extends Activity {
             camButtons[i].setOnClickListener(v -> {
                 if (slot == mActive && !quadEnabled) return;
                 if (quadEnabled) {
-                    // exit quad mode, switch to selected camera
-                    popup.dismiss();
+                    PopupWindow p = mMenuPopup;
+                    if (p != null) p.dismiss();
                     stopQuad();
                     quadEnabled = false;
                     mSettingsBtn.setVisibility(View.VISIBLE);
@@ -708,24 +733,24 @@ public class Decoder extends Activity {
             });
         }
 
-        // Add K to the start of the camera row (already declared above; add now)
+        // Add K to the start of the camera row
         camRow.addView(quadBtn, 0, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
         if (quadEnabled) highlightItem(quadBtn);
+        mCachedQuadBtn = quadBtn;
         quadBtn.setOnClickListener(v -> {
-            popup.dismiss();
+            PopupWindow p = mMenuPopup;
+            if (p != null) p.dismiss();
             boolean newState = !quadEnabled;
             if (newState) {
                 highlightItem(quadBtn);
-                // de-highlight all cameras when quad is activated
                 for (int j = 0; j < CAM_COUNT; j++) {
                     resetItem(camButtons[j]);
                     applyQualityColor(camButtons[j], j);
                 }
             } else {
                 resetItem(quadBtn);
-                // re-highlight the active camera when leaving quad
                 highlightItem(camButtons[mActive]);
                 applyQualityColor(camButtons[mActive], mActive);
             }
@@ -751,9 +776,40 @@ public class Decoder extends Activity {
         exit.setOnClickListener(v -> finishAndRemoveTask());
 
         mSettingsBtn.setOnClickListener(v -> {
-            popup.dismiss();
+            PopupWindow p = mMenuPopup;
+            if (p != null) p.dismiss();
             showUrlEditor();
         });
+
+        // Cache the layout for reuse
+        mMenuLayout = layout;
+        mMenuIsCached = true;
+    }
+
+    /** Update visibility and highlights on a cached menu without rebuilding. */
+    private void updateCachedMenu() {
+        if (mSettingsBtn != null) {
+            mSettingsBtn.setVisibility(quadEnabled ? View.GONE : View.VISIBLE);
+        }
+        if (mWebUiBtn != null) {
+            mWebUiBtn.setVisibility(quadEnabled ? View.GONE : View.VISIBLE);
+        }
+        if (mCachedQuadBtn != null) {
+            if (quadEnabled) highlightItem(mCachedQuadBtn);
+            else resetItem(mCachedQuadBtn);
+        }
+        if (mCachedCamButtons != null && camButtons != null) {
+            for (int i = 0; i < CAM_COUNT; i++) {
+                if (mCachedCamButtons[i] == null || camButtons[i] == null) continue;
+                if (i == mActive && !quadEnabled) {
+                    highlightItem(camButtons[i]);
+                    applyQualityColor(camButtons[i], i);
+                } else {
+                    resetItem(camButtons[i]);
+                    applyQualityColor(camButtons[i], i);
+                }
+            }
+        }
     }
 
     private TextView createItem(String title) {
@@ -851,27 +907,26 @@ public class Decoder extends Activity {
 
     /** Clear the video view so no stale frame lingers. Adds a black overlay
      *  View instead of touching the TextureView (which would break the hardware
-     *  rendering pipeline). The overlay is removed when updateQuality() signals
-     *  an active stream. */
+     *  rendering pipeline). The overlay is removed when the decoder pipeline
+     *  is active. */
     private void clearVideo() {
         if (mSurface == null) return;
-        // Remove existing overlay if any
-        removeClearOverlay();
-        final View overlay = new View(this);
-        overlay.setLayoutParams(new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT));
-        overlay.setBackgroundColor(Color.BLACK);
-        overlay.setTag("clear_overlay");
-        ((FrameLayout) mSurface.getParent()).addView(overlay);
+        if (mClearOverlay == null) {
+            mClearOverlay = new View(this);
+            mClearOverlay.setLayoutParams(new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT));
+            mClearOverlay.setBackgroundColor(Color.BLACK);
+            mClearOverlay.setTag("clear_overlay");
+            ((FrameLayout) mSurface.getParent()).addView(mClearOverlay);
+        }
+        mClearOverlay.setVisibility(View.VISIBLE);
+        mClearOverlay.bringToFront();
     }
 
     private void removeClearOverlay() {
-        if (mSurface == null) return;
-        FrameLayout parent = (FrameLayout) mSurface.getParent();
-        View overlay = parent.findViewWithTag("clear_overlay");
-        if (overlay != null) {
-            parent.removeView(overlay);
+        if (mClearOverlay != null) {
+            mClearOverlay.setVisibility(View.GONE);
         }
     }
 
