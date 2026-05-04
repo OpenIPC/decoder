@@ -2119,17 +2119,13 @@ public class Decoder extends Activity {
                     }
                     startThreads();
                 }
+
                 @Override
                 public void onSurfaceTextureSizeChanged(android.graphics.SurfaceTexture st, int w, int h) {
-                    // Swap surface reference immediately so the decoder thread sees
-                    // the new Surface; release the old Surface synchronised via decoderLock
-                    // to avoid a use-after-free while the decoder is mid-render.
                     Surface old = surface;
                     surface = new Surface(st);
                     if (old != null) {
                         synchronized (decoderLock) {
-                            // decoderLock guarantees the decoder thread has finished
-                            // with any prior releaseOutputBuffer(..., true) call
                         }
                         try {
                             old.release();
@@ -2138,6 +2134,7 @@ public class Decoder extends Activity {
                         }
                     }
                 }
+
                 @Override
                 public boolean onSurfaceTextureDestroyed(android.graphics.SurfaceTexture st) {
                     Surface s = surface;
@@ -2151,19 +2148,12 @@ public class Decoder extends Activity {
                     }
                     return true;
                 }
+
                 @Override
                 public void onSurfaceTextureUpdated(android.graphics.SurfaceTexture st) {}
             });
             if (view.isAvailable()) {
-                Surface old = surface;
                 surface = new Surface(view.getSurfaceTexture());
-                if (old != null) {
-                    try {
-                        old.release();
-                    } catch (Exception e) {
-                        Log.e(TAG, tag + " Error releasing old surface in start()", e);
-                    }
-                }
                 startThreads();
             }
         }
