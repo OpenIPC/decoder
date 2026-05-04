@@ -739,7 +739,7 @@ public class Decoder extends Activity {
         });
 
         TextView webui = createItem("WebUI");
-        header.addView(webui);
+        layout.addView(webui);
         webui.setOnClickListener(v -> {
             startBrowser();
             popup.dismiss();
@@ -766,6 +766,7 @@ public class Decoder extends Activity {
             header.setVisibility(closing ? View.GONE : View.VISIBLE);
             settings.setVisibility(closing ? View.VISIBLE : View.GONE);
             camRow.setVisibility(closing ? View.VISIBLE : View.GONE);
+            webui.setVisibility(closing ? View.VISIBLE : View.GONE);
             divider.setVisibility(closing ? View.VISIBLE : View.GONE);
             exit.setVisibility(closing ? View.VISIBLE : View.GONE);
             // expand to full width for the URL field; shrink back for the main menu
