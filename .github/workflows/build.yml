@@ -21,6 +21,7 @@ jobs:
       - name: Switch to specified commit (keep latest workflow files)
         if: inputs.commit_hash != ''
         run: |
+          git fetch origin ${{ inputs.commit_hash }}
           git checkout ${{ inputs.commit_hash }}
           git checkout ${{ github.ref_name }} -- .github/
 
