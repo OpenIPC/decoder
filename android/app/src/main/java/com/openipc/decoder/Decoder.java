@@ -1607,71 +1607,66 @@ public class Decoder extends Activity {
             // single-pass SDP parse: audio rate, video codec, and per-track Control URLs
             String[] trackUrls = parseSdp(sdp.toString(), rtspUrl);
 
+            seq++;
+            String video = "SETUP " + trackUrls[0] + " RTSP/1.0\r\n" +
+                    "CSeq: " + seq + "\r\n" + auth + mUserAgent +
+                    "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n\r\n";
+            w.write(video.getBytes(StandardCharsets.UTF_8));
+            w.flush();
+
+            // read SETUP response; Session header is required to continue
+            String session = readRtspResponse(input, "Session:");
+            if (session == null) {
+                throw new IOException("RTSP server did not return a Session header");
+            }
+            // strip CR/LF to prevent the session token from injecting extra RTSP headers
+            session = session.replaceAll("[\r\n]", "");
+
+            seq++;
+            String audio = "SETUP " + trackUrls[1] + " RTSP/1.0\r\n" +
+                    "CSeq: " + seq + "\r\n" + auth + mUserAgent +
+                    "Transport: RTP/AVP/TCP;unicast;interleaved=2-3\r\n" +
+                    "Session: " + session + "\r\n\r\n";
+            w.write(audio.getBytes(StandardCharsets.UTF_8));
+            w.flush();
+
+            readRtspResponse(input, null);
+
+            seq++;
+            String play = "PLAY " + rtspUrl + " RTSP/1.0\r\n" +
+                    "CSeq: " + seq + "\r\n" + auth + mUserAgent + "Session: " + session + "\r\n\r\n";
+            w.write(play.getBytes(StandardCharsets.UTF_8));
+            w.flush();
+
+            readRtspResponse(input, null);
+            updateStatus("buffering");
+
+            // disable read timeout before streaming: keyframe intervals often exceed 1 second
+            s.setSoTimeout(0);
+            // reset watchdog baseline so the 3-second timeout counts from now,
+            // not from the epoch (lastFrame == 0 would trigger the watchdog immediately)
+            lastFrame = SystemClock.elapsedRealtime();
+            activeStream = true;
+            // Update status
+            updateStatus("connected");
+            // pre-warm the decoder now, while first packets are still in transit;
+            // without this, createDecoder() runs on the first decoded frame (~200–500 ms later)
+            createDecoder();
+            mTcpSocket = s;
             try {
-                seq++;
-                String video = "SETUP " + trackUrls[0] + " RTSP/1.0\r\n" +
-                        "CSeq: " + seq + "\r\n" + auth + mUserAgent +
-                        "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n\r\n";
-                w.write(video.getBytes(StandardCharsets.UTF_8));
-                w.flush();
-
-                // read SETUP response; Session header is required to continue
-                String session = readRtspResponse(input, "Session:");
-                if (session == null) {
-                    throw new IOException("RTSP server did not return a Session header");
-                }
-                // strip CR/LF to prevent the session token from injecting extra RTSP headers
-                session = session.replaceAll("[\r\n]", "");
-
-                seq++;
-                String audio = "SETUP " + trackUrls[1] + " RTSP/1.0\r\n" +
-                        "CSeq: " + seq + "\r\n" + auth + mUserAgent +
-                        "Transport: RTP/AVP/TCP;unicast;interleaved=2-3\r\n" +
+                tcpStream(input);
+            } finally {
+                mTcpSocket = null;
+            }
+            try {
+                String teardown = "TEARDOWN " + rtspUrl + " RTSP/1.0\r\n" +
+                        "CSeq: " + (seq + 1) + "\r\n" + auth + mUserAgent +
                         "Session: " + session + "\r\n\r\n";
-                w.write(audio.getBytes(StandardCharsets.UTF_8));
+                w.write(teardown.getBytes(StandardCharsets.UTF_8));
                 w.flush();
-
-                readRtspResponse(input, null);
-
-                seq++;
-                String play = "PLAY " + rtspUrl + " RTSP/1.0\r\n" +
-                        "CSeq: " + seq + "\r\n" + auth + mUserAgent + "Session: " + session + "\r\n\r\n";
-                w.write(play.getBytes(StandardCharsets.UTF_8));
-                w.flush();
-
-                readRtspResponse(input, null);
-                updateStatus("buffering");
-
-                // disable read timeout before streaming: keyframe intervals often exceed 1 second
-                s.setSoTimeout(0);
-                // reset watchdog baseline so the 3-second timeout counts from now,
-                // not from the epoch (lastFrame == 0 would trigger the watchdog immediately)
-                lastFrame = SystemClock.elapsedRealtime();
-                activeStream = true;
-                // Update status
-                updateStatus("connected");
-                // pre-warm the decoder now, while first packets are still in transit;
-                // without this, createDecoder() runs on the first decoded frame (~200–500 ms later)
-                createDecoder();
-                try {
-                    mTcpSocket = s;
-                    try {
-                        tcpStream(input);
-                    } finally {
-                        mTcpSocket = null;
-                    }
-                } finally {
-                    try {
-                        String teardown = "TEARDOWN " + rtspUrl + " RTSP/1.0\r\n" +
-                                "CSeq: " + (seq + 1) + "\r\n" + auth + mUserAgent +
-                                "Session: " + session + "\r\n\r\n";
-                        w.write(teardown.getBytes(StandardCharsets.UTF_8));
-                        w.flush();
-                        Log.d(TAG, "RTSP TEARDOWN sent");
-                    } catch (Exception e) {
-                        Log.e(TAG, "Error sending TEARDOWN", e);
-                    }
-                }
+                Log.d(TAG, "RTSP TEARDOWN sent");
+            } catch (Exception e) {
+                Log.e(TAG, "Error sending TEARDOWN", e);
             }
         } finally {
             if (s != null) {
