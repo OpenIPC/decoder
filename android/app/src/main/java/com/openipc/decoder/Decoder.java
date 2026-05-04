@@ -60,6 +60,7 @@ import android.widget.PopupWindow;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.provider.MediaStore;
 
 import java.io.BufferedInputStream;
@@ -144,10 +145,11 @@ public class Decoder extends Activity {
     private final MediaCodec.BufferInfo mBufferInfo = new MediaCodec.BufferInfo();
 
     // read from the network thread, written from the UI thread
-    private static final int CAM_COUNT = 4;
+    private static final int CAM_COUNT = 8;
     private static final String DEFAULT_URL = "rtsp://root:12345@192.168.1.10:554/stream=0";
     private final String[] mHosts = new String[CAM_COUNT];
     private final boolean[] mTypes = new boolean[CAM_COUNT]; // false = TCP, true = UDP
+    private final boolean[] mQuad = new boolean[CAM_COUNT]; // per-camera quad participation
     private int mActive; // only accessed on the UI thread — no volatile needed
     private volatile String mHost;
     private volatile boolean mType;
@@ -356,12 +358,11 @@ public class Decoder extends Activity {
         }
 
         mActive = pref.getInt("active", 0);
-        // clamp to valid range in case prefs were saved with a different CAM_COUNT
-        if (mActive < 0 || mActive >= CAM_COUNT) mActive = 0;
         quadEnabled = pref.getBoolean("quad_enabled", false);
         for (int i = 0; i < CAM_COUNT; i++) {
             mHosts[i] = pref.getString("host_" + i, DEFAULT_URL);
             mTypes[i] = pref.getBoolean("type_" + i, false);
+            mQuad[i] = pref.getBoolean("quad_" + i, false);
         }
         applyActiveCamera();
 
@@ -551,13 +552,16 @@ public class Decoder extends Activity {
         // clear stale quad frames
         clearQuadViews();
 
-        // use all 4 cameras for quad mode
+        // collect first 4 cameras with quad enabled
         quadCells = new QuadCell[4];
-        for (int i = 0; i < 4; i++) {
+        int count = 0;
+        for (int i = 0; i < CAM_COUNT && count < 4; i++) {
+            if (!mQuad[i]) continue;
             String url = mHosts[i];
             if (url == null || url.isEmpty() || url.equals(DEFAULT_URL)) continue;
-            quadCells[i] = new QuadCell(i, url, quadViews[i]);
-            quadCells[i].start();
+            quadCells[count] = new QuadCell(count, url, quadViews[count]);
+            quadCells[count].start();
+            count++;
         }
 
         quadEnabled = true;
@@ -598,6 +602,7 @@ public class Decoder extends Activity {
         for (int i = 0; i < CAM_COUNT; i++) {
             edit.putString("host_" + i, mHosts[i]);
             edit.putBoolean("type_" + i, mTypes[i]);
+            edit.putBoolean("quad_" + i, mQuad[i]);
         }
         edit.apply();
 
@@ -685,6 +690,15 @@ public class Decoder extends Activity {
             saveSettings();
         });
 
+        TextView quadCamToggle = createItem(mQuad[mActive] ? "Quad: YES" : "Quad: NO");
+        header.addView(quadCamToggle);
+        quadCamToggle.setOnClickListener(v -> {
+            mQuad[mActive] = !mQuad[mActive];
+            quadCamToggle.setText(mQuad[mActive] ? "Quad: YES" : "Quad: NO");
+            getSharedPreferences("settings", MODE_PRIVATE).edit()
+                    .putBoolean("quad_" + mActive, mQuad[mActive]).apply();
+        });
+
         final TextView[] camButtons = new TextView[CAM_COUNT];
         for (int i = 0; i < CAM_COUNT; i++) {
             final int slot = i;
@@ -707,22 +721,10 @@ public class Decoder extends Activity {
                 host.setText(mHosts[mActive]);
                 host.setSelection(host.getText().length());
                 typeToggle.setText(mTypes[mActive] ? "Transport: UDP" : "Transport: TCP");
+                quadCamToggle.setText(mQuad[mActive] ? "Quad: YES" : "Quad: NO");
                 saveSettings();
             });
         }
-
-        // Quad toggle button "K" at the start of the camera row
-        TextView quadBtn = createItem("K");
-        quadBtn.setGravity(Gravity.CENTER);
-        quadBtn.setPadding(dp(4), dp(4), dp(4), dp(4));
-        camRow.addView(quadBtn, 0, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-        if (quadEnabled) highlightItem(quadBtn);
-        quadBtn.setOnClickListener(v -> {
-            popup.dismiss();
-            if (quadEnabled) stopQuad(); else startQuad();
-        });
 
         TextView webui = createItem("WebUI");
         layout.addView(webui);
@@ -737,6 +739,13 @@ public class Decoder extends Activity {
         screenshotBtn.setOnClickListener(v -> {
             popup.dismiss();
             takeScreenshot();
+        });
+
+        TextView quadToggle = createItem(quadEnabled ? "Quadrator: ON" : "Quadrator: OFF");
+        layout.addView(quadToggle);
+        quadToggle.setOnClickListener(v -> {
+            popup.dismiss();
+            if (quadEnabled) stopQuad(); else startQuad();
         });
 
         String code = "Exit [V" + mVersion + "]";
@@ -761,7 +770,7 @@ public class Decoder extends Activity {
             settings.setVisibility(closing ? View.VISIBLE : View.GONE);
             camRow.setVisibility(closing ? View.VISIBLE : View.GONE);
             webui.setVisibility(closing ? View.VISIBLE : View.GONE);
-            screenshotBtn.setVisibility(closing ? View.VISIBLE : View.GONE);
+            quadToggle.setVisibility(closing ? View.VISIBLE : View.GONE);
             divider.setVisibility(closing ? View.VISIBLE : View.GONE);
             exit.setVisibility(closing ? View.VISIBLE : View.GONE);
             // expand to full width for the URL field; shrink back for the main menu
@@ -829,24 +838,26 @@ public class Decoder extends Activity {
         });
     }
 
-    /** Clear the video view by drawing black so no stale frame lingers.
-     *  Uses setBackgroundColor only — lockCanvas() is intentionally avoided
-     *  because it can block the UI thread indefinitely when the SurfaceTexture
-     *  was just created (SurfaceFlinger transaction pending). The first decoded
-     *  frame from the MediaCodec will overwrite the background. */
+    /** Clear the video view by drawing black so no stale frame lingers. */
     private void clearVideo() {
-        if (mSurface == null) return;
-        mSurface.setBackgroundColor(Color.BLACK);
+        if (mSurface == null || !mSurface.isAvailable()) return;
+        Canvas canvas = mSurface.lockCanvas();
+        if (canvas != null) {
+            canvas.drawColor(Color.BLACK);
+            mSurface.unlockCanvasAndPost(canvas);
+        }
     }
 
-    /** Clear all quad views so stale frames are erased before restart.
-     *  Uses setBackgroundColor only — lockCanvas() can block the UI thread
-     *  when the TextureView surface was just created. */
+    /** Clear all quad views so stale frames are erased before restart. */
     private void clearQuadViews() {
         for (int i = 0; i < 4; i++) {
             TextureView t = quadViews[i];
-            if (t == null) continue;
-            t.setBackgroundColor(Color.BLACK);
+            if (t == null || !t.isAvailable()) continue;
+            Canvas c = t.lockCanvas();
+            if (c != null) {
+                c.drawColor(Color.BLACK);
+                t.unlockCanvasAndPost(c);
+            }
         }
     }
 
@@ -2042,11 +2053,14 @@ public class Decoder extends Activity {
             // clear stale quad frames
             clearQuadViews();
             quadCells = new QuadCell[4];
-            for (int i = 0; i < 4; i++) {
+            int count = 0;
+            for (int i = 0; i < CAM_COUNT && count < 4; i++) {
+                if (!mQuad[i]) continue;
                 String url = mHosts[i];
                 if (url == null || url.isEmpty() || url.equals(DEFAULT_URL)) continue;
-                quadCells[i] = new QuadCell(i, url, quadViews[i]);
-                quadCells[i].start();
+                quadCells[count] = new QuadCell(count, url, quadViews[count]);
+                quadCells[count].start();
+                count++;
             }
         } else {
             mSurface.setVisibility(View.VISIBLE);
