@@ -18,6 +18,12 @@ jobs:
           ref: ${{ inputs.commit_hash || github.ref }}
           fetch-depth: ${{ inputs.commit_hash && 0 || 1 }}
 
+      - name: Restore latest workflow files (when building from specific commit)
+        if: inputs.commit_hash != ''
+        run: |
+          git fetch origin ${{ github.ref }} --depth=1
+          git checkout FETCH_HEAD -- .github/
+
       - name: Set artifact name
         id: vars
         run: |
