@@ -23,7 +23,7 @@ Android application for viewing RTSP streams from IP cameras with hardware-accel
 - **Audio**: PCM, AAC (ADTS), G.711
 - **Display modes**: Single camera, Quad (4 cameras simultaneously)
 - **Controls**: Pinch-to-zoom, pan, double-tap reset, Android TV remote (Leanback)
-- **Network**: TCP/UDP, automatic reconnection with exponential backoff, Basic auth
+- **Network**: TCP, automatic reconnection with exponential backoff, Basic auth
 - **WebUI**: Built-in browser for camera web interface access
 - **Additional**: Long-press screenshot, status indicators, object pooling, 4 camera slots
 
@@ -41,7 +41,7 @@ Android application for viewing RTSP streams from IP cameras with hardware-accel
    ```
    rtsp://username:password@ip_address:port/stream
    ```
-5. Select transport (TCP/UDP)
+5. Select transport (TCP only)
 6. Tap camera number to activate
 
 ## Building
@@ -66,7 +66,7 @@ export KEY_PASS=your_key_password
 
 - **1-8** — camera slot selection
 - **Settings** — advanced settings
-- **Transport** — toggle between TCP/UDP
+- **Transport** — set RTSP URL
 - **Quad** — enable/disable quad mode
 - **WebUI** — open camera web interface
 - **Long-press** — take screenshot
@@ -74,7 +74,7 @@ export KEY_PASS=your_key_password
 
 ### Quad Mode
 
-Simultaneous viewing of up to 4 cameras with individual settings per cell. TCP-only (UDP ports cannot be shared). Audio is disabled to reduce resource usage.
+Simultaneous viewing of up to 4 cameras with individual settings per cell. TCP transport only. Audio is disabled to reduce resource usage.
 
 ## Architecture
 

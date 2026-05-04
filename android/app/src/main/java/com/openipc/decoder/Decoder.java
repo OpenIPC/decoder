@@ -67,11 +67,8 @@ import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
@@ -138,8 +135,6 @@ public class Decoder extends Activity {
 
     // held so onPause() can close them to unblock blocking read()/receive() on the network thread
     private volatile Socket mTcpSocket;
-    private volatile DatagramSocket mUdpSocket;
-    private volatile DatagramSocket mUdpAudioSocket;
 
     // pre-allocated to avoid per-frame GC pressure in the video decode loop
     private final MediaCodec.BufferInfo mBufferInfo = new MediaCodec.BufferInfo();
@@ -148,10 +143,8 @@ public class Decoder extends Activity {
     private static final int CAM_COUNT = 4;
     private static final String DEFAULT_URL = "rtsp://root:12345@192.168.1.10:554/stream=0";
     private final String[] mHosts = new String[CAM_COUNT];
-    private final boolean[] mTypes = new boolean[CAM_COUNT]; // false = TCP, true = UDP
     private int mActive; // only accessed on the UI thread — no volatile needed
     private volatile String mHost;
-    private volatile boolean mType;
     private String mVersion = "1.22";
     private String mUserAgent = "User-Agent: OpenIPC-Decoder/1.0\r\n";
 
@@ -366,7 +359,6 @@ public class Decoder extends Activity {
         quadEnabled = false;
         for (int i = 0; i < CAM_COUNT; i++) {
             mHosts[i] = pref.getString("host_" + i, DEFAULT_URL);
-            mTypes[i] = pref.getBoolean("type_" + i, false);
         }
         applyActiveCamera();
 
@@ -388,7 +380,6 @@ public class Decoder extends Activity {
     /** Copy the active slot values into the volatile fields read by the network thread. */
     private void applyActiveCamera() {
         mHost = mHosts[mActive];
-        mType = mTypes[mActive];
         resetZoom();
         // detect unconfigured slot (default URL)
         if (mHost == null || mHost.isEmpty() || mHost.equals(DEFAULT_URL)) {
@@ -587,7 +578,6 @@ public class Decoder extends Activity {
         edit.putInt("active", mActive);
         for (int i = 0; i < CAM_COUNT; i++) {
             edit.putString("host_" + i, mHosts[i]);
-            edit.putBoolean("type_" + i, mTypes[i]);
         }
         edit.apply();
 
@@ -637,22 +627,6 @@ public class Decoder extends Activity {
                 Log.e(TAG, "Error closing TCP socket", e);
             }
         }
-        DatagramSocket udp = mUdpSocket;
-        if (udp != null) {
-            try {
-                udp.close();
-            } catch (Exception e) {
-                Log.e(TAG, "Error closing UDP socket", e);
-            }
-        }
-        DatagramSocket udpAudio = mUdpAudioSocket;
-        if (udpAudio != null) {
-            try {
-                udpAudio.close();
-            } catch (Exception e) {
-                Log.e(TAG, "Error closing UDP audio socket", e);
-            }
-        }
     }
 
     private void createMenu(View menu) {
@@ -698,14 +672,6 @@ public class Decoder extends Activity {
             return false;
         });
 
-        TextView typeToggle = createItem(mTypes[mActive] ? "Transport: UDP" : "Transport: TCP");
-        header.addView(typeToggle);
-        typeToggle.setOnClickListener(v -> {
-            mTypes[mActive] = !mTypes[mActive];
-            typeToggle.setText(mTypes[mActive] ? "Transport: UDP" : "Transport: TCP");
-            saveSettings();
-        });
-
         // Quad toggle button "K" — declared first so camera-buttons handler can reference it
         final TextView quadBtn = createItem("K");
         quadBtn.setGravity(Gravity.CENTER);
@@ -744,7 +710,6 @@ public class Decoder extends Activity {
                 }
                 host.setText(mHosts[mActive]);
                 host.setSelection(host.getText().length());
-                typeToggle.setText(mTypes[mActive] ? "Transport: UDP" : "Transport: TCP");
                 saveSettings();
             });
         }
@@ -1586,8 +1551,6 @@ public class Decoder extends Activity {
             throw new IOException("Invalid RTSP URL: host is missing or empty");
         }
         Socket s = null;
-        DatagramSocket udpVideo = null;
-        DatagramSocket udpAudio = null;
         try {
             s = new Socket();
             int port = uri.getPort();
@@ -1643,27 +1606,11 @@ public class Decoder extends Activity {
             // single-pass SDP parse: audio rate, video codec, and per-track Control URLs
             String[] trackUrls = parseSdp(sdp.toString(), rtspUrl);
 
-            // bind to fixed ports matching the OpenIPC camera convention;
-            // SO_REUSEADDR prevents BindException on quick restart after crash
-            if (mType) {
-                udpVideo = new DatagramSocket(null);
-                udpVideo.setReuseAddress(true);
-                mUdpSocket = udpVideo;  // assign immediately to close race
-                try { udpVideo.setReceiveBufferSize(512 * 1024); } catch (Exception ignored) {}
-                udpVideo.bind(new InetSocketAddress(5000));
-                udpAudio = new DatagramSocket(null);
-                udpAudio.setReuseAddress(true);
-                mUdpAudioSocket = udpAudio;  // assign immediately to close race
-                try { udpAudio.setReceiveBufferSize(512 * 1024); } catch (Exception ignored) {}
-                udpAudio.bind(new InetSocketAddress(5002));
-            }
             try {
                 seq++;
-                String type = mType
-                        ? "RTP/AVP/UDP;unicast;client_port=5000-5001"
-                        : "RTP/AVP/TCP;unicast;interleaved=0-1";
                 String video = "SETUP " + trackUrls[0] + " RTSP/1.0\r\n" +
-                        "CSeq: " + seq + "\r\n" + auth + mUserAgent + "Transport: " + type + "\r\n\r\n";
+                        "CSeq: " + seq + "\r\n" + auth + mUserAgent +
+                        "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n\r\n";
                 w.write(video.getBytes(StandardCharsets.UTF_8));
                 w.flush();
 
@@ -1676,11 +1623,9 @@ public class Decoder extends Activity {
                 session = session.replaceAll("[\r\n]", "");
 
                 seq++;
-                type = mType
-                        ? "RTP/AVP/UDP;unicast;client_port=5002-5003"
-                        : "RTP/AVP/TCP;unicast;interleaved=2-3";
                 String audio = "SETUP " + trackUrls[1] + " RTSP/1.0\r\n" +
-                        "CSeq: " + seq + "\r\n" + auth + mUserAgent + "Transport: " + type + "\r\n" +
+                        "CSeq: " + seq + "\r\n" + auth + mUserAgent +
+                        "Transport: RTP/AVP/TCP;unicast;interleaved=2-3\r\n" +
                         "Session: " + session + "\r\n\r\n";
                 w.write(audio.getBytes(StandardCharsets.UTF_8));
                 w.flush();
@@ -1708,34 +1653,11 @@ public class Decoder extends Activity {
                 // without this, createDecoder() runs on the first decoded frame (~200–500 ms later)
                 createDecoder();
                 try {
-                    if (mType) {
-                        mUdpSocket = udpVideo;
-                        mUdpAudioSocket = udpAudio;
-                        final DatagramSocket audioSock = udpAudio;
-                        try {
-                            // daemon thread: socket close in onPause/closeSockets unblocks receive()
-                            Thread audioRx = new Thread(() -> {
-                                try { udpStream(audioSock); } catch (IOException ignored) {}
-                            }, "rtsp-udp-audio");
-                            audioRx.setDaemon(true);
-                            audioRx.start();
-                            udpStream(udpVideo);
-                            // ensure audio thread exits after video stream ends
-                            audioSock.close();
-                            try { audioRx.join(2000); } catch (InterruptedException ignored) {
-                                Thread.currentThread().interrupt();
-                            }
-                        } finally {
-                            mUdpSocket = null;
-                            mUdpAudioSocket = null;
-                        }
-                    } else {
-                        mTcpSocket = s;
-                        try {
-                            tcpStream(input);
-                        } finally {
-                            mTcpSocket = null;
-                        }
+                    mTcpSocket = s;
+                    try {
+                        tcpStream(input);
+                    } finally {
+                        mTcpSocket = null;
                     }
                 } finally {
                     try {
@@ -1749,17 +1671,6 @@ public class Decoder extends Activity {
                         Log.e(TAG, "Error sending TEARDOWN", e);
                     }
                 }
-            } finally {
-                if (udpVideo != null) {
-                    try { udpVideo.close(); } catch (Exception e) {
-                        Log.e(TAG, "Error closing UDP video socket", e);
-                    }
-                }
-                if (udpAudio != null) {
-                    try { udpAudio.close(); } catch (Exception e) {
-                        Log.e(TAG, "Error closing UDP audio socket", e);
-                    }
-                }
             }
         } finally {
             if (s != null) {
@@ -1767,27 +1678,6 @@ public class Decoder extends Activity {
                     Log.e(TAG, "Error closing TCP socket", e);
                 }
             }
-        }
-    }
-
-    private void udpStream(DatagramSocket d) throws IOException {
-        // wake up every second so the activeStream flag is checked even when the camera
-        // goes silent (power cycle, network loss); prevents permanent thread leak
-        d.setSoTimeout(1000);
-        // single buffer reused every packet — avoids per-frame allocation at 25-30 fps
-        byte[] buf = new byte[65535];
-        DatagramPacket packet = new DatagramPacket(buf, buf.length);
-        while (activeStream) {
-            try {
-                d.receive(packet);
-            } catch (SocketTimeoutException ignored) {
-                continue; // re-check activeStream
-            }
-            int length = packet.getLength();
-            Frame frame = obtainFrame(length);
-            System.arraycopy(packet.getData(), 0, frame.data(), 0, length);
-            frame.setLength(length);
-            processPacket(frame);
         }
     }
 
