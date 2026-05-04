@@ -2098,6 +2098,7 @@ public class Decoder extends Activity {
      * to reduce resource usage.
      */
     private class QuadCell {
+        final int index;
         final String host;
         final TextureView view;
         final String tag;
@@ -2134,6 +2135,7 @@ public class Decoder extends Activity {
         private final MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
 
         QuadCell(int index, String host, TextureView view) {
+            this.index = index;
             this.host = host;
             this.view = view;
             this.tag = "Quad-" + index;
