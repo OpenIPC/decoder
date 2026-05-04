@@ -9,6 +9,8 @@ package com.openipc.decoder;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.media.MediaCodec;
+import android.media.MediaFormat;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -41,6 +43,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.nio.ByteBuffer;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;

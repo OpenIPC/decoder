@@ -335,8 +335,7 @@ class MenuManager {
         view.setWebViewClient(new WebViewClient() {
             @Override
             public void onReceivedHttpAuthRequest(
-                    WebView v, HttpAuthHandler handler, String h, String realm,
-                    String scheme) {
+                    WebView v, HttpAuthHandler handler, String h, String realm) {
                 String userInfo = finalUri.getUserInfo();
                 if (userInfo != null) {
                     String[] parts = userInfo.split(":", 2);
