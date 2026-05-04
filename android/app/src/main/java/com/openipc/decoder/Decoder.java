@@ -684,6 +684,11 @@ public class Decoder extends Activity {
             saveSettings();
         });
 
+        // Quad toggle button "K" — declared first so camera-buttons handler can reference it
+        final TextView quadBtn = createItem("K");
+        quadBtn.setGravity(Gravity.CENTER);
+        quadBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
+
         final TextView[] camButtons = new TextView[CAM_COUNT];
         for (int i = 0; i < CAM_COUNT; i++) {
             final int slot = i;
@@ -694,10 +699,12 @@ public class Decoder extends Activity {
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT));
 
-            if (i == mActive) highlightItem(camButtons[i]);
+            if (i == mActive && !quadEnabled) highlightItem(camButtons[i]);
 
             camButtons[i].setOnClickListener(v -> {
                 if (slot == mActive) return;
+                // de-highlight K when switching to a camera
+                resetItem(quadBtn);
                 mActive = slot;
                 for (int j = 0; j < CAM_COUNT; j++) {
                     if (j == mActive) highlightItem(camButtons[j]);
@@ -710,17 +717,24 @@ public class Decoder extends Activity {
             });
         }
 
-        // Quad toggle button "K" at the start of the camera row
-        TextView quadBtn = createItem("K");
-        quadBtn.setGravity(Gravity.CENTER);
-        quadBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
+        // Add K to the start of the camera row (already declared above; add now)
         camRow.addView(quadBtn, 0, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
         if (quadEnabled) highlightItem(quadBtn);
         quadBtn.setOnClickListener(v -> {
             popup.dismiss();
-            if (quadEnabled) stopQuad(); else startQuad();
+            boolean newState = !quadEnabled;
+            if (newState) {
+                highlightItem(quadBtn);
+                // de-highlight all cameras when quad is activated
+                for (int j = 0; j < CAM_COUNT; j++) resetItem(camButtons[j]);
+            } else {
+                resetItem(quadBtn);
+                // re-highlight the active camera when leaving quad
+                highlightItem(camButtons[mActive]);
+            }
+            if (newState) startQuad(); else stopQuad();
         });
 
         TextView webui = createItem("WebUI");
