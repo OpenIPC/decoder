@@ -356,6 +356,8 @@ public class Decoder extends Activity {
         }
 
         mActive = pref.getInt("active", 0);
+        // clamp to valid range in case prefs were saved with a different CAM_COUNT
+        if (mActive < 0 || mActive >= CAM_COUNT) mActive = 0;
         quadEnabled = pref.getBoolean("quad_enabled", false);
         for (int i = 0; i < CAM_COUNT; i++) {
             mHosts[i] = pref.getString("host_" + i, DEFAULT_URL);
