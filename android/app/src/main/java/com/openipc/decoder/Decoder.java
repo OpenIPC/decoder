@@ -269,7 +269,13 @@ public class Decoder extends Activity
     @Override
     public void onSwitchCamera(int slot) {
         if (slot == mActive && !quadEnabled) return;
-        if (quadEnabled) return;
+        if (quadEnabled) {
+            // Exit quad mode and switch to selected camera
+            stopQuad();
+            mActive = slot;
+            saveSettings();
+            return;
+        }
         mActive = slot;
         saveSettings();
     }
@@ -936,7 +942,7 @@ public class Decoder extends Activity
 
             executor.execute(() -> {
                 Thread.currentThread().setName(tag + "-wd");
-                final long WATCHDOG_MS = 3000;
+                final long WATCHDOG_MS = 8000;
                 while (running) {
                     if (activeStream && lastFrame > 0
                             && SystemClock.elapsedRealtime() - lastFrame > WATCHDOG_MS) {
@@ -1169,6 +1175,7 @@ public class Decoder extends Activity
 
             int pt = data[1] & 0x7F;
             if (pt == 97 || pt == 96) {
+                lastFrame = SystemClock.elapsedRealtime();
                 codecH265 = (pt == 97);
                 Frame output = nalAssembler.assemble(frame, codecH265);
                 cellFramePool.recycle(frame);

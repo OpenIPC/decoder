@@ -33,7 +33,7 @@ class RtspClient {
     static final int RTP_PT_H264 = 96;
     static final int RTP_PT_PCMU_DEFAULT = 100;
 
-    private static final long WATCHDOG_MS = 3000;
+    private static final long WATCHDOG_MS = 8000;
 
     private volatile String host;
     private volatile String userAgent;
@@ -394,6 +394,7 @@ class RtspClient {
             framePool.recycle(frame);
             return;
         } else if (payload == RTP_PT_H265 || payload == RTP_PT_H264) {
+            lastFrame = SystemClock.elapsedRealtime();
             long now = SystemClock.elapsedRealtime();
             if (now - lastQualityUpdateTime > 1000) {
                 lastQualityUpdateTime = now;

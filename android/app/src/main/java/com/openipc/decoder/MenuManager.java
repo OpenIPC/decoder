@@ -132,7 +132,7 @@ class MenuManager {
         layout.addView(mSettingsBtn);
         mSettingsBtn.setVisibility(quadEnabled ? View.GONE : View.VISIBLE);
 
-        final TextView quadBtn = createItem("K");
+        final TextView quadBtn = createItem("Q");
         quadBtn.setGravity(Gravity.CENTER);
         quadBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
 
