@@ -427,7 +427,7 @@ class RtspClient {
                           | ((data[5] & 0xFF) << 16)
                           | ((data[6] & 0xFF) << 8)
                           | (data[7] & 0xFF);
-                long rtpDeltaMs = (Integer.toUnsignedLong(rtpTs) - Integer.toUnsignedLong(lastRtpTimestamp)) / 90L;
+                long rtpDeltaMs = ((rtpTs & 0xFFFFFFFFL) - (lastRtpTimestamp & 0xFFFFFFFFL)) / 90L;
                 long arrivalDeltaMs = (System.nanoTime() - lastRtpArrivalNs) / 1000000;
                 long jitter = Math.abs(arrivalDeltaMs - rtpDeltaMs);
                 if (jitter < 5000) {
@@ -435,10 +435,11 @@ class RtspClient {
                     jitterSampleCount++;
                 }
             }
-            lastRtpTimestamp = ((data[4] & 0xFF) << 24)
-                             | ((data[5] & 0xFF) << 16)
-                             | ((data[6] & 0xFF) << 8)
-                             | (data[7] & 0xFF);
+            lastRtpTimestamp = Integer.toUnsignedLong(
+                    ((data[4] & 0xFF) << 24) |
+                    ((data[5] & 0xFF) << 16) |
+                    ((data[6] & 0xFF) << 8) |
+                    (data[7] & 0xFF));
             lastRtpArrivalNs = System.nanoTime();
 
             codecH265 = payload == RTP_PT_H265;
