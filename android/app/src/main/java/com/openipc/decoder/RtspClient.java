@@ -54,6 +54,8 @@ class RtspClient {
     private volatile int audioSampleRate = 8000;
     private volatile boolean audioBigEndian = true;
     private volatile int audioPt = RTP_PT_PCMU_DEFAULT;
+    private volatile String videoTrackUrl;
+    private volatile String audioTrackUrl;
 
     // Quality tracking
     private long lastQualityUpdateTime;
@@ -260,10 +262,10 @@ class RtspClient {
                     sdp.append(new String(skipBuf, 0, n, StandardCharsets.UTF_8));
                 sdpBodyLen -= n;
             }
-            String[] trackUrls = parseSdp(sdp.toString(), rtspUrl);
+            parseSdpAndNotify(sdp.toString(), rtspUrl);
 
             seq++;
-            String video = "SETUP " + trackUrls[0] + " RTSP/1.0\r\n" +
+            String video = "SETUP " + videoTrackUrl + " RTSP/1.0\r\n" +
                     "CSeq: " + seq + "\r\n" + auth + userAgent +
                     "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n\r\n";
             w.write(video.getBytes(StandardCharsets.UTF_8));
@@ -276,7 +278,7 @@ class RtspClient {
             session = session.replaceAll("[\r\n]", "");
 
             seq++;
-            String audio = "SETUP " + trackUrls[1] + " RTSP/1.0\r\n" +
+            String audio = "SETUP " + audioTrackUrl + " RTSP/1.0\r\n" +
                     "CSeq: " + seq + "\r\n" + auth + userAgent +
                     "Transport: RTP/AVP/TCP;unicast;interleaved=2-3\r\n" +
                     "Session: " + session + "\r\n\r\n";
@@ -450,10 +452,39 @@ class RtspClient {
         framePool.recycle(frame);
     }
 
-    private String[] parseSdp(String sdp, String baseUrl) {
+    private void parseSdpAndNotify(String sdp, String baseUrl) {
+        boolean[] h265Out = new boolean[1];
+        int[] audioPtOut = new int[1];
+        audioPtOut[0] = -1;
+        String[] audioInfo = new String[3]; // codec, bigEndianStr, rateStr
+        String[] controls = parseSdp(sdp, baseUrl, h265Out, audioPtOut, audioInfo);
+        codecH265 = h265Out[0];
+        audioPt = audioPtOut[0];
+        videoTrackUrl = controls[0];
+        audioTrackUrl = controls[1];
+        audioCodec = audioInfo[0];
+        audioBigEndian = "true".equals(audioInfo[1]);
+        if (audioInfo[2] != null) {
+            try { audioSampleRate = Integer.parseInt(audioInfo[2]); }
+            catch (NumberFormatException ignored) {}
+        }
+        if (listenerCb != null) {
+            listenerCb.onCodecChanged(codecH265, audioCodec, audioSampleRate,
+                    audioBigEndian, audioPt);
+        }
+    }
+
+    static String[] parseSdp(String sdp, String baseUrl,
+                             boolean[] codecH265Out, int[] audioPtOut,
+                             String[] audioInfoOut) {
         String base = baseUrl;
         String[] controls = { null, null };
         int track = -1;
+        boolean codecH265 = false;
+        int audioPt = -1;
+        String audioCodec = "PCM";
+        boolean audioBigEndian = false;
+        int audioSampleRate = 0;
 
         for (String line : sdp.split("[\r\n]+")) {
             if (line.startsWith("m=video")) {
@@ -462,7 +493,7 @@ class RtspClient {
                 if (parts.length >= 4) {
                     try {
                         int pt = Integer.parseInt(parts[3]);
-                        codecH265 = (pt == RTP_PT_H265);
+                        codecH265 = (pt == 97);
                     } catch (NumberFormatException ignored) {}
                 }
             } else if (line.startsWith("m=audio")) {
@@ -487,11 +518,9 @@ class RtspClient {
                 if (codecName.contains("MP4A") || codecName.contains("AAC")) {
                     audioCodec = "AAC";
                     audioBigEndian = false;
-                    Log.d(TAG, "Audio codec: AAC detected");
                 } else if (codecName.contains("PCMA") || codecName.contains("PCMU")) {
                     audioCodec = "G711";
                     audioBigEndian = false;
-                    Log.d(TAG, "Audio codec: G.711 detected");
                 } else if (codecName.startsWith("L16")) {
                     audioCodec = "PCM";
                     audioBigEndian = true;
@@ -518,10 +547,12 @@ class RtspClient {
         if (controls[0] == null) controls[0] = base + "/trackID=0";
         if (controls[1] == null) controls[1] = base + "/trackID=1";
 
-        // Notify the listener about codec info
-        if (listenerCb != null) {
-            listenerCb.onCodecChanged(codecH265, audioCodec, audioSampleRate,
-                    audioBigEndian, audioPt);
+        if (codecH265Out != null && codecH265Out.length > 0) codecH265Out[0] = codecH265;
+        if (audioPtOut != null && audioPtOut.length > 0) audioPtOut[0] = audioPt;
+        if (audioInfoOut != null && audioInfoOut.length >= 3) {
+            audioInfoOut[0] = audioCodec;
+            audioInfoOut[1] = String.valueOf(audioBigEndian);
+            audioInfoOut[2] = audioSampleRate > 0 ? String.valueOf(audioSampleRate) : null;
         }
         return controls;
     }
