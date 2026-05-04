@@ -60,7 +60,6 @@ import android.widget.PopupWindow;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.graphics.Bitmap;
-import android.graphics.Canvas;
 import android.provider.MediaStore;
 
 import java.io.BufferedInputStream;
@@ -838,26 +837,20 @@ public class Decoder extends Activity {
         });
     }
 
-    /** Clear the video view by drawing black so no stale frame lingers. */
+    /** Clear the video view by drawing black so no stale frame lingers.
+     *  Uses setBackgroundColor only — avoids lockCanvas() that can block
+     *  the UI thread when the SurfaceTexture was just created. */
     private void clearVideo() {
-        if (mSurface == null || !mSurface.isAvailable()) return;
-        Canvas canvas = mSurface.lockCanvas();
-        if (canvas != null) {
-            canvas.drawColor(Color.BLACK);
-            mSurface.unlockCanvasAndPost(canvas);
-        }
+        if (mSurface == null) return;
+        mSurface.setBackgroundColor(Color.BLACK);
     }
 
     /** Clear all quad views so stale frames are erased before restart. */
     private void clearQuadViews() {
         for (int i = 0; i < 4; i++) {
             TextureView t = quadViews[i];
-            if (t == null || !t.isAvailable()) continue;
-            Canvas c = t.lockCanvas();
-            if (c != null) {
-                c.drawColor(Color.BLACK);
-                t.unlockCanvasAndPost(c);
-            }
+            if (t == null) continue;
+            t.setBackgroundColor(Color.BLACK);
         }
     }
 
