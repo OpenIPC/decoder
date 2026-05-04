@@ -357,7 +357,7 @@ public class Decoder extends Activity {
         }
 
         mActive = pref.getInt("active", 0);
-        quadEnabled = pref.getBoolean("quad_enabled", false);
+        quadEnabled = pref.getBoolean("quad_enabled", true);
         for (int i = 0; i < CAM_COUNT; i++) {
             mHosts[i] = pref.getString("host_" + i, DEFAULT_URL);
             mTypes[i] = pref.getBoolean("type_" + i, false);
