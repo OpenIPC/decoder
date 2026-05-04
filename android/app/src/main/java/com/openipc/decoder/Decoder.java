@@ -436,12 +436,12 @@ public class Decoder extends Activity {
                         }
                         statusText.setText("Connected • " + videoCodec + " • " + aCodec + bps);
                     }, 1000);
-                    // Hide after 3 seconds
+                    // Hide after 5 seconds
                     statusText.postDelayed(() -> {
                         if (statusText != null) {
                             statusText.setVisibility(View.GONE);
                         }
-                    }, 3000);
+                    }, 5000);
                     break;
                 case "disconnected":
                     statusText.setText(getString(R.string.status_disconnected));
