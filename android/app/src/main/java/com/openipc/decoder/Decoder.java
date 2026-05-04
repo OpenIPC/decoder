@@ -10,6 +10,7 @@ package com.openipc.decoder;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.ContentValues;
 import android.content.Intent;
@@ -652,25 +653,8 @@ public class Decoder extends Activity {
         layout.addView(camRow, wrapParams);
         layout.setMinimumWidth(dp(280));
 
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.VERTICAL);
-        header.setVisibility(View.GONE);
-        layout.addView(header);
-
         TextView settings = createItem("Settings");
         layout.addView(settings);
-
-        EditText host = createEdit(mHosts[mActive]);
-        header.addView(host);
-        host.setOnEditorActionListener((v, actionId, event) -> {
-            if (actionId == EditorInfo.IME_ACTION_DONE) {
-                mHosts[mActive] = sanitizeUrl(host.getText().toString().trim());
-                saveSettings();
-                popup.dismiss();
-                return true;
-            }
-            return false;
-        });
 
         // Quad toggle button "K" — declared first so camera-buttons handler can reference it
         final TextView quadBtn = createItem("K");
@@ -708,8 +692,6 @@ public class Decoder extends Activity {
                         applyQualityColor(camButtons[j], j);
                     }
                 }
-                host.setText(mHosts[mActive]);
-                host.setSelection(host.getText().length());
                 saveSettings();
             });
         }
@@ -762,17 +744,8 @@ public class Decoder extends Activity {
         exit.setOnClickListener(v -> finishAndRemoveTask());
 
         settings.setOnClickListener(v -> {
-            boolean closing = header.getVisibility() == View.VISIBLE;
-            header.setVisibility(closing ? View.GONE : View.VISIBLE);
-            settings.setVisibility(closing ? View.VISIBLE : View.GONE);
-            camRow.setVisibility(closing ? View.VISIBLE : View.GONE);
-            webui.setVisibility(closing ? View.VISIBLE : View.GONE);
-            divider.setVisibility(closing ? View.VISIBLE : View.GONE);
-            exit.setVisibility(closing ? View.VISIBLE : View.GONE);
-            // expand to full width for the URL field; shrink back for the main menu
-            popup.update(closing ? LinearLayout.LayoutParams.WRAP_CONTENT
-                    : LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            popup.dismiss();
+            showUrlEditor();
         });
     }
 
@@ -826,6 +799,31 @@ public class Decoder extends Activity {
         focusChange(text);
 
         return text;
+    }
+
+    /** Show a full-screen dialog to edit the camera URL for the active slot. */
+    private void showUrlEditor() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Camera " + (mActive + 1) + " URL");
+
+        final EditText input = new EditText(this);
+        input.setText(mHosts[mActive]);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        input.setSelectAllOnFocus(true);
+        input.setSelection(input.getText().length());
+        builder.setView(input);
+
+        builder.setPositiveButton("Save", (dialog, which) -> {
+            String url = input.getText().toString().trim();
+            mHosts[mActive] = sanitizeUrl(url);
+            saveSettings();
+        });
+        builder.setNegativeButton("Cancel", (dialog, which) -> dialog.cancel());
+
+        AlertDialog dialog = builder.create();
+        dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+        dialog.show();
+        input.requestFocus();
     }
 
     private void focusChange(View item) {
