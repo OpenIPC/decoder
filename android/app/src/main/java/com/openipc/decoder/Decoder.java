@@ -130,6 +130,9 @@ public class Decoder extends Activity {
     // set on audio init failure; cleared on session close to allow next retry
     private volatile boolean audioFailed;
 
+    // guard for AAC decode thread — set false in closeAudio to signal clean exit
+    private volatile boolean aacRunning;
+
     // set on codec init failure; prevents per-frame retry when codec is unsupported
     private volatile boolean decoderFailed;
 
@@ -1246,11 +1249,12 @@ public class Decoder extends Activity {
         }
 
         // Start AAC decode loop on the executor
+        aacRunning = true;
         executor.execute(() -> {
             Thread.currentThread().setName("rtsp-aac-decode");
             MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
 
-            while (listener && !Thread.currentThread().isInterrupted()) {
+            while (aacRunning && !Thread.currentThread().isInterrupted()) {
                 try {
                     byte[] aacData = aacQueue.poll(100, TimeUnit.MILLISECONDS);
                     if (aacData == null) continue;
@@ -1320,6 +1324,7 @@ public class Decoder extends Activity {
     }
 
     private void closeAudio() {
+        aacRunning = false;
         AudioTrack track = audioTrack;
         if (track != null) {
             // null the field BEFORE stop/release: any concurrent playAudio() snapshot
@@ -1773,32 +1778,26 @@ public class Decoder extends Activity {
         }
     }
 
-    private void tcpStream(InputStream rawInput) throws IOException {
-        // wrap in BufferedInputStream to batch OS-level reads
-        BufferedInputStream input = new BufferedInputStream(rawInput, 65536);
-        byte[] pktBuf = new byte[65535];
-        while (activeStream) {
+    /**
+     * Read one RTP-over-TCP interleaved packet from the stream.
+     * Returns the raw packet bytes (including the 4-byte $ marker header),
+     * or null if the stream ended cleanly.
+     * @throws IOException on truncated data
+     */
+    private byte[] readInterleavedPacket(BufferedInputStream input, byte[] pktBuf, boolean active)
+            throws IOException {
+        while (active) {
             int b = input.read();
-            if (b == -1) {
-                activeStream = false; // server closed connection cleanly — signal reconnect
-                break;
-            }
-            if (b != 0x24) continue; // not an RTSP interleaved marker — skip
+            if (b == -1) return null;
+            if (b != 0x24) continue;
 
             int channel = input.read();
             int hi = input.read();
             int lo = input.read();
-            if (channel == -1 || hi == -1 || lo == -1) {
-                activeStream = false; // unexpected EOF inside interleaved header
-                break;
-            }
+            if (channel == -1 || hi == -1 || lo == -1) return null;
+
             int len = (hi << 8) | lo;
-            // A zero-length or oversized packet is malformed; skip it to avoid
-            // an empty read loop or an out-of-bounds access into pktBuf.
-            if (len <= 0 || len > pktBuf.length) {
-                Log.w(TAG, "Invalid RTSP interleaved packet length: " + len);
-                continue;
-            }
+            if (len <= 0 || len > pktBuf.length) continue;
 
             int read = 0;
             while (read < len) {
@@ -1807,11 +1806,38 @@ public class Decoder extends Activity {
                 read += n;
             }
 
-            if (channel == 0 || channel == 2) {
-                Frame frame = obtainFrame(len);
-                System.arraycopy(pktBuf, 0, frame.data(), 0, len);
-                frame.setLength(len);
+            // Return a copy with channel + header
+            byte[] pkt = new byte[len + 4];
+            pkt[0] = 0x24;
+            pkt[1] = (byte) channel;
+            pkt[2] = (byte) hi;
+            pkt[3] = (byte) lo;
+            System.arraycopy(pktBuf, 0, pkt, 4, len);
+            return pkt;
+        }
+        return null;
+    }
+
+    private void tcpStream(InputStream rawInput) throws IOException {
+        // wrap in BufferedInputStream to batch OS-level reads
+        BufferedInputStream input = new BufferedInputStream(rawInput, 65536);
+        byte[] pktBuf = new byte[65535];
+        while (activeStream) {
+            byte[] pkt = readInterleavedPacket(input, pktBuf, activeStream);
+            if (pkt == null) { activeStream = false; break; }
+
+            int channel = pkt[1];
+            int len = pkt.length - 4;
+            Frame frame = obtainFrame(len);
+            System.arraycopy(pkt, 4, frame.data(), 0, len);
+            frame.setLength(len);
+
+            if (channel == 0) {
                 processPacket(frame);
+            } else if (channel == 2) {
+                processAudio(frame);
+            } else {
+                recycleFrame(frame);
             }
         }
     }
@@ -2532,29 +2558,15 @@ public class Decoder extends Activity {
             BufferedInputStream input = new BufferedInputStream(rawInput, 65536);
             byte[] pktBuf = new byte[65535];
             while (activeStream && running) {
-                int b = input.read();
-                if (b == -1) { activeStream = false; break; }
-                if (b != 0x24) continue;
+                byte[] pkt = readInterleavedPacket(input, pktBuf, activeStream && running);
+                if (pkt == null) { activeStream = false; break; }
 
-                int channel = input.read();
-                int hi = input.read();
-                int lo = input.read();
-                if (channel == -1 || hi == -1 || lo == -1) { activeStream = false; break; }
-
-                int len = (hi << 8) | lo;
-                if (len <= 0 || len > pktBuf.length) continue;
-
-                int read = 0;
-                while (read < len) {
-                    int n = input.read(pktBuf, read, len - read);
-                    if (n == -1) throw new IOException("Truncated");
-                    read += n;
-                }
-
+                int channel = pkt[1];
+                int len = pkt.length - 4;
                 // channel 0 = video RTP; skip audio (channel 2)
                 if (channel == 0) {
                     Frame f = obtainFrame(len);
-                    System.arraycopy(pktBuf, 0, f.data(), 0, len);
+                    System.arraycopy(pkt, 4, f.data(), 0, len);
                     f.setLength(len);
                     handlePacket(f);
                 }
