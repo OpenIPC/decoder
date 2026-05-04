@@ -199,6 +199,7 @@ public class Decoder extends Activity {
     private boolean quadEnabled;
     private QuadCell[] quadCells;
     private TextView mSettingsBtn;
+    private TextView mWebUiBtn;
     private LinearLayout quadContainer;
     private final TextureView[] quadViews = new TextureView[4];
 
@@ -663,6 +664,14 @@ public class Decoder extends Activity {
         quadBtn.setGravity(Gravity.CENTER);
         quadBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
 
+        mWebUiBtn = createItem("WebUI");
+        layout.addView(mWebUiBtn);
+        mWebUiBtn.setVisibility(quadEnabled ? View.GONE : View.VISIBLE);
+        mWebUiBtn.setOnClickListener(v -> {
+            startBrowser();
+            popup.dismiss();
+        });
+
         camButtons = new TextView[CAM_COUNT];
         for (int i = 0; i < CAM_COUNT; i++) {
             final int slot = i;
@@ -720,14 +729,8 @@ public class Decoder extends Activity {
                 applyQualityColor(camButtons[mActive], mActive);
             }
             mSettingsBtn.setVisibility(newState ? View.GONE : View.VISIBLE);
+            mWebUiBtn.setVisibility(newState ? View.GONE : View.VISIBLE);
             if (newState) startQuad(); else stopQuad();
-        });
-
-        TextView webui = createItem("WebUI");
-        layout.addView(webui);
-        webui.setOnClickListener(v -> {
-            startBrowser();
-            popup.dismiss();
         });
 
         String code = "Exit [V" + mVersion + ", " + BuildConfig.GIT_HASH + "]";
