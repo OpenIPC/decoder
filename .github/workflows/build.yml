@@ -16,6 +16,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.commit_hash || github.ref }}
+          fetch-depth: ${{ inputs.commit_hash && 0 || 1 }}
 
       - name: Set artifact name
         id: vars
