@@ -535,9 +535,6 @@ public class Decoder extends Activity {
         mSurface.setVisibility(View.GONE);
         quadContainer.setVisibility(View.VISIBLE);
 
-        // clear stale quad frames
-        clearQuadViews();
-
         quadCells = new QuadCell[4];
         for (int i = 0; i < 4; i++) {
             String url = mHosts[i];
@@ -613,6 +610,7 @@ public class Decoder extends Activity {
         // 5. Detect unconfigured slot — don't start listener
         boolean configured = mHost != null && !mHost.isEmpty() && !mHost.equals(DEFAULT_URL);
         if (!configured) {
+            clearVideo();
             return;
         }
 
@@ -2157,11 +2155,11 @@ public class Decoder extends Activity {
                 @Override
                 public void onSurfaceTextureUpdated(android.graphics.SurfaceTexture st) {}
             });
-            // SurfaceTexture persists across visibility toggles, so onSurfaceTextureAvailable
-            // may NOT fire again. Start threads immediately if the texture is ready.
             if (view.isAvailable()) {
-                surface = new Surface(view.getSurfaceTexture());
-                startThreads();
+                if (surface == null) {
+                    surface = new Surface(view.getSurfaceTexture());
+                }
+                if (!threadsStarted) startThreads();
             }
         }
 
@@ -2291,11 +2289,9 @@ public class Decoder extends Activity {
             Surface s = surface;
             if (s != null) {
                 surface = null;
-                try {
-                    s.release();
-                } catch (Exception e) {
-                    Log.e(TAG, tag + " Error releasing surface", e);
-                }
+                // don't release s here — it wraps the TextureView's internal
+                // SurfaceTexture; releasing it would invalidate the texture.
+                // GC will clean up when the QuadCell is discarded.
             }
         }
 
