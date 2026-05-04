@@ -209,7 +209,10 @@ public class Decoder extends Activity {
 
     // UI status indicators
     private TextView statusText;
-    private TextView qualityText;
+    // Camera number buttons in popup menu (needed by updateQuality)
+    private TextView[] camButtons;
+    // Current quality color for active camera (green/yellow/red, or WHITE if unknown)
+    private int mActiveQualityColor = Color.WHITE;
 
     // Screenshot state
     private boolean isTakingScreenshot = false;
@@ -245,9 +248,8 @@ public class Decoder extends Activity {
         mSurface = findViewById(R.id.video_surface);
         mSurface.setKeepScreenOn(true);
 
-        // Initialize status indicators
+        // Initialize status indicator
         statusText = findViewById(R.id.status_text);
-        qualityText = findViewById(R.id.quality_text);
         // capture the rendering Surface on the UI thread via TextureView listener
         mSurface.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
             @Override public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture st, int w, int h) {
@@ -357,7 +359,7 @@ public class Decoder extends Activity {
         }
 
         mActive = pref.getInt("active", 0);
-        quadEnabled = pref.getBoolean("quad_enabled", true);
+        quadEnabled = pref.getBoolean("quad_enabled", false);
         for (int i = 0; i < CAM_COUNT; i++) {
             mHosts[i] = pref.getString("host_" + i, DEFAULT_URL);
             mTypes[i] = pref.getBoolean("type_" + i, false);
@@ -434,26 +436,21 @@ public class Decoder extends Activity {
         });
     }
     
-    /** Update quality indicator */
+    /** Update quality indicator — colors the active camera button text. */
     private void updateQuality(int latency) {
         runOnUiThread(() -> {
-            if (qualityText == null) return;
-            
             if (latency < 0) {
-                qualityText.setVisibility(View.GONE);
-                return;
-            }
-            
-            qualityText.setVisibility(View.VISIBLE);
-            if (latency < 100) {
-                qualityText.setText(getString(R.string.quality_good));
-                qualityText.setTextColor(0xFF00FF00); // Green
+                mActiveQualityColor = Color.WHITE;
+            } else if (latency < 100) {
+                mActiveQualityColor = 0xFF00FF00; // Green
             } else if (latency < 300) {
-                qualityText.setText(getString(R.string.quality_fair));
-                qualityText.setTextColor(0xFFFFFF00); // Yellow
+                mActiveQualityColor = 0xFFFFFF00; // Yellow
             } else {
-                qualityText.setText(getString(R.string.quality_poor));
-                qualityText.setTextColor(0xFFFF0000); // Red
+                mActiveQualityColor = 0xFFFF0000; // Red
+            }
+            // Apply to the active camera button if the menu is open
+            if (camButtons != null && !quadEnabled) {
+                camButtons[mActive].setTextColor(mActiveQualityColor);
             }
         });
     }
@@ -713,7 +710,7 @@ public class Decoder extends Activity {
         quadBtn.setGravity(Gravity.CENTER);
         quadBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
 
-        final TextView[] camButtons = new TextView[CAM_COUNT];
+        camButtons = new TextView[CAM_COUNT];
         for (int i = 0; i < CAM_COUNT; i++) {
             final int slot = i;
             camButtons[i] = createItem(String.valueOf(i + 1));
@@ -723,7 +720,12 @@ public class Decoder extends Activity {
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT));
 
-            if (i == mActive && !quadEnabled) highlightItem(camButtons[i]);
+            if (i == mActive && !quadEnabled) {
+                highlightItem(camButtons[i]);
+                applyQualityColor(camButtons[i], i);
+            } else {
+                applyQualityColor(camButtons[i], i);
+            }
 
             camButtons[i].setOnClickListener(v -> {
                 if (slot == mActive) return;
@@ -731,8 +733,13 @@ public class Decoder extends Activity {
                 resetItem(quadBtn);
                 mActive = slot;
                 for (int j = 0; j < CAM_COUNT; j++) {
-                    if (j == mActive) highlightItem(camButtons[j]);
-                    else resetItem(camButtons[j]);
+                    if (j == mActive) {
+                        highlightItem(camButtons[j]);
+                        applyQualityColor(camButtons[j], j);
+                    } else {
+                        resetItem(camButtons[j]);
+                        applyQualityColor(camButtons[j], j);
+                    }
                 }
                 host.setText(mHosts[mActive]);
                 host.setSelection(host.getText().length());
@@ -752,11 +759,15 @@ public class Decoder extends Activity {
             if (newState) {
                 highlightItem(quadBtn);
                 // de-highlight all cameras when quad is activated
-                for (int j = 0; j < CAM_COUNT; j++) resetItem(camButtons[j]);
+                for (int j = 0; j < CAM_COUNT; j++) {
+                    resetItem(camButtons[j]);
+                    applyQualityColor(camButtons[j], j);
+                }
             } else {
                 resetItem(quadBtn);
                 // re-highlight the active camera when leaving quad
                 highlightItem(camButtons[mActive]);
+                applyQualityColor(camButtons[mActive], mActive);
             }
             if (newState) startQuad(); else stopQuad();
         });
@@ -825,13 +836,23 @@ public class Decoder extends Activity {
         bg.setColor(Color.BLACK);
         bg.setStroke(2, Color.BLUE);
         item.setBackground(bg);
-        item.setTextColor(Color.CYAN);
     }
 
     /** Reset camera button to default style. */
     private void resetItem(TextView item) {
         item.setTextColor(Color.WHITE);
         focusChange(item);
+    }
+
+    /** Set text color of camera button based on configuration and quality. */
+    private void applyQualityColor(TextView btn, int slot) {
+        if (mHosts[slot] == null || mHosts[slot].isEmpty() || mHosts[slot].equals(DEFAULT_URL)) {
+            btn.setTextColor(0xFF666666); // Gray = unconfigured
+        } else if (slot == mActive && !quadEnabled) {
+            btn.setTextColor(mActiveQualityColor); // Active cam's quality color
+        } else {
+            btn.setTextColor(Color.WHITE); // Default white
+        }
     }
 
     private EditText createEdit(String title) {

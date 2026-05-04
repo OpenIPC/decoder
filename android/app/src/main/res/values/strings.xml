@@ -4,9 +4,6 @@
     <string name="status_connected">Connected</string>
     <string name="status_disconnected">Disconnected</string>
     <string name="status_buffering">Buffering…</string>
-    <string name="quality_good">Good</string>
-    <string name="quality_fair">Fair</string>
-    <string name="quality_poor">Poor</string>
     <string name="menu_screenshot">Screenshot</string>
     <string name="status_unconfigured">No camera configured</string>
 </resources>
