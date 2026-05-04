@@ -12,17 +12,17 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout branch (full history)
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.commit_hash || github.ref }}
+          ref: ${{ github.ref }}
           fetch-depth: ${{ inputs.commit_hash && 0 || 1 }}
 
-      - name: Restore latest workflow files (when building from specific commit)
+      - name: Switch to specified commit (keep latest workflow files)
         if: inputs.commit_hash != ''
         run: |
-          git fetch origin ${{ github.ref }} --depth=1
-          git checkout FETCH_HEAD -- .github/
+          git checkout ${{ inputs.commit_hash }}
+          git checkout ${{ github.ref_name }} -- .github/
 
       - name: Set artifact name
         id: vars
