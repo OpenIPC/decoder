@@ -69,7 +69,7 @@ public class Decoder extends Activity
     final NalAssembler nalAssembler = new NalAssembler(1024 * 1024, () -> {
         closeDecoder();
         nalQueue.clear();
-    });
+    }, framePool);
 
     // --- UI components ---
     private TextureView mSurface;

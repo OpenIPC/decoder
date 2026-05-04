@@ -23,10 +23,12 @@ class NalAssembler {
     private int nalSize;
     private boolean lastCodec;
     private final Runnable onCodecSwitch;
+    private final FramePool framePool;
 
-    NalAssembler(int bufferSize, Runnable onCodecSwitch) {
+    NalAssembler(int bufferSize, Runnable onCodecSwitch, FramePool framePool) {
         this.nalBuffer = new byte[bufferSize];
         this.onCodecSwitch = onCodecSwitch;
+        this.framePool = framePool;
     }
 
     void reset() { nalSize = 0; }
@@ -90,24 +92,26 @@ class NalAssembler {
             }
 
             if (endBit != 0) {
-                byte[] outBuf = new byte[nalSize];
-                System.arraycopy(nalBuffer, 0, outBuf, 0, nalSize);
+                Frame out = framePool.obtain(nalSize);
+                System.arraycopy(nalBuffer, 0, out.data(), 0, nalSize);
+                out.setLength(nalSize);
                 nalSize = 0;
-                return new Frame(outBuf, outBuf.length);
+                return out;
             }
             return null;
         } else {
             nalSize = 0;
-            int copyLen = Math.min(rxSize + 4, nalBuffer.length);
-            if (copyLen < 5) return null;
+            int copyLen = rxSize + 4;
+            if (copyLen > nalBuffer.length || copyLen < 5) return null;
             nalBuffer[0] = 0;
             nalBuffer[1] = 0;
             nalBuffer[2] = 0;
             nalBuffer[3] = 1;
-            System.arraycopy(rx, cp, nalBuffer, 4, copyLen - 4);
-            byte[] outBuf = new byte[copyLen];
-            System.arraycopy(nalBuffer, 0, outBuf, 0, copyLen);
-            return new Frame(outBuf, outBuf.length);
+            System.arraycopy(rx, cp, nalBuffer, 4, rxSize);
+            Frame out = framePool.obtain(copyLen);
+            System.arraycopy(nalBuffer, 0, out.data(), 0, copyLen);
+            out.setLength(copyLen);
+            return out;
         }
     }
 

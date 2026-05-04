@@ -51,15 +51,7 @@ class QuadCell {
     private volatile boolean decoderFailed;
 
     private final BlockingQueue<Frame> nalQueue = new ArrayBlockingQueue<>(30);
-    private final NalAssembler nalAssembler = new NalAssembler(512 * 1024, () -> {
-        nalQueue.clear();
-        synchronized (decoderLock) {
-            if (mediaCodecManager != null) {
-                mediaCodecManager.closeDecoder();
-                decoderFailed = false;
-            }
-        }
-    });
+    private NalAssembler nalAssembler;
     private int lastUnknownPayload = -1;
 
     private volatile Socket tcpSocket;
@@ -78,6 +70,15 @@ class QuadCell {
         this.cellFramePool = pool;
         this.userAgent = userAgent;
         this.listener = listener;
+        this.nalAssembler = new NalAssembler(512 * 1024, () -> {
+            nalQueue.clear();
+            synchronized (decoderLock) {
+                if (mediaCodecManager != null) {
+                    mediaCodecManager.closeDecoder();
+                    decoderFailed = false;
+                }
+            }
+        }, pool);
     }
 
     void start() {
@@ -408,8 +409,8 @@ class QuadCell {
         int flag = 0;
         int frag = NalAssembler.fragment(buffer.data()[4], codecH265);
         boolean config = codecH265
-                ? (frag == 32 || frag == 33 || frag == 34)
-                : (frag == 7 || frag == 8);
+                ? (frag == MediaCodecManager.H265_NAL_VPS || frag == MediaCodecManager.H265_NAL_SPS || frag == MediaCodecManager.H265_NAL_PPS)
+                : (frag == MediaCodecManager.H264_NAL_SPS || frag == MediaCodecManager.H264_NAL_PPS);
         if (config) flag = MediaCodec.BUFFER_FLAG_CODEC_CONFIG;
 
         boolean needCreate = false;

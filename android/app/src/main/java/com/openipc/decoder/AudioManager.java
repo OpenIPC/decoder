@@ -21,11 +21,12 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 class AudioManager {
     private static final String TAG = "OpenIPCDecoder";
 
-    private volatile AudioTrack audioTrack;
+    private final AtomicReference<AudioTrack> audioTrackRef = new AtomicReference<>();
     private volatile MediaCodec aacDecoder;
     private final Object aacDecoderLock = new Object();
     private volatile boolean aacRunning;
@@ -68,9 +69,8 @@ class AudioManager {
     void closeAudio() {
         aacRunning = false;
         aacQueue.clear();
-        AudioTrack track = audioTrack;
+        AudioTrack track = audioTrackRef.getAndSet(null);
         if (track != null) {
-            audioTrack = null;
             Log.i(TAG, "Close audio decoder");
             try {
                 track.stop();
@@ -89,6 +89,9 @@ class AudioManager {
         }
         aacQueue.clear();
         audioFailed = false;
+        if (executor != null) {
+            executor.shutdownNow();
+        }
     }
 
     private void processAudio(Frame frame) {
@@ -125,17 +128,21 @@ class AudioManager {
     }
 
     private void playAudio(Frame data) {
-        AudioTrack track = audioTrack;
+        AudioTrack track = audioTrackRef.get();
         if (track == null) {
             if (!audioFailed) {
-                createAudio();
+                synchronized (audioTrackRef) {
+                    if (audioTrackRef.get() == null && !audioFailed) {
+                        createAudio();
+                    }
+                }
             }
         } else {
             byte[] buf = data.data();
             int offset = 0;
             int remaining = data.length();
             while (remaining > 0) {
-                AudioTrack t = audioTrack;
+                AudioTrack t = audioTrackRef.get();
                 if (t == null) break;
                 int written = t.write(buf, offset, remaining);
                 if (written < 0) {
@@ -188,11 +195,11 @@ class AudioManager {
             return;
         }
 
-        audioTrack = track;
+        audioTrackRef.set(track);
         try {
             track.play();
         } catch (Exception e) {
-            audioTrack = null;
+            audioTrackRef.compareAndSet(track, null);
             track.release();
             Log.e(TAG, "AudioTrack.play() failed", e);
             audioFailed = true;

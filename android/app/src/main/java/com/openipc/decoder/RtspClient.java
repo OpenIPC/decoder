@@ -82,7 +82,7 @@ class RtspClient {
         void onJitterSample(int avgJitter);
     }
 
-    private Listener listenerCb;
+    private volatile Listener listenerCb;
 
     RtspClient(FramePool framePool, NalAssembler nalAssembler,
                BlockingQueue<Frame> nalQueue) {
@@ -176,6 +176,7 @@ class RtspClient {
 
     void stop() {
         listener = false;
+        listenerGen++;
         activeStream = false;
         closeSockets();
         if (executor != null) {
@@ -247,20 +248,27 @@ class RtspClient {
             w.write(desc.getBytes(StandardCharsets.UTF_8));
             w.flush();
 
-            String contentLenStr = readRtspResponse(input, "Content-Length:");
-            int sdpBodyLen = 0;
-            if (contentLenStr != null) {
-                try { sdpBodyLen = Integer.parseInt(contentLenStr); }
-                catch (NumberFormatException ignored) {}
-            }
             StringBuilder sdp = new StringBuilder();
-            byte[] skipBuf = new byte[512];
-            while (sdpBodyLen > 0) {
-                int n = input.read(skipBuf, 0, Math.min(sdpBodyLen, skipBuf.length));
-                if (n <= 0) break;
-                if (sdp.length() < 4096)
-                    sdp.append(new String(skipBuf, 0, n, StandardCharsets.UTF_8));
-                sdpBodyLen -= n;
+            String contentLen = readRtspResponse(input, "Content-Length:", sdp);
+            if (contentLen != null) {
+                try {
+                    int len = Integer.parseInt(contentLen);
+                    byte[] body = new byte[len];
+                    int off = 0;
+                    while (off < len) {
+                        int n = input.read(body, off, len - off);
+                        if (n <= 0) break;
+                        off += n;
+                    }
+                    sdp.append(new String(body, 0, off, StandardCharsets.UTF_8));
+                } catch (NumberFormatException ignored) {}
+            } else if (sdp.length() == 0) {
+                int saved = input.available();
+                if (saved > 0) {
+                    byte[] body = new byte[Math.min(saved, 4096)];
+                    int n = input.read(body);
+                    if (n > 0) sdp.append(new String(body, 0, n, StandardCharsets.UTF_8));
+                }
             }
             parseSdpAndNotify(sdp.toString(), rtspUrl);
 
@@ -419,7 +427,7 @@ class RtspClient {
                           | ((data[5] & 0xFF) << 16)
                           | ((data[6] & 0xFF) << 8)
                           | (data[7] & 0xFF);
-                int rtpDeltaMs = (int)((rtpTs - lastRtpTimestamp) / 90L);
+                long rtpDeltaMs = (Integer.toUnsignedLong(rtpTs) - Integer.toUnsignedLong(lastRtpTimestamp)) / 90L;
                 long arrivalDeltaMs = (System.nanoTime() - lastRtpArrivalNs) / 1000000;
                 long jitter = Math.abs(arrivalDeltaMs - rtpDeltaMs);
                 if (jitter < 5000) {
@@ -570,7 +578,13 @@ class RtspClient {
         return sb.length() > 0 ? sb.toString() : null;
     }
 
+    /** Read RTSP response headers. Returns the value of {@code targetHeader} if found, or null. */
     static String readRtspResponse(InputStream in, String targetHeader) throws IOException {
+        return readRtspResponse(in, targetHeader, null);
+    }
+
+    /** Read RTSP response headers and optionally accumulate body into {@code bodyOut}. */
+    static String readRtspResponse(InputStream in, String targetHeader, StringBuilder bodyOut) throws IOException {
         String status = readLine(in);
         if (status == null) throw new IOException("Server closed connection during handshake");
         Log.i(TAG, status);
@@ -587,7 +601,7 @@ class RtspClient {
         String found = null;
         String line;
         while ((line = readLine(in)) != null && !line.isEmpty()) {
-            Log.i(TAG, line);
+            Log.d(TAG, line);
             if (targetHeader != null && line.toLowerCase(Locale.ROOT)
                     .startsWith(targetHeader.toLowerCase(Locale.ROOT))) {
                 found = line.substring(targetHeader.length()).split(";")[0].trim();

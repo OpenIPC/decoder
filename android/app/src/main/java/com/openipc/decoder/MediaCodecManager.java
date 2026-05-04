@@ -17,12 +17,12 @@ import java.nio.ByteBuffer;
 class MediaCodecManager {
     private static final String TAG = "OpenIPCDecoder";
 
-    // NAL type constants
-    private static final int H265_NAL_VPS = 32;
-    private static final int H265_NAL_SPS = 33;
-    private static final int H265_NAL_PPS = 34;
-    private static final int H264_NAL_SPS = 7;
-    private static final int H264_NAL_PPS = 8;
+    // NAL type constants — package-private for sharing with QuadCell
+    static final int H265_NAL_VPS = 32;
+    static final int H265_NAL_SPS = 33;
+    static final int H265_NAL_PPS = 34;
+    static final int H264_NAL_SPS = 7;
+    static final int H264_NAL_PPS = 8;
 
     private volatile MediaCodec decoder;
     private final Object decoderLock = new Object();
