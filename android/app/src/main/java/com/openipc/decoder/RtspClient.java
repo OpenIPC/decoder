@@ -556,6 +556,4 @@ class RtspClient {
         }
         return found;
     }
-
-    }
 }
