@@ -395,18 +395,15 @@ public class Decoder extends Activity {
         }
     }
 
-    /** Update connection status indicator and root background color. */
+    /** Update connection status indicator. */
     private void updateStatus(String status) {
         runOnUiThread(() -> {
             if (statusText == null) return;
-            View root = findViewById(R.id.decoder);
-            if (root == null) return;
 
             switch (status) {
                 case "connecting":
                     statusText.setText(getString(R.string.status_connecting));
                     statusText.setVisibility(View.VISIBLE);
-                    root.setBackgroundColor(0xFF332200); // dark amber
                     break;
                 case "connected":
                     statusText.setText(getString(R.string.status_connected));
@@ -416,22 +413,18 @@ public class Decoder extends Activity {
                             statusText.setVisibility(View.GONE);
                         }
                     }, 2000);
-                    root.setBackgroundColor(0xFF000000); // black — video is playing
                     break;
                 case "disconnected":
                     statusText.setText(getString(R.string.status_disconnected));
                     statusText.setVisibility(View.VISIBLE);
-                    root.setBackgroundColor(0xFF333333); // dark gray — not black like off-screen
                     break;
                 case "buffering":
                     statusText.setText(getString(R.string.status_buffering));
                     statusText.setVisibility(View.VISIBLE);
-                    root.setBackgroundColor(0xFF002233); // dark blue
                     break;
                 case "unconfigured":
                     statusText.setText(getString(R.string.status_unconfigured));
                     statusText.setVisibility(View.VISIBLE);
-                    root.setBackgroundColor(0xFF221100); // dark brown — fully empty
                     break;
             }
         });
