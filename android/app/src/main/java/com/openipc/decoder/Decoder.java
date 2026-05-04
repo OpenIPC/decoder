@@ -646,14 +646,15 @@ public class Decoder extends Activity {
         mMenuPopup = popup;
         popup.setOnDismissListener(() -> mMenuPopup = null);
 
-        // camRow must be WRAP_CONTENT to anchor the popup width to all 8 buttons;
-        // other menu items use default MATCH_PARENT to stretch and align uniformly
+        // camRow sets the natural width; layout has a minimum width so that
+        // version string and transport label fit without clipping
         LinearLayout camRow = new LinearLayout(this);
         camRow.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout.LayoutParams wrapParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         layout.addView(camRow, wrapParams);
+        layout.setMinimumWidth(dp(280));
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.VERTICAL);
@@ -688,7 +689,7 @@ public class Decoder extends Activity {
             final int slot = i;
             camButtons[i] = createItem(String.valueOf(i + 1));
             camButtons[i].setGravity(Gravity.CENTER);
-            camButtons[i].setPadding(dp(4), dp(4), dp(4), dp(4));
+            camButtons[i].setPadding(dp(12), dp(8), dp(12), dp(8));
             camRow.addView(camButtons[i], new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT));
