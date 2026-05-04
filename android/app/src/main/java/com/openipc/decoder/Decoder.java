@@ -573,9 +573,6 @@ public class Decoder extends Activity {
         quadContainer.setVisibility(View.GONE);
         mSurface.setVisibility(View.VISIBLE);
 
-        // clear stale frame before reconnect
-        clearVideo();
-
         // restart single-stream playback
         boolean configured = mHost != null && !mHost.isEmpty() && !mHost.equals(DEFAULT_URL);
         if (!listener && configured) {
@@ -620,10 +617,9 @@ public class Decoder extends Activity {
         nalQueue.clear();
         pcmQueue.clear();
 
-        // 5. Detect unconfigured slot — clear stale frame but don't start listener
+        // 5. Detect unconfigured slot — don't start listener
         boolean configured = mHost != null && !mHost.isEmpty() && !mHost.equals(DEFAULT_URL);
         if (!configured) {
-            clearVideo();
             return;
         }
 
@@ -2114,7 +2110,6 @@ public class Decoder extends Activity {
                 quadCells = null;
             }
             // clear stale frame before reconnect
-            clearVideo();
             // Don't start listener for unconfigured slots
             boolean configured = mHost != null && !mHost.isEmpty() && !mHost.equals(DEFAULT_URL);
             if (!listener && configured) {
