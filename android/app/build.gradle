@@ -10,6 +10,11 @@ plugins {
     alias(libs.plugins.android.application)
 }
 
+static def getGitHash() {
+    def process = "git rev-parse --short HEAD".execute()
+    return process.text.trim()
+}
+
 android {
     namespace = 'com.openipc.decoder'
     compileSdk = 36
@@ -20,6 +25,12 @@ android {
         targetSdk 36
         versionCode 22
         versionName "1.22"
+
+        buildConfigField "String", "GIT_HASH", "\"${getGitHash()}\""
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     // Signing credentials from environment variables; null when absent.
