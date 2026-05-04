@@ -231,6 +231,10 @@ public class Decoder extends Activity {
     private long jitterAccumulator = 0;
     private int jitterSampleCount = 0;
 
+    // Bitrate tracking (network thread → UI thread)
+    private volatile long streamBytes;
+    private volatile long bitrateMarkNs;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -415,12 +419,29 @@ public class Decoder extends Activity {
                     break;
                 case "connected":
                     statusText.setText(getString(R.string.status_connected));
-                    // Hide after 2 seconds
+                    statusText.setVisibility(View.VISIBLE);
+                    // After 1 second, refresh with actual codec + bitrate info
+                    statusText.postDelayed(() -> {
+                        if (statusText == null
+                                || statusText.getVisibility() != View.VISIBLE) return;
+                        String videoCodec = codecH265 ? "H.265" : "H.264";
+                        String aCodec = "AAC".equals(audioCodec) ? "AAC"
+                                : "G711".equals(audioCodec) ? "G.711" : "PCM";
+                        long elapsedNs = System.nanoTime() - bitrateMarkNs;
+                        String bps = "";
+                        if (elapsedNs > 500_000_000) {
+                            double mbps = (streamBytes * 8.0 / 1_000_000)
+                                    / (elapsedNs / 1_000_000_000.0);
+                            bps = String.format(Locale.US, " • %.1f Mbps", mbps);
+                        }
+                        statusText.setText("Connected • " + videoCodec + " • " + aCodec + bps);
+                    }, 1000);
+                    // Hide after 3 seconds
                     statusText.postDelayed(() -> {
                         if (statusText != null) {
                             statusText.setVisibility(View.GONE);
                         }
-                    }, 2000);
+                    }, 3000);
                     break;
                 case "disconnected":
                     statusText.setText(getString(R.string.status_disconnected));
@@ -1748,7 +1769,9 @@ public class Decoder extends Activity {
             // not from the epoch (lastFrame == 0 would trigger the watchdog immediately)
             lastFrame = SystemClock.elapsedRealtime();
             activeStream = true;
-            // Update status
+            // reset bitrate counters for the new stream
+            streamBytes = 0;
+            bitrateMarkNs = System.nanoTime();
             updateStatus("connected");
             // pre-warm the decoder now, while first packets are still in transit;
             // without this, createDecoder() runs on the first decoded frame (~200–500 ms later)
@@ -1818,10 +1841,13 @@ public class Decoder extends Activity {
     private void tcpStream(InputStream rawInput) throws IOException {
         BufferedInputStream input = new BufferedInputStream(rawInput, 65536);
         byte[] pktBuf = new byte[65535];
+        streamBytes = 0;
+        bitrateMarkNs = System.nanoTime();
         while (activeStream) {
             int total = readInterleavedPacket(input, pktBuf);
             if (total < 0) { activeStream = false; break; }
 
+            streamBytes += total;
             int channel = pktBuf[1];
             int len = total - 4;
             Frame frame = obtainFrame(len);
@@ -1933,6 +1959,9 @@ public class Decoder extends Activity {
                         // Successful connection
                         retryDelay = 1000;
                         consecutiveFailures = 0;
+                        // reset bitrate counters for the new stream
+                        streamBytes = 0;
+                        bitrateMarkNs = System.nanoTime();
                         updateStatus("connected");
 
                         // Wait a bit before checking connection status again
