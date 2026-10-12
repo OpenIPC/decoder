@@ -16,9 +16,12 @@ import java.util.Locale;
  * downgrade a multicast request to unicast, so the reply decides what is received (#67).
  */
 class Transport {
-    /** Slot setting: RTP over the RTSP connection, over UDP, or UDP with fallback to TCP. */
+    /**
+     * Slot setting: RTP over the RTSP connection, over UDP, UDP with fallback to TCP, or
+     * RTSP multicast with fallback to TCP (#69).
+     */
     enum Mode {
-        TCP, UDP, AUTO;
+        TCP, UDP, AUTO, MULTICAST;
 
         /** Stored or shared value ("tcp", "udp", "auto"); unknown values mean TCP. */
         static Mode parse(String s) {
@@ -102,6 +105,11 @@ class Transport {
     /** Request header value for interleaved RTP on channels {@code ch} and {@code ch + 1}. */
     static String tcpRequest(int ch) {
         return "RTP/AVP/TCP;unicast;interleaved=" + ch + "-" + (ch + 1);
+    }
+
+    /** Request header value for multicast; the server picks group, ports and TTL. */
+    static String multicastRequest() {
+        return "RTP/AVP;multicast";
     }
 
     /** Request header value for UDP unicast to local ports {@code rtp} and {@code rtp + 1}. */

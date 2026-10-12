@@ -78,6 +78,7 @@ public class TransportTest {
     public void requests() {
         assertEquals("RTP/AVP/TCP;unicast;interleaved=2-3", Transport.tcpRequest(2));
         assertEquals("RTP/AVP;unicast;client_port=50000-50001", Transport.udpRequest(50000));
+        assertEquals("RTP/AVP;multicast", Transport.multicastRequest());
     }
 
     @Test
@@ -87,6 +88,7 @@ public class TransportTest {
         assertEquals(Transport.Mode.TCP, Transport.Mode.parse("TCP"));
         assertEquals(Transport.Mode.TCP, Transport.Mode.parse(null));
         assertEquals(Transport.Mode.TCP, Transport.Mode.parse("quic"));
+        assertEquals(Transport.Mode.MULTICAST, Transport.Mode.parse("multicast"));
     }
 
     @Test
