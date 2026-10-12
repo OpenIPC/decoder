@@ -1,8 +1,4 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://openipc.org/assets/openipc-logo-white.svg">
-  <source media="(prefers-color-scheme: light)" srcset="https://openipc.org/assets/openipc-logo-black.svg">
-  <img alt="OpenIPC logo" src="https://openipc.org/assets/openipc-logo-black.svg">
-</picture>
+![OpenIPC logo][logo]
 
 # OpenIPC Decoder
 
@@ -211,3 +207,5 @@ export KEY_PASS=your_key_password
 - Документация: [openipc.org](https://openipc.org)
 
 [![Telegram](https://openipc.org/images/telegram_button.svg)](https://openipc.org/our-channels)
+
+[logo]: https://raw.githubusercontent.com/OpenIPC/.github/refs/heads/main/assets/openipc-logo-black.svg
