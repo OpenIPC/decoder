@@ -159,6 +159,7 @@ class QuadCell implements RtspSession.Callback {
             }
         });
 
+        Log.i(TAG, tag + ": surface ready, starting session");
         // Video only: Quad mode has no audio (#12)
         session.configure(host, userAgent, false);
         session.start();

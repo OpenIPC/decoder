@@ -767,6 +767,13 @@ public class Decoder extends Activity
         audioManager.shutdown();
     }
 
+    /** A link shared while the app is open arrives here; onResume() then applies it. */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
