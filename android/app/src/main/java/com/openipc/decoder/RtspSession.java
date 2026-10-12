@@ -54,6 +54,9 @@ class RtspSession {
         /** "disconnected", "buffering" (after PLAY) or "connected" (first video packet). */
         void onStatus(String status);
 
+        /** Why the last connection attempt failed, for display (#80). */
+        default void onFailure(String message) {}
+
         /** Session parameters, before PLAY. Audio is NONE when it was not set up. */
         void onSdp(Sdp sdp);
 
@@ -192,6 +195,7 @@ class RtspSession {
                 // stop() closes the socket on purpose: not a connection failure
                 if (gen != generation) break;
                 failures++;
+                callback.onFailure(e.getMessage());
                 if (failures <= 3 || failures % 10 == 0) {
                     Log.w(TAG, tag + ": RTSP connection failed (" + failures + "): "
                             + e.getMessage());
