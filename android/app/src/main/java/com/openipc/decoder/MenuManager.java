@@ -20,6 +20,7 @@ import android.text.style.SuperscriptSpan;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
@@ -112,7 +113,18 @@ class MenuManager {
             return;
         }
 
-        LinearLayout layout = new LinearLayout(activity);
+        // The popup is focusable and takes every key; on its own it only closes on Back,
+        // so Escape (keyboards) is handled here as well
+        LinearLayout layout = new LinearLayout(activity) {
+            @Override
+            public boolean dispatchKeyEvent(KeyEvent event) {
+                if (event.getKeyCode() == KeyEvent.KEYCODE_ESCAPE) {
+                    if (event.getAction() == KeyEvent.ACTION_UP) dismissPopup();
+                    return true;
+                }
+                return super.dispatchKeyEvent(event);
+            }
+        };
         layout.setOrientation(LinearLayout.VERTICAL);
 
         PopupWindow popup = new PopupWindow(layout, LinearLayout.LayoutParams.WRAP_CONTENT,
