@@ -484,6 +484,7 @@ public class Decoder extends Activity
 
         mSurface.setVisibility(View.GONE);
         quadContainer.setVisibility(View.VISIBLE);
+        ensureQuadLaidOut();
         removeClearOverlay();
 
         quadCells = new QuadCell[4];
@@ -513,6 +514,26 @@ public class Decoder extends Activity
 
         quadContainer.setVisibility(View.GONE);
         mSurface.setVisibility(View.VISIBLE);
+    }
+
+    /**
+     * Seen on an Android 10 TV box: after the window briefly lost visibility (a task brought
+     * to the front by another start), the Quad container stayed at 0x0 with no layout pass
+     * scheduled, so the cells never got a surface. Check once it should have been laid out
+     * and force a pass if not.
+     */
+    private void ensureQuadLaidOut() {
+        quadContainer.postDelayed(() -> {
+            if (!quadEnabled || quadContainer.getWidth() > 0) return;
+            Log.w(TAG, "Quad layout did not happen, forcing a layout pass");
+            View decor = getWindow().getDecorView();
+            for (View v = quadContainer; v != null && v != decor;
+                 v = v.getParent() instanceof View ? (View) v.getParent() : null) {
+                v.forceLayout();
+            }
+            decor.requestLayout();
+            decor.invalidate();
+        }, 500);
     }
 
     /** Clear the video view so no stale frame lingers. */
@@ -801,6 +822,7 @@ public class Decoder extends Activity
         if (quadEnabled) {
             mSurface.setVisibility(View.GONE);
             quadContainer.setVisibility(View.VISIBLE);
+            ensureQuadLaidOut();
             if (quadCells != null) {
                 for (QuadCell cell : quadCells) {
                     if (cell != null) cell.stop();
