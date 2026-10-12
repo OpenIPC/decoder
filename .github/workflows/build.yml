@@ -27,9 +27,8 @@ jobs:
         run: |
           case "${{ github.ref_name }}" in
             basic) echo "name=decoder" ;;
-            v2)     echo "name=decoder-v2" ;;
-            v3)     echo "name=decoder-v3" ;;
-            *)      echo "name=decoder-${{ github.ref_name }}" ;;
+            v2)    echo "name=decoder-v2" ;;
+            *)     echo "name=decoder-$(echo '${{ github.ref_name }}' | tr '/' '-')" ;;
           esac >> $GITHUB_OUTPUT
 
       - name: Set up JDK 17
@@ -52,7 +51,19 @@ jobs:
           ./gradlew assembleRelease
           mv app/build/outputs/apk/release/app-release.apk ../${{ steps.vars.outputs.name }}.apk
 
+      # Working branches: keep the build as a workflow artifact only
+      - name: Upload artifact
+        if: github.ref_name != 'basic' && github.ref_name != 'v2'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.vars.outputs.name }}
+          path: |
+            ${{ steps.vars.outputs.name }}.aab
+            ${{ steps.vars.outputs.name }}.apk
+
+      # Release branches: publish to the "latest" release and Telegram
       - name: Upload
+        if: github.ref_name == 'basic' || github.ref_name == 'v2'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
@@ -61,6 +72,7 @@ jobs:
             ${{ steps.vars.outputs.name }}.apk
 
       - name: Telegram
+        if: github.ref_name == 'basic' || github.ref_name == 'v2'
         run: |
           GIT_HASH=$(git rev-parse --short HEAD)
           GIT_BRANCH="${{ github.ref_name }}"
