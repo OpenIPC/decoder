@@ -16,7 +16,10 @@ import android.media.MediaFormat;
 import android.util.Log;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -289,46 +292,68 @@ class AudioManager {
     }
 
     private void processAac(AudioConfig c, byte[] data, int start, int end) {
+        List<int[]> units;
         if (c.sizeLength > 0) {
-            // RFC 3640 mpeg4-generic: AU-headers-length (bits), AU headers, then AU data
-            if (end - start < 2) return;
-            int headerBits = ((data[start] & 0xFF) << 8) | (data[start + 1] & 0xFF);
-            int bitPos = (start + 2) * 8;
-            int bitEnd = bitPos + headerBits;
-            int pos = start + 2 + (headerBits + 7) / 8;
-            if (pos > end) return;
             ensureAacDecoder(c, false);
-            boolean first = true;
-            while (true) {
-                int headerLen = c.sizeLength + (first ? c.indexLength : c.indexDeltaLength);
-                if (bitPos + headerLen > bitEnd) break;
-                int size = readBits(data, bitPos, c.sizeLength);
-                bitPos += headerLen;
-                first = false;
-                // AUs fragmented across packets are not supported
-                if (size <= 0 || pos + size > end) break;
-                offerAac(Arrays.copyOfRange(data, pos, pos + size));
-                pos += size;
-            }
+            units = splitAuHeaders(data, start, end,
+                    c.sizeLength, c.indexLength, c.indexDeltaLength);
         } else if (end - start >= 7 && isAdtsSync(data, start)) {
             ensureAacDecoder(c, true);
-            int pos = start;
-            while (end - pos >= 7 && isAdtsSync(data, pos)) {
-                int frameLen = ((data[pos + 3] & 0x03) << 11)
-                        | ((data[pos + 4] & 0xFF) << 3)
-                        | ((data[pos + 5] & 0xE0) >>> 5);
-                if (frameLen < 7 || pos + frameLen > end) break;
-                offerAac(Arrays.copyOfRange(data, pos, pos + frameLen));
-                pos += frameLen;
-            }
+            units = splitAdts(data, start, end);
         } else {
             // Raw access unit without AU headers
             ensureAacDecoder(c, false);
-            offerAac(Arrays.copyOfRange(data, start, end));
+            units = Collections.singletonList(new int[] {start, end - start});
+        }
+        for (int[] u : units) {
+            offerAac(Arrays.copyOfRange(data, u[0], u[0] + u[1]));
         }
     }
 
-    private static boolean isAdtsSync(byte[] data, int pos) {
+    /**
+     * RFC 3640 mpeg4-generic payload: AU-headers-length (bits), AU headers, then AU data.
+     * Returns {offset, length} of each complete AU; AUs fragmented across packets are
+     * not supported and end the list.
+     */
+    static List<int[]> splitAuHeaders(byte[] data, int start, int end,
+                                      int sizeLength, int indexLength, int indexDeltaLength) {
+        List<int[]> units = new ArrayList<>();
+        if (end - start < 2 || sizeLength <= 0) return units;
+        int headerBits = ((data[start] & 0xFF) << 8) | (data[start + 1] & 0xFF);
+        int bitPos = (start + 2) * 8;
+        int bitEnd = bitPos + headerBits;
+        int pos = start + 2 + (headerBits + 7) / 8;
+        if (pos > end) return units;
+        boolean first = true;
+        while (true) {
+            int headerLen = sizeLength + (first ? indexLength : indexDeltaLength);
+            if (bitPos + headerLen > bitEnd) break;
+            int size = readBits(data, bitPos, sizeLength);
+            bitPos += headerLen;
+            first = false;
+            if (size <= 0 || pos + size > end) break;
+            units.add(new int[] {pos, size});
+            pos += size;
+        }
+        return units;
+    }
+
+    /** ADTS frames: {offset, length} of each complete frame, stopping at bad sync or length. */
+    static List<int[]> splitAdts(byte[] data, int start, int end) {
+        List<int[]> frames = new ArrayList<>();
+        int pos = start;
+        while (end - pos >= 7 && isAdtsSync(data, pos)) {
+            int frameLen = ((data[pos + 3] & 0x03) << 11)
+                    | ((data[pos + 4] & 0xFF) << 3)
+                    | ((data[pos + 5] & 0xE0) >>> 5);
+            if (frameLen < 7 || pos + frameLen > end) break;
+            frames.add(new int[] {pos, frameLen});
+            pos += frameLen;
+        }
+        return frames;
+    }
+
+    static boolean isAdtsSync(byte[] data, int pos) {
         return (data[pos] & 0xFF) == 0xFF && (data[pos + 1] & 0xF6) == 0xF0;
     }
 
