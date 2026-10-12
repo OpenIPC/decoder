@@ -118,6 +118,10 @@ public class Decoder extends Activity
     // Screenshot
     private boolean isTakingScreenshot;
 
+    // Stream size, for fitting the video view into the screen
+    private int mVideoWidth;
+    private int mVideoHeight;
+
     // Codec/bitrate state for status overlay (pulled from RtspClient)
     private volatile boolean codecH265;
     private volatile String audioCodec = AudioConfig.NONE;
@@ -201,6 +205,10 @@ public class Decoder extends Activity
             }
         });
         final View menuAnchor = findViewById(R.id.decoder);
+        // Rotation or a resized window: fit the video again (#31)
+        menuAnchor.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            if (r - l != or - ol || b - t != ob - ot) fitVideo();
+        });
         mGestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onScroll(MotionEvent e1, MotionEvent e2, float dx, float dy) {
                 if (mZoomScale > ZOOM_MIN) {
@@ -765,13 +773,39 @@ public class Decoder extends Activity
         if (width < 64 || height < 64) return;
         Log.d(TAG, "Resolution update: " + width + "x" + height);
         runOnUiThread(() -> {
-            int surfaceH = mSurface.getHeight();
-            if (surfaceH == 0) surfaceH = getResources().getDisplayMetrics().heightPixels;
-            int surfaceW = (int) ((float) surfaceH / height * width);
-            FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(surfaceW, surfaceH);
-            params.gravity = Gravity.CENTER;
-            mSurface.setLayoutParams(params);
+            mVideoWidth = width;
+            mVideoHeight = height;
+            fitVideo();
         });
+    }
+
+    /**
+     * Size the video view to fit inside the screen with the stream's aspect ratio
+     * (letterbox or pillarbox). Re-run when the container size changes: rotation,
+     * multi-window, and Android 16 ignoring the fixed orientation on large screens.
+     */
+    private void fitVideo() {
+        if (mVideoWidth <= 0 || mVideoHeight <= 0) return;
+        View box = (View) mSurface.getParent();
+        int boxW = box.getWidth();
+        int boxH = box.getHeight();
+        if (boxW == 0 || boxH == 0) {
+            boxW = getResources().getDisplayMetrics().widthPixels;
+            boxH = getResources().getDisplayMetrics().heightPixels;
+        }
+        int[] size = fitInside(mVideoWidth, mVideoHeight, boxW, boxH);
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(size[0], size[1]);
+        params.gravity = Gravity.CENTER;
+        mSurface.setLayoutParams(params);
+        resetZoom();
+    }
+
+    /** Largest size with the video's aspect ratio that fits inside the box (#17). */
+    static int[] fitInside(int videoW, int videoH, int boxW, int boxH) {
+        double scale = Math.min((double) boxW / videoW, (double) boxH / videoH);
+        int w = (int) Math.round(videoW * scale);
+        int h = (int) Math.round(videoH * scale);
+        return new int[] {Math.min(w, boxW), Math.min(h, boxH)};
     }
 
     private void applyZoomTransform() {
