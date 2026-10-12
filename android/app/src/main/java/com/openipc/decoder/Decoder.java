@@ -96,6 +96,10 @@ public class Decoder extends Activity
     private int mActive;
     private volatile String mHost;
     private String mVersion;
+    // Camera URLs (with passwords) are encrypted at rest (#16)
+    private CredentialStore credentials;
+    // Stored values that could not be decrypted: kept as they are until the slot is edited
+    private final String[] mUnreadable = new String[CAM_COUNT];
     String mUserAgent = "User-Agent: OpenIPC-Decoder/1.0\r\n";
 
     // Thread management
@@ -141,6 +145,7 @@ public class Decoder extends Activity
         } catch (PackageManager.NameNotFoundException ignored) {}
         mUserAgent = "User-Agent: OpenIPC-Decoder/" + mVersion + "\r\n";
         mDensity = getResources().getDisplayMetrics().density;
+        credentials = CredentialStore.create();
 
         // --- Create managers ---
         videoDecoder = new MediaCodecManager(new MediaCodecManager.Listener() {
@@ -347,7 +352,7 @@ public class Decoder extends Activity
 
         if (pref.contains("host") && !pref.contains("host_0")) {
             SharedPreferences.Editor edit = pref.edit();
-            edit.putString("host_0", pref.getString("host", DEFAULT_URL));
+            edit.putString("host_0", credentials.seal(pref.getString("host", DEFAULT_URL)));
             edit.putBoolean("type_0", pref.getBoolean("type", false));
             edit.remove("host");
             edit.remove("type");
@@ -357,9 +362,19 @@ public class Decoder extends Activity
         // Restore the last camera and mode (#22); both are saved but were never read back
         mActive = clampSlot(pref.getInt("active", 0));
         quadEnabled = pref.getBoolean("quad_enabled", false);
+        SharedPreferences.Editor migrate = null;
         for (int i = 0; i < CAM_COUNT; i++) {
-            mHosts[i] = pref.getString("host_" + i, DEFAULT_URL);
+            String stored = pref.getString("host_" + i, null);
+            String url = credentials.open(stored);
+            mHosts[i] = url != null ? url : DEFAULT_URL;
+            mUnreadable[i] = url == null && stored != null ? stored : null;
+            // Plain URLs from older versions are re-saved encrypted right away
+            if (credentials.needsMigration(stored)) {
+                if (migrate == null) migrate = pref.edit();
+                migrate.putString("host_" + i, credentials.seal(stored));
+            }
         }
+        if (migrate != null) migrate.apply();
 
         Intent intent = getIntent();
         String link = intent.getStringExtra(Intent.EXTRA_TEXT);
@@ -370,7 +385,8 @@ public class Decoder extends Activity
             // still there after the next pause/resume
             quadEnabled = false;
             pref.edit()
-                    .putString("host_" + mActive, mHosts[mActive])
+                    .putString("host_" + mActive, credentials.sealForSlot(
+                            mHosts[mActive], mUnreadable[mActive], DEFAULT_URL))
                     .putBoolean("quad_enabled", false)
                     .apply();
             intent.removeExtra(Intent.EXTRA_TEXT);
@@ -401,7 +417,8 @@ public class Decoder extends Activity
         SharedPreferences.Editor edit = pref.edit();
         edit.putInt("active", mActive);
         for (int i = 0; i < CAM_COUNT; i++) {
-            edit.putString("host_" + i, mHosts[i]);
+            edit.putString("host_" + i,
+                    credentials.sealForSlot(mHosts[i], mUnreadable[i], DEFAULT_URL));
         }
         edit.apply();
 
