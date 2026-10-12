@@ -162,9 +162,11 @@ class RtpListener implements Closeable {
         MulticastSocket s = new MulticastSocket(null);
         try {
             if (url.multicast()) {
-                // Several receivers of one group on this device each get a copy
+                // Several receivers of one group on this device each get a copy. Bound to
+                // the group, not the wildcard: on Linux a wildcard socket also receives every
+                // other group joined on this port, e.g. another channel of the same NVR
                 s.setReuseAddress(true);
-                s.bind(new InetSocketAddress(url.port));
+                s.bind(new InetSocketAddress(url.address, url.port));
                 s.joinGroup(url.address);
                 joined = true;
             } else {
