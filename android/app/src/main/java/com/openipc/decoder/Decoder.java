@@ -45,6 +45,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 
 import java.text.SimpleDateFormat;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.Locale;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -83,15 +84,16 @@ public class Decoder extends Activity
     private boolean quadEnabled;
     private QuadCell[] quadCells;
     private LinearLayout quadContainer;
-    private final SurfaceView[] quadViews = new SurfaceView[4];
+    private final SurfaceView[] quadViews = new SurfaceView[CAM_COUNT];
     // Quad audio (#12): the cell whose sound plays, -1 for none
     private int quadAudio = -1;
-    private final TextView[] quadAudioBadges = new TextView[4];
+    private final TextView[] quadAudioBadges = new TextView[CAM_COUNT];
     private volatile int quadAudioGen;
     private ExecutorService quadAudioExecutor;
 
     // Camera settings
-    private static final int CAM_COUNT = 4;
+    /** Camera slots (#13). Multi-view shows 2x2, or 3x3 once a slot above 4 is in use. */
+    static final int CAM_COUNT = 8;
     private static final String DEFAULT_URL = "rtsp://root:12345@192.168.1.10:554/stream=0";
     private final String[] mHosts = new String[CAM_COUNT];
     private int mActive;
@@ -239,44 +241,6 @@ public class Decoder extends Activity
         quadContainer = new LinearLayout(this);
         quadContainer.setOrientation(LinearLayout.VERTICAL);
         quadContainer.setVisibility(View.GONE);
-        for (int row = 0; row < 2; row++) {
-            LinearLayout lr = new LinearLayout(this);
-            lr.setOrientation(LinearLayout.HORIZONTAL);
-            quadContainer.addView(lr, new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
-            for (int col = 0; col < 2; col++) {
-                int idx = row * 2 + col;
-                quadViews[idx] = new SurfaceView(this);
-                quadViews[idx].setOnClickListener(cv ->
-                        menuManager.showMenu(menuAnchor, quadEnabled, mActive, mVersion,
-                                BuildConfig.GIT_HASH, mHosts));
-                // Each cell is a FrameLayout so overlays can be stacked on the video
-                FrameLayout cell = new FrameLayout(this);
-                cell.addView(quadViews[idx], new FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT));
-                // Long press selects the cell whose audio plays (#12)
-                quadViews[idx].setOnLongClickListener(v -> {
-                    toggleQuadAudio(idx);
-                    return true;
-                });
-                TextView badge = new TextView(this);
-                badge.setText(R.string.quad_audio_badge);
-                badge.setTextColor(Color.WHITE);
-                badge.setTextSize(11);
-                badge.setBackgroundColor(0x99000000);
-                badge.setPadding(dp(6), dp(2), dp(6), dp(2));
-                badge.setVisibility(View.GONE);
-                FrameLayout.LayoutParams bp = new FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.WRAP_CONTENT,
-                        FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
-                bp.setMargins(dp(4), dp(4), dp(4), dp(4));
-                cell.addView(badge, bp);
-                quadAudioBadges[idx] = badge;
-                lr.addView(cell, new LinearLayout.LayoutParams(
-                        0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
-            }
-        }
         FrameLayout root = (FrameLayout) menuAnchor;
         root.addView(quadContainer, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -532,6 +496,7 @@ public class Decoder extends Activity
         stopExecutor();
 
         mSurface.setVisibility(View.GONE);
+        buildQuadGrid(quadGridSize(mHosts, DEFAULT_URL));
         quadContainer.setVisibility(View.VISIBLE);
         ensureQuadLaidOut();
         removeClearOverlay();
@@ -580,9 +545,70 @@ public class Decoder extends Activity
         }, 500);
     }
 
+    /** Grid side for multi-view: 2 while only slots 1-4 are used, else 3 (#13). */
+    static int quadGridSize(String[] hosts, String defaultUrl) {
+        for (int i = 4; i < hosts.length; i++) {
+            String url = hosts[i];
+            if (url != null && !url.isEmpty() && !url.equals(defaultUrl)) return 3;
+        }
+        return 2;
+    }
+
+    /** (Re)build the multi-view grid; cells beyond it have no view. */
+    private void buildQuadGrid(int size) {
+        quadContainer.removeAllViews();
+        Arrays.fill(quadViews, null);
+        Arrays.fill(quadAudioBadges, null);
+        for (int row = 0; row < size; row++) {
+            LinearLayout lr = new LinearLayout(this);
+            lr.setOrientation(LinearLayout.HORIZONTAL);
+            quadContainer.addView(lr, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+            for (int col = 0; col < size; col++) {
+                int idx = row * size + col;
+                if (idx >= CAM_COUNT) {
+                    // The last cell of a 3x3 grid: no slot, stays black
+                    lr.addView(new View(this), new LinearLayout.LayoutParams(
+                            0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
+                    continue;
+                }
+                quadViews[idx] = new SurfaceView(this);
+                quadViews[idx].setOnClickListener(cv ->
+                        menuManager.showMenu(findViewById(R.id.decoder), quadEnabled, mActive, mVersion,
+                                BuildConfig.GIT_HASH, mHosts));
+                // Each cell is a FrameLayout so overlays can be stacked on the video
+                FrameLayout cell = new FrameLayout(this);
+                cell.addView(quadViews[idx], new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT));
+                // Long press selects the cell whose audio plays (#12)
+                quadViews[idx].setOnLongClickListener(v -> {
+                    toggleQuadAudio(idx);
+                    return true;
+                });
+                TextView badge = new TextView(this);
+                badge.setText(R.string.quad_audio_badge);
+                badge.setTextColor(Color.WHITE);
+                badge.setTextSize(11);
+                badge.setBackgroundColor(0x99000000);
+                badge.setPadding(dp(6), dp(2), dp(6), dp(2));
+                badge.setVisibility(View.GONE);
+                FrameLayout.LayoutParams bp = new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
+                bp.setMargins(dp(4), dp(4), dp(4), dp(4));
+                cell.addView(badge, bp);
+                quadAudioBadges[idx] = badge;
+                lr.addView(cell, new LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
+            }
+        }
+    }
+
     private void createQuadCells() {
-        quadCells = new QuadCell[4];
-        for (int i = 0; i < 4; i++) {
+        quadCells = new QuadCell[CAM_COUNT];
+        for (int i = 0; i < CAM_COUNT; i++) {
+            if (quadViews[i] == null) continue;
             String url = mHosts[i];
             if (url == null || url.isEmpty() || url.equals(DEFAULT_URL)) continue;
             quadCells[i] = new QuadCell(i, url, quadViews[i], framePool, mUserAgent,
@@ -609,7 +635,7 @@ public class Decoder extends Activity
         // A new route: audio of a previously selected cell can no longer reach playback
         int route = audioManager.newRoute();
         QuadCell[] cells = quadCells;
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < CAM_COUNT; i++) {
             QuadCell cell = cells != null ? cells[i] : null;
             boolean on = i == quadAudio && cell != null;
             if (cell != null) cell.setAudioSink(on ? audioManager : null, route);
@@ -675,7 +701,7 @@ public class Decoder extends Activity
     }
 
     private void clearQuadViews() {
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < CAM_COUNT; i++) {
             SurfaceView t = quadViews[i];
             if (t == null) continue;
             FrameLayout cell = (FrameLayout) t.getParent();
@@ -993,14 +1019,16 @@ public class Decoder extends Activity
         audioManager.setEnabled(true);
         if (quadEnabled) {
             mSurface.setVisibility(View.GONE);
-            quadContainer.setVisibility(View.VISIBLE);
-            ensureQuadLaidOut();
             if (quadCells != null) {
                 for (QuadCell cell : quadCells) {
                     if (cell != null) cell.stop();
                 }
                 quadCells = null;
             }
+            // The slots may have changed while paused, and with them the grid size (#13)
+            buildQuadGrid(quadGridSize(mHosts, DEFAULT_URL));
+            quadContainer.setVisibility(View.VISIBLE);
+            ensureQuadLaidOut();
             clearQuadViews();
             createQuadCells();
             getSharedPreferences("settings", MODE_PRIVATE).edit()
