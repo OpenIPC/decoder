@@ -22,6 +22,7 @@
         <activity android:name="Crash" android:exported="false" android:process=":crash" />
         <activity
             android:name="Decoder"
+            android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:exported="true"
             android:screenOrientation="sensorLandscape"
