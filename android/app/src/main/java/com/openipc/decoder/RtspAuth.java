@@ -33,6 +33,8 @@ class RtspAuth {
     private String algorithm;
     private boolean qopAuth;
     private int nonceCount;
+    /** MD5-sess: one client nonce per server nonce, used in H(A1) and sent every time. */
+    private String sessCnonce;
     /** Fixed client nonce for tests; random when null. */
     String testCnonce;
 
@@ -62,11 +64,12 @@ class RtspAuth {
         String ha1 = md5(user + ":" + realm + ":" + password);
         String cnonce = null;
         String nc = null;
-        if ("MD5-SESS".equals(algorithm) || qopAuth) {
-            cnonce = testCnonce != null ? testCnonce : randomHex(8);
-        }
         if ("MD5-SESS".equals(algorithm)) {
+            if (sessCnonce == null) sessCnonce = newCnonce();
+            cnonce = sessCnonce;
             ha1 = md5(ha1 + ":" + nonce + ":" + cnonce);
+        } else if (qopAuth) {
+            cnonce = newCnonce();
         }
         String ha2 = md5(method + ":" + uri);
         String response;
@@ -78,16 +81,16 @@ class RtspAuth {
         }
 
         StringBuilder h = new StringBuilder("Authorization: Digest ");
-        h.append("username=\"").append(user).append("\", ");
-        h.append("realm=\"").append(realm).append("\", ");
-        h.append("nonce=\"").append(nonce).append("\", ");
-        h.append("uri=\"").append(uri).append("\", ");
+        h.append("username=").append(quote(user)).append(", ");
+        h.append("realm=").append(quote(realm)).append(", ");
+        h.append("nonce=").append(quote(nonce)).append(", ");
+        h.append("uri=").append(quote(uri)).append(", ");
         h.append("response=\"").append(response).append('"');
         if (algorithm != null) h.append(", algorithm=").append(algorithm);
-        if (opaque != null) h.append(", opaque=\"").append(opaque).append('"');
-        if (qopAuth) {
-            h.append(", qop=auth, nc=").append(nc).append(", cnonce=\"").append(cnonce).append('"');
-        }
+        if (opaque != null) h.append(", opaque=").append(quote(opaque));
+        if (qopAuth) h.append(", qop=auth, nc=").append(nc);
+        // MD5-sess needs the cnonce even without qop, or the server cannot verify H(A1)
+        if (cnonce != null) h.append(", cnonce=").append(quote(cnonce));
         return h.append("\r\n").toString();
     }
 
@@ -106,6 +109,15 @@ class RtspAuth {
             if (alg != null && !alg.equalsIgnoreCase("MD5") && !alg.equalsIgnoreCase("MD5-sess")) {
                 continue; // SHA-256 etc. are not supported
             }
+            String qop = p.get("qop");
+            boolean hasAuth = false;
+            if (qop != null) {
+                for (String q : qop.split(",")) {
+                    if (q.trim().equalsIgnoreCase("auth")) hasAuth = true;
+                }
+                // Only auth-int offered: we cannot produce that, look for another challenge
+                if (!hasAuth) continue;
+            }
             boolean stale = "true".equalsIgnoreCase(p.get("stale"));
             boolean retry = !digest || stale;
             digest = true;
@@ -113,14 +125,9 @@ class RtspAuth {
             nonce = p.containsKey("nonce") ? p.get("nonce") : "";
             opaque = p.get("opaque");
             algorithm = alg != null ? alg.toUpperCase(Locale.ROOT) : null;
-            String qop = p.get("qop");
-            qopAuth = false;
-            if (qop != null) {
-                for (String q : qop.split(",")) {
-                    if (q.trim().equalsIgnoreCase("auth")) qopAuth = true;
-                }
-            }
+            qopAuth = hasAuth;
             nonceCount = 0;
+            sessCnonce = null;
             return retry;
         }
         // Basic was already sent pre-emptively: another attempt would fail the same way
@@ -153,6 +160,15 @@ class RtspAuth {
             out.put(key, value.toString().trim());
         }
         return out;
+    }
+
+    private String newCnonce() {
+        return testCnonce != null ? testCnonce : randomHex(8);
+    }
+
+    /** Quoted-string with '"' and '\\' escaped (RFC 2616 2.2). */
+    static String quote(String v) {
+        return '"' + v.replace("\\", "\\\\").replace("\"", "\\\"") + '"';
     }
 
     static String md5(String s) {

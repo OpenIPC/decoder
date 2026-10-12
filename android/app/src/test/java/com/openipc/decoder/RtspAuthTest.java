@@ -108,4 +108,45 @@ public class RtspAuthTest {
         assertEquals("auth,auth-int", p.get("qop"));
         assertEquals("", p.get("empty"));
     }
+
+    @Test
+    public void authIntOnlyChallengeIsSkipped() {
+        RtspAuth auth = new RtspAuth("u:p");
+        assertTrue(auth.onUnauthorized(Arrays.asList(
+                "Digest realm=\"r\", nonce=\"a\", qop=\"auth-int\"",
+                "Digest realm=\"r\", nonce=\"b\", qop=\"auth\"")));
+        String h = auth.header("DESCRIBE", "rtsp://x");
+        assertTrue(h, h.contains("nonce=\"b\""));
+        assertTrue(h, h.contains("qop=auth"));
+        assertFalse(new RtspAuth("u:p").onUnauthorized(Collections.singletonList(
+                "Digest realm=\"r\", nonce=\"a\", qop=\"auth-int\"")));
+    }
+
+    @Test
+    public void md5SessWithoutQopSendsAStableCnonce() {
+        RtspAuth auth = new RtspAuth("u:p");
+        auth.onUnauthorized(Collections.singletonList(
+                "Digest realm=\"r\", nonce=\"n\", algorithm=MD5-sess"));
+        Map<String, String> first = RtspAuth.parseParams(
+                auth.header("SETUP", "rtsp://x").substring("Authorization: Digest ".length()));
+        Map<String, String> second = RtspAuth.parseParams(
+                auth.header("PLAY", "rtsp://x").substring("Authorization: Digest ".length()));
+        String cnonce = first.get("cnonce");
+        assertTrue("cnonce sent", cnonce != null && !cnonce.isEmpty());
+        assertEquals("same cnonce for the whole nonce", cnonce, second.get("cnonce"));
+        String ha1 = RtspAuth.md5(RtspAuth.md5("u:r:p") + ":n:" + cnonce);
+        assertEquals(RtspAuth.md5(ha1 + ":n:" + RtspAuth.md5("PLAY:rtsp://x")), second.get("response"));
+    }
+
+    @Test
+    public void quotedValuesAreEscaped() {
+        assertEquals("\"a\\\"b\\\\c\"", RtspAuth.quote("a\"b\\c"));
+        RtspAuth auth = new RtspAuth("we\"ird:p");
+        auth.onUnauthorized(Collections.singletonList("Digest realm=\"r\\\"x\", nonce=\"n\""));
+        String h = auth.header("DESCRIBE", "rtsp://x");
+        // Parsing our own header gives back the original values
+        Map<String, String> p = RtspAuth.parseParams(h.substring("Authorization: Digest ".length()));
+        assertEquals("we\"ird", p.get("username"));
+        assertEquals("r\"x", p.get("realm"));
+    }
 }

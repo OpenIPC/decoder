@@ -59,6 +59,8 @@ public class RtspSessionTest {
         volatile int sessionTimeout = 60;
         /** Reply 501 to GET_PARAMETER. */
         volatile boolean rejectGetParameter;
+        /** Reply 401 (Digest, never stale) to every GET_PARAMETER. */
+        volatile boolean keepaliveUnauthorized;
         /** After PLAY keep sending video packets every 20 ms instead of a fixed burst. */
         volatile boolean streamContinuously;
         final AtomicInteger unauthorized = new AtomicInteger();
@@ -133,6 +135,11 @@ public class RtspSessionTest {
                                     + sessionTimeout + "\r\n\r\n";
                             break;
                         case "GET_PARAMETER":
+                            if (keepaliveUnauthorized) {
+                                reply = "RTSP/1.0 401 Unauthorized\r\nCSeq: " + cseq + "\r\n"
+                                        + "WWW-Authenticate: Digest realm=\"cam\", nonce=\"K\"\r\n\r\n";
+                                break;
+                            }
                             reply = rejectGetParameter
                                     ? "RTSP/1.0 501 Not Implemented\r\nCSeq: " + cseq + "\r\n\r\n"
                                     : "RTSP/1.0 200 OK\r\nCSeq: " + cseq + "\r\nSession: ABC123\r\n\r\n";
@@ -164,9 +171,8 @@ public class RtspSessionTest {
                         for (int i = 0; i < audioPackets; i++) out.write(packet(2, 98));
                         out.flush();
                         if (closeAfterPackets) return;
-                        // Keep the session open until the client goes away
-                        while (in.read() >= 0) { /* ignore */ }
-                        return;
+                        // Stay idle but keep answering requests (keepalives)
+                        continue;
                     }
                 }
             } catch (IOException ignored) {
@@ -466,10 +472,39 @@ public class RtspSessionTest {
 
     @Test
     public void keepaliveIntervalFromSessionHeader() {
-        RtspSession.minKeepaliveMs = 1000;
         assertEquals(30000, RtspSession.keepaliveInterval("ABC"));
         assertEquals(5000, RtspSession.keepaliveInterval("ABC;timeout=10"));
-        assertEquals(1000, RtspSession.keepaliveInterval("ABC; timeout=1"));
+        // Half of a one-second session, not the whole second
+        assertEquals(500, RtspSession.keepaliveInterval("ABC; timeout=1"));
         assertEquals(30000, RtspSession.keepaliveInterval("ABC;timeout=junk"));
+        assertEquals(30000, RtspSession.keepaliveInterval("ABC;timeout=0"));
+    }
+
+    @Test
+    public void keepaliveIsSentWhileTheStreamIsIdle() throws Exception {
+        // Watchdog long enough not to interfere: only the keepalive is under test
+        RtspSession.watchdogMs = 10000;
+        server.sessionTimeout = 2; // keepalive every second
+        runUntilVideo(server.url(null), true); // 3 packets, then the server goes quiet
+        Thread.sleep(2600);
+        long keepalives = server.methods().stream()
+                .filter(x -> x.startsWith("GET_PARAMETER")).count();
+        assertTrue("keepalives while idle: " + keepalives, keepalives >= 2);
+        assertEquals(1, server.connections.get());
+    }
+
+    @Test
+    public void rejectedKeepaliveEndsTheSession() throws Exception {
+        server.sessionTimeout = 1;
+        server.streamContinuously = true;
+        server.keepaliveUnauthorized = true;
+        runUntilVideo(server.url("admin:pw"), true);
+        long deadline = System.nanoTime() + 4_000_000_000L;
+        while (server.connections.get() < 2 && System.nanoTime() < deadline) Thread.sleep(20);
+        assertTrue("reconnected after the keepalive was rejected", server.connections.get() >= 2);
+        // Bounded: Basic, then one Digest retry per connection, no endless repetition
+        long perFirstConnection = server.requests.stream()
+                .filter(x -> x.startsWith("GET_PARAMETER")).count();
+        assertTrue(perFirstConnection <= 2 * server.connections.get());
     }
 }

@@ -54,5 +54,9 @@ public class RtspUrlTest {
         assertThrows(IOException.class, () -> RtspSession.Url.parse("192.168.1.10/stream"));
         assertThrows(IOException.class, () -> RtspSession.Url.parse("rtsp://:554/s"));
         assertThrows(IOException.class, () -> RtspSession.Url.parse("rtsp://cam:99999/s"));
+        // Percent-encoded CR/LF must not reach the Authorization header
+        assertThrows(IOException.class,
+                () -> RtspSession.Url.parse("rtsp://admin%0D%0AX-Injected:%201:pw@cam/s"));
+        assertThrows(IOException.class, () -> RtspSession.Url.parse("rtsp://admin:p%0Aw@cam/s"));
     }
 }
