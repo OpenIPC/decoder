@@ -12,7 +12,7 @@
 一款小巧的 Android 应用，用于观看 IP 摄像机的 RTSP 视频流，支持 H.264/H.265 硬件解码。专为运行 [OpenIPC](https://openipc.org) 固件的摄像机设计，可在手机、平板、电视、电视盒子和车载设备上使用。
 
 <p align="center">
-  <img src="screenshots/photo_menu.jpg" alt="应用截图" width="640">
+  <img src="screenshots/quad_menu.jpg" alt="四分屏模式：三路摄像机与菜单" width="640">
 </p>
 
 ## 下载
