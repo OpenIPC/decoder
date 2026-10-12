@@ -43,7 +43,7 @@ class QuadCell implements RtspSession.Callback {
     private final BlockingQueue<Frame> nalQueue = new ArrayBlockingQueue<>(30);
     private final NalAssembler nalAssembler;
     private final NalAssembler.Sink nalSink;
-    private int queueFullDrops;
+    private volatile int queueFullDrops;
     private int lastUnknownPayload = -1;
 
     private ExecutorService executor;
@@ -62,8 +62,11 @@ class QuadCell implements RtspSession.Callback {
     private int lastIn;
     private int lastOut;
     private long lastSampleMs;
+    private int lastLost;
     private float inFps;
     private float outFps;
+    /** Frames per second lost because the decoder did not keep up (queue full, no input buffer). */
+    private float lostFps;
     /** Consecutive samples in which the decoder fell behind (UI thread, #83). */
     int behindSamples;
 
@@ -252,13 +255,16 @@ class QuadCell implements RtspSession.Callback {
     String sample(long nowMs) {
         int in = framesIn;
         int out = decoder.framesOut();
+        int lost = queueFullDrops + decoder.inputDropped();
         if (lastSampleMs > 0 && nowMs > lastSampleMs) {
             float sec = (nowMs - lastSampleMs) / 1000f;
             inFps = Math.max(0, in - lastIn) / sec;
             outFps = Math.max(0, out - lastOut) / sec;
+            lostFps = Math.max(0, lost - lastLost) / sec;
         }
         lastIn = in;
         lastOut = out;
+        lastLost = lost;
         lastSampleMs = nowMs;
 
         if (pausedReason != null) return pausedReason;
@@ -278,6 +284,7 @@ class QuadCell implements RtspSession.Callback {
 
     float inFps() { return inFps; }
     float outFps() { return outFps; }
+    float lostFps() { return lostFps; }
     boolean isPaused() { return pausedReason != null; }
 
     /** Playing long enough for its decode rate to mean something (#83). */

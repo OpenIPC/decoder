@@ -96,6 +96,9 @@ public class Decoder extends Activity
     private final TextView[] quadStats = new TextView[CAM_COUNT];
     /** Samples (seconds) a cell may fall behind before the grid is relieved (#83). */
     private static final int OVERLOAD_SAMPLES = 5;
+    /** After pausing a cell, time for the load to settle before the next decision. */
+    private static final long RELIEF_COOLDOWN_MS = 10_000;
+    private long lastReliefMs;
     private volatile int quadAudioGen;
     private ExecutorService quadAudioExecutor;
 
@@ -880,9 +883,11 @@ public class Decoder extends Activity
     }
 
     /**
-     * The declared decoder budget is often far too low (on the AG-216 about 2.7x of it played
-     * fine), so load is judged by measurement: when a playing cell keeps decoding clearly
-     * fewer frames than it receives, the highest-numbered playing cell is paused (#83).
+     * Load is judged by measurement, not by the declared budget: a cell falls behind when the
+     * decoder makes it lose frames (its queue overflows, or the decoder has no free input
+     * buffer). Frames lost on the network do not count: they lower decoded/received in the
+     * corner text but say nothing about the decoder. When a cell keeps falling behind, the
+     * highest-numbered playing cell is paused, then the load is given time to settle (#83).
      */
     private void relieveDecoder(QuadCell[] cells, long now) {
         boolean overloaded = false;
@@ -894,13 +899,15 @@ public class Decoder extends Activity
             active++;
             last = i;
             if (c.isSettled(now) && c.inFps() >= 5) {
-                c.behindSamples = c.outFps() < 0.85f * c.inFps() ? c.behindSamples + 1 : 0;
+                boolean behind = c.lostFps() >= Math.max(2f, 0.1f * c.inFps());
+                c.behindSamples = behind ? c.behindSamples + 1 : 0;
                 if (c.behindSamples >= OVERLOAD_SAMPLES) overloaded = true;
             } else {
                 c.behindSamples = 0;
             }
         }
-        if (!overloaded || active < 2) return;
+        if (!overloaded || active < 2 || now - lastReliefMs < RELIEF_COOLDOWN_MS) return;
+        lastReliefMs = now;
         String reason = "Paused: decoder overloaded";
         Log.w(TAG, "Decoder overloaded with " + active + " streams: pausing Quad-" + last);
         cells[last].pause(reason);

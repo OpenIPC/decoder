@@ -50,6 +50,8 @@ class MediaCodecManager {
 
     /** Frames rendered so far (#82): with the frames received this gives the real decode rate. */
     private volatile int framesOut;
+    /** NAL units not fed because the decoder had no free input buffer: it is not keeping up. */
+    private volatile int inputDropped;
     private volatile int outWidth;
     private volatile int outHeight;
     /** MIME type whose instance slot this manager holds while it has a decoder (#83). */
@@ -64,6 +66,7 @@ class MediaCodecManager {
     }
 
     int framesOut() { return framesOut; }
+    int inputDropped() { return inputDropped; }
     int outWidth() { return outWidth; }
     int outHeight() { return outHeight; }
     boolean hasDecoder() { return decoder != null; }
@@ -312,6 +315,8 @@ class MediaCodecManager {
                             codec.queueInputBuffer(inputBufferId, 0,
                                     buffer.length(), System.nanoTime() / 1000, flag);
                         }
+                    } else {
+                        inputDropped++;
                     }
 
                     MediaCodec.BufferInfo info = bufferInfo;
