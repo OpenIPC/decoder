@@ -462,7 +462,7 @@ class RtspSession {
                             + (sdp.videoH265 ? ", H.265" : ", H.264"));
                     callback.onSdp(sdp);
                 }
-                if (sdp == null) return; // nothing to decode yet
+                if (sdp == null || pt != sdp.videoPt) return; // not video, or none yet
                 boolean usable = callback.onPacket(CHANNEL_VIDEO, buf, offset, length);
                 if (usable) {
                     lastPacketMs = System.nanoTime() / 1_000_000;
