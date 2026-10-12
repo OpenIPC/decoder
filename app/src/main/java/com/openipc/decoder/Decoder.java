@@ -56,7 +56,9 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -81,6 +83,8 @@ public class Decoder extends Activity {
     // Incremented on every start/stop; worker threads exit when it no longer matches
     private volatile int listenerGen;
     private volatile Socket mSocket;
+    // Guards mSocket and activeStream against a generation change from onPause/onResume
+    private final Object streamLock = new Object();
     private int lastWidth;
     private int lastHeight;
     private volatile long lastFrame;
@@ -383,6 +387,10 @@ public class Decoder extends Activity {
     }
 
     private void playAudio(Frame data) {
+        // A reconnect may announce another rate: recreate the track
+        if (audioTrack != null && audioRate > 0 && audioTrack.getSampleRate() != audioRate) {
+            closeAudio();
+        }
         if (audioTrack == null) {
             createAudio(data.length);
         } else {
@@ -518,7 +526,10 @@ public class Decoder extends Activity {
     }
 
     private void closeSocket() {
-        Socket s = mSocket;
+        Socket s;
+        synchronized (streamLock) {
+            s = mSocket;
+        }
         if (s != null) {
             try {
                 s.close();
@@ -558,6 +569,18 @@ public class Decoder extends Activity {
 
     private Response readResponse(InputStream in) throws IOException {
         Response r = new Response();
+        // Some servers start sending interleaved RTP before the PLAY response: skip it
+        in.mark(1);
+        while (in.read() == 0x24) {
+            int channel = in.read();
+            int hi = in.read();
+            int lo = in.read();
+            if ((channel | hi | lo) < 0) throw new IOException("Connection closed");
+            int len = (hi << 8) | lo;
+            readFully(in, new byte[len], len);
+            in.mark(1);
+        }
+        in.reset();
         String status = readLine(in);
         Log.i(TAG, status);
         String[] parts = status.split(" ", 3);
@@ -603,6 +626,11 @@ public class Decoder extends Activity {
     private static String resolveControl(String base, String control) {
         if (control == null || control.equals("*")) return base;
         if (control.startsWith("rtsp://") || control.startsWith("rtsps://")) return control;
+        if (control.startsWith("/")) {
+            // Root-relative: keep only scheme://host:port of the base
+            int hostEnd = base.indexOf('/', base.indexOf("://") + 3);
+            return (hostEnd < 0 ? base : base.substring(0, hostEnd)) + control;
+        }
         return base.endsWith("/") ? base + control : base + "/" + control;
     }
 
@@ -612,30 +640,23 @@ public class Decoder extends Activity {
         String[] controls = { null, null };
         String session = null;
         int media = -1; // -1 session level, 0 video, 1 audio, 2 other
-        int vPt = -1;
-        int aPt = -1;
-        String vCodec = null;
-        String aCodec = null;
-        int aRate = 0;
+        // Payload types offered per media line, and their rtpmap: pt -> { NAME, rate }
+        List<Integer> vPts = new ArrayList<>();
+        List<Integer> aPts = new ArrayList<>();
+        Map<Integer, String[]> vMap = new HashMap<>();
+        Map<Integer, String[]> aMap = new HashMap<>();
         boolean hasAudio = false;
 
         for (String line : sdp.split("\r?\n")) {
             if (line.startsWith("m=")) {
+                media = line.startsWith("m=video") ? 0 : line.startsWith("m=audio") ? 1 : 2;
+                if (media == 1) hasAudio = true;
                 String[] p = line.split("\\s+");
-                int pt = -1;
-                try {
-                    if (p.length >= 4) pt = Integer.parseInt(p[3]);
-                } catch (NumberFormatException ignored) {
-                }
-                if (line.startsWith("m=video")) {
-                    media = 0;
-                    vPt = pt;
-                } else if (line.startsWith("m=audio")) {
-                    media = 1;
-                    aPt = pt;
-                    hasAudio = true;
-                } else {
-                    media = 2;
+                for (int i = 3; i < p.length && media < 2; i++) {
+                    try {
+                        (media == 0 ? vPts : aPts).add(Integer.parseInt(p[i]));
+                    } catch (NumberFormatException ignored) {
+                    }
                 }
             } else if (line.startsWith("a=control:")) {
                 String ctrl = line.substring(10).trim();
@@ -645,15 +666,42 @@ public class Decoder extends Activity {
                 // a=rtpmap:<pt> <name>/<rate>[/<channels>]
                 String[] p = line.substring(9).trim().split("[\\s/]+");
                 if (p.length < 2) continue;
-                if (media == 0 && p[0].equals(String.valueOf(vPt))) {
-                    vCodec = p[1].toUpperCase(Locale.ROOT);
-                } else if (media == 1 && p[0].equals(String.valueOf(aPt))) {
-                    aCodec = p[1].toUpperCase(Locale.ROOT);
-                    try {
-                        if (p.length > 2) aRate = Integer.parseInt(p[2]);
-                    } catch (NumberFormatException ignored) {
-                    }
+                try {
+                    (media == 0 ? vMap : aMap).put(Integer.parseInt(p[0]), new String[] {
+                            p[1].toUpperCase(Locale.ROOT), p.length > 2 ? p[2] : "" });
+                } catch (NumberFormatException ignored) {
                 }
+            }
+        }
+
+        // Video: first offered H.264/H.265; without rtpmap keep the legacy 96/97 convention
+        int vPt = -1;
+        String vCodec = null;
+        for (int pt : vPts) {
+            String[] m = vMap.get(pt);
+            String name = m != null ? m[0] : pt == 97 ? "H265" : pt == 96 ? "H264" : null;
+            if ("H264".equals(name) || "H265".equals(name) || "HEVC".equals(name)) {
+                vPt = pt;
+                vCodec = name;
+                break;
+            }
+        }
+        if (vPt < 0 && !vPts.isEmpty()) vPt = vPts.get(0);
+
+        // Audio: first offered L16, the only format played; without rtpmap the legacy PT 100
+        int aPt = -1;
+        int aRate = 0;
+        String aCodec = null;
+        for (int pt : aPts) {
+            String[] m = aMap.get(pt);
+            if (m != null ? m[0].equals("L16") : pt == 100) {
+                aPt = pt;
+                aCodec = "L16";
+                try {
+                    if (m != null) aRate = Integer.parseInt(m[1]);
+                } catch (NumberFormatException ignored) {
+                }
+                break;
             }
         }
 
@@ -663,22 +711,13 @@ public class Decoder extends Activity {
             urls[1] = resolveControl(sessionBase, controls[1] != null ? controls[1] : "trackID=1");
         }
 
-        // Video codec from rtpmap; servers without rtpmap keep the legacy 96/97 convention
         videoPt = vPt;
-        if (vCodec != null) {
-            codecH265 = vCodec.equals("H265") || vCodec.equals("HEVC");
-        } else {
-            codecH265 = vPt == 97;
-        }
-
-        // Only 16-bit PCM (L16) is played; without rtpmap keep the legacy PT 100
-        boolean pcm = aCodec != null ? aCodec.equals("L16") : aPt == 100;
-        audioPt = pcm ? aPt : -1;
-        audioRate = pcm && aRate > 0 && aRate <= 192000 ? aRate : 0;
+        codecH265 = vCodec != null ? !vCodec.equals("H264") : vPt == 97;
+        audioPt = aPt;
+        audioRate = aRate > 0 && aRate <= 192000 ? aRate : 0;
 
         Log.i(TAG, "SDP: video pt " + vPt + " " + (codecH265 ? "H265" : "H264")
-                + ", audio pt " + aPt + " " + (aCodec != null ? aCodec : "?")
-                + (pcm ? "" : " (not played)"));
+                + ", audio pt " + aPt + (aCodec != null ? " L16" : " (none played)"));
         return urls;
     }
 
@@ -694,9 +733,12 @@ public class Decoder extends Activity {
         String url = "rtsp://" + host + (port >= 0 ? ":" + port : "")
                 + (path != null ? path : "") + (query != null ? "?" + query : "");
 
-        try (Socket s = new Socket()) {
-            mSocket = s;
-            if (gen != listenerGen) return;
+        Socket s = new Socket();
+        try {
+            synchronized (streamLock) {
+                if (gen != listenerGen) return;
+                mSocket = s;
+            }
             s.connect(new InetSocketAddress(host, port < 0 ? 554 : port), 3000);
             s.setSoTimeout(3000);
             InputStream in = new BufferedInputStream(s.getInputStream(), 65536);
@@ -738,14 +780,22 @@ public class Decoder extends Activity {
             r = request(in, w, "PLAY", url, seq, auth + "Session: " + session + "\r\n");
             if (r.code / 100 != 2) throw new IOException("PLAY failed: " + r.code);
 
-            lastFrame = SystemClock.elapsedRealtime();
-            activeStream = true;
+            synchronized (streamLock) {
+                // Paused meanwhile: do not mark an obsolete connection active
+                if (gen != listenerGen) return;
+                lastFrame = SystemClock.elapsedRealtime();
+                activeStream = true;
+            }
             tcp_stream(in, gen);
         } finally {
             // A thread from an older generation must not clobber the state of a newer one
-            if (gen == listenerGen) {
-                mSocket = null;
-                activeStream = false;
+            synchronized (streamLock) {
+                if (mSocket == s) mSocket = null;
+                if (gen == listenerGen) activeStream = false;
+            }
+            try {
+                s.close();
+            } catch (IOException ignored) {
             }
         }
     }
@@ -767,24 +817,25 @@ public class Decoder extends Activity {
             readFully(input, data, len);
 
             if ((channel == 0 || channel == 2) && len > 13) {
-                processPacket(new Frame(data, len));
+                processPacket(new Frame(data, len), channel);
             }
         }
     }
 
     private int lastUnknownPayload = -1;
 
-    private void processPacket(Frame frame) {
+    private void processPacket(Frame frame, int channel) {
         byte[] data = frame.data();
         int payload = (data[1] & 0x7F);
-        if (payload == videoPt) {
+        // Channel 0 carries the video track and channel 2 the audio track (see SETUP)
+        if (channel == 0 && payload == videoPt) {
             lastFrame = SystemClock.elapsedRealtime();
             Frame output = buildFrame(frame);
             if (output != null && !nalQueue.offer(output)) {
                 Log.w(TAG, "Frame queue is full");
             }
             return;
-        } else if (payload == audioPt) {
+        } else if (channel == 2 && payload == audioPt) {
             processAudio(frame);
             return;
         }
@@ -797,7 +848,10 @@ public class Decoder extends Activity {
 
     private void startListener() {
         Log.i(TAG, "Start network listener");
-        final int gen = ++listenerGen;
+        final int gen;
+        synchronized (streamLock) {
+            gen = ++listenerGen;
+        }
 
         new Thread(() -> {
             while (gen == listenerGen) {
@@ -859,8 +913,10 @@ public class Decoder extends Activity {
     protected void onPause() {
         super.onPause();
         // Old threads see the new generation and exit; closing the socket unblocks the reader
-        listenerGen++;
-        activeStream = false;
+        synchronized (streamLock) {
+            listenerGen++;
+            activeStream = false;
+        }
         closeSocket();
         closeDecoder();
         closeAudio();
