@@ -1,59 +1,30 @@
 /*
  * Copyright (c) OpenIPC  https://openipc.org  Prosperity Public License 3.0.0
  *
- * RtspClient.java — RTSP handshake and RTP-over-TCP streaming client
+ * RtspClient.java — single-view stream: RTSP session, NAL assembly, audio and quality
  *
  */
 
 package com.openipc.decoder;
 
-import android.net.Uri;
 import android.os.SystemClock;
-import android.util.Base64;
 import android.util.Log;
 
-import java.io.BufferedInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.InetSocketAddress;
-import java.net.Socket;
-import java.nio.charset.StandardCharsets;
-import java.util.Locale;
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
-class RtspClient {
+class RtspClient implements RtspSession.Callback {
     private static final String TAG = "OpenIPCDecoder";
 
-    static final int RTP_PT_H265 = 97;
-    static final int RTP_PT_H264 = 96;
+    private final FramePool framePool;
+    private final NalAssembler nalAssembler;
+    private final BlockingQueue<Frame> nalQueue;
+    private final RtspSession session = new RtspSession("rtsp", this);
 
-    private static final long WATCHDOG_MS = 8000;
-
-    private volatile String host;
-    private volatile String userAgent;
-    private volatile int listenerGen;
-    private volatile boolean listener;
-    private volatile boolean activeStream;
-    private volatile long lastFrame;
-
-    private FramePool framePool;
-    private NalAssembler nalAssembler;
-    private BlockingQueue<Frame> nalQueue;
-    private volatile Socket mTcpSocket;
-    private ExecutorService executor;
-
-    // Decoder state
+    // Session parameters from the SDP (network thread)
+    private volatile int videoPt = -1;
     private volatile boolean codecH265;
-    private volatile AudioConfig audioConfig = new AudioConfig();
-    private volatile String videoTrackUrl;
-    private volatile String audioTrackUrl;
 
-    // Quality tracking
+    // Quality tracking (network thread)
     private long lastQualityUpdateTime;
     private long lastRtpTimestamp = -1;
     private long lastRtpArrivalNs = -1;
@@ -61,14 +32,6 @@ class RtspClient {
     private int jitterSampleCount;
     private int lastUnknownPayload = -1;
 
-    // First-frame tracking for status transition
-    private boolean firstFrameReceived;
-
-    // Bitrate tracking
-    private volatile long streamBytes;
-    private volatile long bitrateMarkNs;
-
-    // Audio callback — set by owner
     private AudioManager audioManager;
 
     interface Listener {
@@ -90,506 +53,110 @@ class RtspClient {
     void setAudioManager(AudioManager am) { this.audioManager = am; }
 
     void configure(String host, String userAgent) {
-        this.host = host;
-        this.userAgent = userAgent;
+        session.configure(host, userAgent, true);
     }
 
-    boolean isCodecH265() { return codecH265; }
-    boolean isActive() { return activeStream; }
-    boolean isListening() { return listener; }
-    long getLastFrame() { return lastFrame; }
-    long getStreamBytes() { return streamBytes; }
-    long getBitrateMarkNs() { return bitrateMarkNs; }
+    boolean isActive() { return session.isActive(); }
+    long getStreamBytes() { return session.getStreamBytes(); }
+    long getBitrateMarkNs() { return session.getBitrateMarkNs(); }
 
     void start() {
-        if (listener) return;
-        listener = true;
-        listenerGen++;
-        executor = Executors.newFixedThreadPool(5);
-
-        final int gen = listenerGen;
-        executor.execute(() -> {
-            Thread.currentThread().setName("rtsp-network");
-            int retryDelay = 1000;
-            int consecutiveFailures = 0;
-            final int MAX_RETRY_DELAY = 30000;
-            final int MAX_CONSECUTIVE_FAILURES = 10;
-
-            while (gen == listenerGen) {
-                try {
-                    if (!activeStream) {
-                        rtspConnect();
-                        retryDelay = 1000;
-                        consecutiveFailures = 0;
-                        streamBytes = 0;
-                        bitrateMarkNs = System.nanoTime();
-                        if (listenerCb != null) listenerCb.onStatusChanged("disconnected");
-                    } else {
-                        SystemClock.sleep(1000);
-                    }
-                } catch (Exception e) {
-                    consecutiveFailures++;
-                    activeStream = false;
-                    if (listenerCb != null) listenerCb.onStatusChanged("disconnected");
-
-                    if (consecutiveFailures <= 3 || (consecutiveFailures % 5 == 0)) {
-                        Log.w(TAG, "RTSP connection failed (" + consecutiveFailures + "): " + e.getMessage());
-                    }
-
-                    int jitter = (int)(Math.random() * 500);
-                    int delay = retryDelay + jitter;
-                    if (consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
-                        delay = MAX_RETRY_DELAY;
-                    }
-                    SystemClock.sleep(delay);
-                    retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
-
-                    if (consecutiveFailures > 20) {
-                        Log.i(TAG, "Resetting connection state after many failures");
-                        closeSockets();
-                        if (listenerCb != null) listenerCb.onStatusChanged("disconnected");
-                        consecutiveFailures = 15;
-                    }
-                }
-            }
-        });
-
-        executor.execute(() -> {
-            Thread.currentThread().setName("rtsp-watchdog");
-            while (gen == listenerGen) {
-                if (activeStream && lastFrame > 0
-                        && SystemClock.elapsedRealtime() - lastFrame > WATCHDOG_MS) {
-                    Log.w(TAG, "Stream is inactive");
-                    activeStream = false;
-                    Socket tcp = mTcpSocket;
-                    if (tcp != null) try { tcp.close(); } catch (Exception ignored) {}
-                }
-                SystemClock.sleep(1000);
-            }
-        });
+        nalAssembler.reset();
+        session.start();
     }
 
+    /** Non-blocking: the session threads exit on their own. */
     void stop() {
-        listener = false;
-        listenerGen++;
-        activeStream = false;
-        closeSockets();
-        if (executor != null) {
-            executor.shutdownNow();
-            try {
-                if (!executor.awaitTermination(2, TimeUnit.SECONDS)) {
-                    executor.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                executor.shutdownNow();
-                Thread.currentThread().interrupt();
-            }
-            executor = null;
-        }
-        if (nalAssembler != null) nalAssembler.reset();
+        session.stop();
+        nalAssembler.reset();
     }
 
-    void invalidateGen() { listenerGen++; }
+    // ====================== RtspSession.Callback ======================
 
-    private void closeSockets() {
-        Socket tcp = mTcpSocket;
-        if (tcp != null) {
-            try { tcp.close(); } catch (Exception e) {
-                Log.e(TAG, "Error closing TCP socket", e);
-            }
-        }
+    @Override
+    public void onStatus(String status) {
+        Listener l = listenerCb;
+        if (l != null) l.onStatusChanged(status);
     }
 
-    private void rtspConnect() throws Exception {
+    @Override
+    public void onSdp(Sdp sdp) {
         nalAssembler.reset();
         lastUnknownPayload = -1;
-        String currentHost = host;
-        if (currentHost == null || currentHost.isEmpty()) {
-            throw new IOException("Camera slot not configured");
-        }
-        Uri uri = Uri.parse(currentHost);
-        String h = uri.getHost();
-        if (h == null || h.isEmpty()) {
-            throw new IOException("Invalid RTSP URL: host is missing or empty");
-        }
-        Socket s = null;
-        try {
-            s = new Socket();
-            int port = uri.getPort();
-            s.connect(new InetSocketAddress(h, port < 0 ? 554 : port), 5000);
-            s.setTcpNoDelay(true);
-            s.setSoTimeout(5000);
-            InputStream input = s.getInputStream();
-            OutputStream w = s.getOutputStream();
-
-            Log.d(TAG, "Start rtsp connection");
-
-            String user = uri.getUserInfo();
-            String auth = "";
-            if (user != null) {
-                auth = "Authorization: Basic " +
-                        Base64.encodeToString(user.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP) + "\r\n";
-            }
-            String path = uri.getEncodedPath();
-            String query = uri.getEncodedQuery();
-            String rtspUrl = uri.getScheme() + "://" + h
-                    + (port >= 0 ? ":" + port : "")
-                    + (path  != null ? path         : "")
-                    + (query != null ? "?" + query  : "");
-
-            int seq = 1;
-            String desc = "DESCRIBE " + rtspUrl + " RTSP/1.0\r\n" +
-                    "CSeq: " + seq + "\r\n" + auth + userAgent + "Accept: application/sdp\r\n\r\n";
-            w.write(desc.getBytes(StandardCharsets.UTF_8));
-            w.flush();
-
-            StringBuilder sdp = new StringBuilder();
-            String contentLen = readRtspResponse(input, "Content-Length:", sdp);
-            if (contentLen != null) {
-                try {
-                    int len = Integer.parseInt(contentLen);
-                    byte[] body = new byte[len];
-                    int off = 0;
-                    while (off < len) {
-                        int n = input.read(body, off, len - off);
-                        if (n <= 0) break;
-                        off += n;
-                    }
-                    sdp.append(new String(body, 0, off, StandardCharsets.UTF_8));
-                } catch (NumberFormatException ignored) {}
-            } else if (sdp.length() == 0) {
-                int saved = input.available();
-                if (saved > 0) {
-                    byte[] body = new byte[Math.min(saved, 4096)];
-                    int n = input.read(body);
-                    if (n > 0) sdp.append(new String(body, 0, n, StandardCharsets.UTF_8));
-                }
-            }
-            parseSdpAndNotify(sdp.toString(), rtspUrl);
-
-            seq++;
-            String video = "SETUP " + videoTrackUrl + " RTSP/1.0\r\n" +
-                    "CSeq: " + seq + "\r\n" + auth + userAgent +
-                    "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n\r\n";
-            w.write(video.getBytes(StandardCharsets.UTF_8));
-            w.flush();
-
-            String session = readRtspResponse(input, "Session:");
-            if (session == null) {
-                throw new IOException("RTSP server did not return a Session header");
-            }
-            session = session.replaceAll("[\r\n]", "");
-
-            seq++;
-            String audio = "SETUP " + audioTrackUrl + " RTSP/1.0\r\n" +
-                    "CSeq: " + seq + "\r\n" + auth + userAgent +
-                    "Transport: RTP/AVP/TCP;unicast;interleaved=2-3\r\n" +
-                    "Session: " + session + "\r\n\r\n";
-            w.write(audio.getBytes(StandardCharsets.UTF_8));
-            w.flush();
-
-            readRtspResponse(input, null);
-
-            seq++;
-            String play = "PLAY " + rtspUrl + " RTSP/1.0\r\n" +
-                    "CSeq: " + seq + "\r\n" + auth + userAgent + "Session: " + session + "\r\n\r\n";
-            w.write(play.getBytes(StandardCharsets.UTF_8));
-            w.flush();
-
-            readRtspResponse(input, null);
-            firstFrameReceived = false;
-        if (listenerCb != null) listenerCb.onStatusChanged("buffering");
-
-            s.setSoTimeout(0);
-            lastFrame = SystemClock.elapsedRealtime();
-            activeStream = true;
-
-            mTcpSocket = s;
-            try {
-                tcpStream(input);
-            } finally {
-                mTcpSocket = null;
-            }
-            try {
-                String teardown = "TEARDOWN " + rtspUrl + " RTSP/1.0\r\n" +
-                        "CSeq: " + (seq + 1) + "\r\n" + auth + userAgent +
-                        "Session: " + session + "\r\n\r\n";
-                w.write(teardown.getBytes(StandardCharsets.UTF_8));
-                w.flush();
-                Log.d(TAG, "RTSP TEARDOWN sent");
-            } catch (Exception e) {
-                Log.e(TAG, "Error sending TEARDOWN", e);
-            }
-        } finally {
-            if (s != null) {
-                try { s.close(); } catch (Exception e) {
-                    Log.e(TAG, "Error closing TCP socket", e);
-                }
-            }
-        }
+        lastRtpTimestamp = -1;
+        lastRtpArrivalNs = -1;
+        videoPt = sdp.videoPt;
+        codecH265 = sdp.videoH265;
+        Log.i(TAG, "Video pt " + sdp.videoPt + (sdp.videoH265 ? " H.265" : " H.264")
+                + ", audio " + sdp.audio.codec);
+        Listener l = listenerCb;
+        if (l != null) l.onCodecChanged(codecH265, sdp.audio);
     }
 
-    private void tcpStream(InputStream rawInput) throws IOException {
-        BufferedInputStream input = new BufferedInputStream(rawInput, 65536);
-        byte[] pktBuf = new byte[65535];
-        streamBytes = 0;
-        bitrateMarkNs = System.nanoTime();
-        while (activeStream) {
-            int total = readInterleavedPacket(input, pktBuf);
-            if (total < 0) { activeStream = false; break; }
+    @Override
+    public void onPacket(int channel, byte[] buf, int offset, int length) {
+        if (length < 12) return;
+        Frame frame = framePool.obtain(length);
+        System.arraycopy(buf, offset, frame.data(), 0, length);
+        frame.setLength(length);
 
-            streamBytes += total;
-            int channel = pktBuf[1];
-            int len = total - 4;
-            Frame frame = framePool.obtain(len);
-            System.arraycopy(pktBuf, 4, frame.data(), 0, len);
-            frame.setLength(len);
-
-            if (channel == 0) {
-                processPacket(frame);
-            } else if (channel == 2) {
-                if (audioManager != null) {
-                    audioManager.onAudioFrame(frame);
-                }
-                framePool.recycle(frame);
-            } else {
-                framePool.recycle(frame);
-            }
-        }
-    }
-
-    /** Read one RTP-over-TCP interleaved packet. Shared between RtspClient and QuadCell. */
-    static int readInterleavedPacket(BufferedInputStream input, byte[] pktBuf) throws IOException {
-        while (true) {
-            int b0 = input.read();
-            if (b0 < 0) return -1; // clean EOF
-            if (b0 != '$') continue;
-            int b1 = input.read();
-            if (b1 < 0) throw new IOException("Truncated RTP header (channel)");
-            int b2 = input.read();
-            if (b2 < 0) throw new IOException("Truncated RTP header (len hi)");
-            int b3 = input.read();
-            if (b3 < 0) throw new IOException("Truncated RTP header (len lo)");
-            int len = (b2 << 8) | b3;
-            if (len + 4 > pktBuf.length)
-                throw new IOException("RTP packet too large: " + len);
-            pktBuf[0] = '$';
-            pktBuf[1] = (byte) b1;
-            pktBuf[2] = (byte) b2;
-            pktBuf[3] = (byte) b3;
-            int offset = 4;
-            int remaining = len;
-            while (remaining > 0) {
-                int n = input.read(pktBuf, offset, remaining);
-                if (n < 0) throw new IOException("Truncated RTP body");
-                remaining -= n;
-                offset += n;
-            }
-            return len + 4;
-        }
-    }
-
-    private void processPacket(Frame frame) {
-        if (frame.length() < 12) { framePool.recycle(frame); return; }
-        byte[] data = frame.data();
-        if ((data[0] & 0x0F) != 0 || (data[0] & 0x10) != 0) { framePool.recycle(frame); return; }
-
-        int payload = (data[1] & 0x7F);
-        if (payload == audioConfig.pt) {
-            if (audioManager != null) {
-                audioManager.onAudioFrame(frame);
-            }
-            framePool.recycle(frame);
-            return;
-        } else if (payload == RTP_PT_H265 || payload == RTP_PT_H264) {
-            if (!firstFrameReceived) {
-                firstFrameReceived = true;
-                if (listenerCb != null) listenerCb.onStatusChanged("connected");
-            }
-            lastFrame = SystemClock.elapsedRealtime();
-            long now = SystemClock.elapsedRealtime();
-            if (now - lastQualityUpdateTime > 1000) {
-                lastQualityUpdateTime = now;
-                int avgJitter = (jitterSampleCount > 0)
-                        ? (int)(jitterAccumulator / jitterSampleCount)
-                        : -1;
-                if (listenerCb != null) listenerCb.onJitterSample(avgJitter);
-                jitterAccumulator = 0;
-                jitterSampleCount = 0;
-            }
-            if (lastRtpTimestamp >= 0 && lastRtpArrivalNs >= 0) {
-                int rtpTs = ((data[4] & 0xFF) << 24)
-                          | ((data[5] & 0xFF) << 16)
-                          | ((data[6] & 0xFF) << 8)
-                          | (data[7] & 0xFF);
-                long rtpDeltaMs = ((rtpTs & 0xFFFFFFFFL) - (lastRtpTimestamp & 0xFFFFFFFFL)) / 90L;
-                long arrivalDeltaMs = (System.nanoTime() - lastRtpArrivalNs) / 1000000;
-                long jitter = Math.abs(arrivalDeltaMs - rtpDeltaMs);
-                if (jitter < 5000) {
-                    jitterAccumulator += jitter;
-                    jitterSampleCount++;
-                }
-            }
-            lastRtpTimestamp = Integer.toUnsignedLong(
-                    ((data[4] & 0xFF) << 24) |
-                    ((data[5] & 0xFF) << 16) |
-                    ((data[6] & 0xFF) << 8) |
-                    (data[7] & 0xFF));
-            lastRtpArrivalNs = System.nanoTime();
-
-            codecH265 = payload == RTP_PT_H265;
-            Frame output = nalAssembler.assemble(frame, codecH265);
-            framePool.recycle(frame);
-            if (output != null) {
-                if (!nalQueue.offer(output)) {
-                    Log.w(TAG, "Video queue full, frame dropped");
-                    framePool.recycle(output);
-                }
-            }
-            return;
-        }
-
-        if (payload != lastUnknownPayload) {
-            lastUnknownPayload = payload;
-            Log.w(TAG, "Unknown rtp type: " + payload);
+        if (channel == RtspSession.CHANNEL_VIDEO) {
+            processVideo(frame);
+        } else if (channel == RtspSession.CHANNEL_AUDIO && audioManager != null) {
+            audioManager.onAudioFrame(frame);
         }
         framePool.recycle(frame);
     }
 
-    private void parseSdpAndNotify(String sdp, String baseUrl) {
-        boolean[] h265Out = new boolean[1];
-        AudioConfig audio = new AudioConfig();
-        String[] controls = parseSdp(sdp, baseUrl, h265Out, audio);
-        codecH265 = h265Out[0];
-        audioConfig = audio;
-        videoTrackUrl = controls[0];
-        audioTrackUrl = controls[1];
-        if (listenerCb != null) {
-            listenerCb.onCodecChanged(codecH265, audio);
+    private void processVideo(Frame frame) {
+        byte[] data = frame.data();
+        // CSRC and header extensions are not supported for video yet (#10)
+        if ((data[0] & 0x0F) != 0 || (data[0] & 0x10) != 0) return;
+
+        int payload = data[1] & 0x7F;
+        if (payload != videoPt) {
+            if (payload != lastUnknownPayload) {
+                lastUnknownPayload = payload;
+                Log.w(TAG, "Unexpected video rtp type: " + payload + " (expected " + videoPt + ")");
+            }
+            return;
+        }
+
+        updateJitter(data);
+
+        Frame output = nalAssembler.assemble(frame, codecH265);
+        if (output != null && !nalQueue.offer(output)) {
+            Log.w(TAG, "Video queue full, frame dropped");
+            framePool.recycle(output);
         }
     }
 
-    /**
-     * Parse the SDP: returns { videoControlUrl, audioControlUrl }, stores the video codec
-     * into {@code codecH265Out[0]} and the audio track parameters into {@code audioOut}
-     * (both may be null).
-     */
-    static String[] parseSdp(String sdp, String baseUrl,
-                             boolean[] codecH265Out, AudioConfig audioOut) {
-        String base = baseUrl;
-        String[] controls = { null, null };
-        int track = -1;
-        boolean codecH265 = false;
-        AudioConfig audio = audioOut != null ? audioOut : new AudioConfig();
-
-        for (String line : sdp.split("[\r\n]+")) {
-            if (line.startsWith("m=video")) {
-                track = 0;
-                String[] parts = line.split("\\s+");
-                if (parts.length >= 4) {
-                    try {
-                        int pt = Integer.parseInt(parts[3]);
-                        codecH265 = (pt == 97);
-                    } catch (NumberFormatException ignored) {}
-                }
-            } else if (line.startsWith("m=audio")) {
-                track = 1;
-                String[] parts = line.split("\\s+");
-                if (parts.length >= 4) {
-                    try {
-                        audio.pt = Integer.parseInt(parts[3]);
-                        audio.applyStaticPayloadType();
-                    } catch (NumberFormatException ignored) {}
-                }
-            } else if (line.startsWith("m=")) {
-                track = 2; // other media, ignored
-            } else if (line.startsWith("a=control:")) {
-                String ctrl = line.substring("a=control:".length()).trim();
-                if (track == -1) {
-                    base = ctrl.startsWith("rtsp://") ? ctrl : baseUrl + "/" + ctrl;
-                } else if (track < 2) {
-                    controls[track] = ctrl.startsWith("rtsp://") ? ctrl : base + "/" + ctrl;
-                }
-            } else if (track == 1 && audio.pt >= 0
-                    && line.startsWith("a=rtpmap:" + audio.pt + " ")) {
-                audio.applyRtpmap(line.substring(("a=rtpmap:" + audio.pt + " ").length()));
-            } else if (track == 1 && audio.pt >= 0
-                    && line.startsWith("a=fmtp:" + audio.pt + " ")) {
-                audio.applyFmtp(line.substring(("a=fmtp:" + audio.pt + " ").length()));
+    private void updateJitter(byte[] data) {
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastQualityUpdateTime > 1000) {
+            lastQualityUpdateTime = now;
+            int avgJitter = jitterSampleCount > 0
+                    ? (int) (jitterAccumulator / jitterSampleCount) : -1;
+            Listener l = listenerCb;
+            if (l != null) l.onJitterSample(avgJitter);
+            jitterAccumulator = 0;
+            jitterSampleCount = 0;
+        }
+        long rtpTs = Integer.toUnsignedLong(((data[4] & 0xFF) << 24)
+                | ((data[5] & 0xFF) << 16)
+                | ((data[6] & 0xFF) << 8)
+                | (data[7] & 0xFF));
+        long arrivalNs = System.nanoTime();
+        if (lastRtpTimestamp >= 0 && lastRtpArrivalNs >= 0) {
+            long rtpDeltaMs = (rtpTs - lastRtpTimestamp) / 90L;
+            long arrivalDeltaMs = (arrivalNs - lastRtpArrivalNs) / 1_000_000;
+            long jitter = Math.abs(arrivalDeltaMs - rtpDeltaMs);
+            if (jitter < 5000) {
+                jitterAccumulator += jitter;
+                jitterSampleCount++;
             }
         }
-        audio.finish();
-        if (controls[0] == null) controls[0] = base + "/trackID=0";
-        if (controls[1] == null) controls[1] = base + "/trackID=1";
-
-        if (codecH265Out != null && codecH265Out.length > 0) codecH265Out[0] = codecH265;
-        return controls;
-    }
-
-    /**
-     * Length of the RTP header including CSRC list and header extension,
-     * or -1 when the packet is malformed.
-     */
-    static int rtpHeaderLength(byte[] data, int length) {
-        if (length < 12 || (data[0] & 0xC0) != 0x80) return -1;
-        int len = 12 + 4 * (data[0] & 0x0F);
-        if ((data[0] & 0x10) != 0) {
-            if (len + 4 > length) return -1;
-            int extWords = ((data[len + 2] & 0xFF) << 8) | (data[len + 3] & 0xFF);
-            len += 4 + 4 * extWords;
-        }
-        return len <= length ? len : -1;
-    }
-
-    /** Payload end offset: packet length minus RTP padding, or -1 when malformed. */
-    static int rtpPayloadEnd(byte[] data, int length) {
-        if ((data[0] & 0x20) == 0) return length;
-        int pad = data[length - 1] & 0xFF;
-        return pad <= length ? length - pad : -1;
-    }
-
-    static String readLine(InputStream in) throws IOException {
-        StringBuilder sb = new StringBuilder(128);
-        int c;
-        while ((c = in.read()) != -1) {
-            if (c == '\n') return sb.toString();
-            if (c != '\r') {
-                if (sb.length() >= 8192) throw new IOException("RTSP header line too long");
-                sb.append((char) c);
-            }
-        }
-        return sb.length() > 0 ? sb.toString() : null;
-    }
-
-    /** Read RTSP response headers. Returns the value of {@code targetHeader} if found, or null. */
-    static String readRtspResponse(InputStream in, String targetHeader) throws IOException {
-        return readRtspResponse(in, targetHeader, null);
-    }
-
-    /** Read RTSP response headers and optionally accumulate body into {@code bodyOut}. */
-    static String readRtspResponse(InputStream in, String targetHeader, StringBuilder bodyOut) throws IOException {
-        String status = readLine(in);
-        if (status == null) throw new IOException("Server closed connection during handshake");
-        Log.i(TAG, status);
-
-        String[] parts = status.split(" ", 3);
-        if (parts.length < 2) throw new IOException("Malformed RTSP response: " + status);
-        try {
-            int code = Integer.parseInt(parts[1]);
-            if (code < 200 || code >= 300) throw new IOException("RTSP error: " + status.trim());
-        } catch (NumberFormatException e) {
-            throw new IOException("Malformed RTSP status code: " + status);
-        }
-
-        String found = null;
-        String line;
-        while ((line = readLine(in)) != null && !line.isEmpty()) {
-            Log.d(TAG, line);
-            if (targetHeader != null && line.toLowerCase(Locale.ROOT)
-                    .startsWith(targetHeader.toLowerCase(Locale.ROOT))) {
-                found = line.substring(targetHeader.length()).split(";")[0].trim();
-            }
-        }
-        return found;
+        lastRtpTimestamp = rtpTs;
+        lastRtpArrivalNs = arrivalNs;
     }
 }

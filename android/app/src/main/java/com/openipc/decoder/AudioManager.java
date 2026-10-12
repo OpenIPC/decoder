@@ -94,9 +94,9 @@ class AudioManager {
     /** Called from the network thread to deliver an audio RTP packet. */
     void onAudioFrame(Frame frame) {
         byte[] data = frame.data();
-        int start = RtspClient.rtpHeaderLength(data, frame.length());
+        int start = RtspSession.rtpHeaderLength(data, frame.length());
         if (start < 0) return;
-        int end = RtspClient.rtpPayloadEnd(data, frame.length());
+        int end = RtspSession.rtpPayloadEnd(data, frame.length());
         if (end <= start) return;
 
         AudioConfig c = config;

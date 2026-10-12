@@ -8,24 +8,8 @@
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/openipc/decoder/Decoder.java"
-            line="802"
+            line="799"
             column="18"/>
-    </issue>
-
-    <issue
-        id="SuspiciousIndentation"
-        message="Suspicious indentation: This is indented but is not nested under the previous expression (`if (listenerCb != nu`...)"
-        errorLine1="            s.setSoTimeout(0);"
-        errorLine2="            ~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/openipc/decoder/RtspClient.java"
-            line="303"
-            column="13"/>
-        <location
-            file="src/main/java/com/openipc/decoder/RtspClient.java"
-            line="301"
-            column="9"
-            message="Previous statement here"/>
     </issue>
 
     <issue
@@ -156,7 +140,7 @@
         errorLine2="                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/openipc/decoder/Decoder.java"
-            line="419"
+            line="418"
             column="28"/>
     </issue>
 
@@ -167,7 +151,7 @@
         errorLine2="                           ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/openipc/decoder/Decoder.java"
-            line="419"
+            line="418"
             column="28"/>
     </issue>
 
