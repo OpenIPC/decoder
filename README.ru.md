@@ -34,7 +34,7 @@
 ## Возможности
 
 - **Видео:** воспроизведение RTSP, аппаратное декодирование H.264/H.265 через MediaCodec
-- **Звук:** AAC (RFC 3640 `mpeg4-generic`, ADTS), G.711 μ-law/A-law, L16 PCM (моно и стерео)
+- **Звук:** AAC (RFC 3640 `mpeg4-generic`, ADTS, MP4A-LATM), Opus, G.711 μ-law/A-law, L16 PCM (моно и стерео)
 - **Режимы:** одна камера или Quad — 4 камеры на одном экране
 - **Управление:** масштаб двумя пальцами, перемещение, сброс двойным касанием, пульт Android TV (Leanback)
 - **Сеть:** авторизация Basic и Digest, RTSP keepalive, автоматическое переподключение с растущей задержкой, индикатор качества связи
@@ -93,7 +93,7 @@
 >
 > - **Только RTSP поверх TCP.** UDP и multicast не поддерживаются — [#7](https://github.com/OpenIPC/decoder/issues/7)
 > - **Только 4 слота для камер** — [#13](https://github.com/OpenIPC/decoder/issues/13)
-> - **Не поддерживаются форматы звука** MP4A-LATM, Opus, G.726, а также AAC-кадры, разбитые на несколько RTP-пакетов — [#14](https://github.com/OpenIPC/decoder/issues/14)
+> - **Не поддерживается звук G.726** — [#14](https://github.com/OpenIPC/decoder/issues/14)
 > - **Возможная зависимость от сервисов Google (GAPPS)** на некоторых устройствах; изучается, поэтому отключайте GAPPS осознанно — [#15](https://github.com/OpenIPC/decoder/issues/15)
 > - **Логин и пароль передаются в открытом виде** по RTSP/HTTP без шифрования (Basic, если камера не запросила Digest); RTSPS не поддерживается — [#16](https://github.com/OpenIPC/decoder/issues/16)
 >
