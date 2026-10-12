@@ -61,6 +61,7 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 |--------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Q**        | Turn multi-view (Quad) on or off                                                                                                                                                   |
 | **1**–**8**  | Switch to a camera slot. The active slot's number shows the connection quality: green under 100 ms of jitter, yellow 100–300 ms, red above 300 ms. A grey number is an empty slot. |
+| **U**        | Show the reserved UDP RTP cell full-screen ([#68](https://github.com/OpenIPC/decoder/issues/68))                                                                                   |
 | **Settings** | Edit the RTSP URL of the active slot (single-camera mode only)                                                                                                                     |
 | **WebUI**    | Open the camera's web interface; credentials come from the RTSP URL (single-camera mode only)                                                                                      |
 | **Exit**     | Close the app. The small text next to it is the app version and build hash.                                                                                                        |
@@ -81,7 +82,7 @@ The app accepts plain-text shares (`ACTION_SEND`, `text/plain`). Sharing an `rts
 
 ### Multi-view (Quad)
 
-Shows the configured slots in a 2×2 grid, or in a 3×3 grid once any of slots 5–8 is used. Each cell has its own connection and decoder, so the device's video decoder limits how many high-resolution streams play smoothly: with five or more cameras, their substreams are a good choice. Some cameras accept only one RTSP client at a time. Long-press a cell to play its audio (long-press it again to mute); the selected cell shows an AUDIO badge and is remembered. Tap any cell to open the menu.
+Shows the configured slots in a 2×2 grid, or in a 3×3 grid once any of slots 5–8 is used. The ninth cell of the 3×3 grid is reserved for a camera that pushes RTP over UDP (planned, [#68](https://github.com/OpenIPC/decoder/issues/68)); for now it shows the address and port to send to. **U** in the menu opens it full-screen. Each cell has its own connection and decoder, so the device's video decoder limits how many high-resolution streams play smoothly: with five or more cameras, their substreams are a good choice. Some cameras accept only one RTSP client at a time. Long-press a cell to play its audio (long-press it again to mute); the selected cell shows an AUDIO badge and is remembered. Tap any cell to open the menu.
 
 ## Known limitations
 

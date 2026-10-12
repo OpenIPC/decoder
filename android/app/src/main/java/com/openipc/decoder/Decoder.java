@@ -44,8 +44,12 @@ import android.widget.Toast;
 import java.io.IOException;
 import java.io.OutputStream;
 
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
 import java.util.Locale;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -266,6 +270,12 @@ public class Decoder extends Activity
 
     @Override
     public void onSwitchCamera(int slot) {
+        if (leaveUdpView()) {
+            // From the UDP view back to a slot: (re)start it even if it was the active one
+            mActive = slot;
+            saveSettings();
+            return;
+        }
         if (slot == mActive && !quadEnabled) return;
         if (quadEnabled) {
             // Exit quad mode and switch to selected camera
@@ -280,6 +290,10 @@ public class Decoder extends Activity
 
     @Override
     public void onToggleQuad() {
+        if (leaveUdpView()) {
+            startQuad();
+            return;
+        }
         boolean newState = !quadEnabled;
         if (newState) startQuad(); else {
             stopQuad();
@@ -290,6 +304,46 @@ public class Decoder extends Activity
                 rtspClient.start();
             }
         }
+    }
+
+    @Override
+    public void onShowUdp() {
+        if (udpViewShown) return;
+        if (quadEnabled) {
+            stopQuad();
+        } else {
+            if (rtspClient != null) rtspClient.stop();
+            stopExecutor();
+            audioManager.closeAudio();
+            closeDecoder();
+            nalQueue.clear();
+        }
+        mSurface.setVisibility(View.GONE);
+        if (udpFullView == null) {
+            udpFullView = udpHintCell();
+            udpFullView.setTextSize(20);
+            ((FrameLayout) findViewById(R.id.decoder)).addView(udpFullView,
+                    new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+                            FrameLayout.LayoutParams.MATCH_PARENT));
+        } else {
+            udpFullView.setText(udpHintText(localIpv4(), UDP_RTP_PORT));
+        }
+        // An unconfigured slot brings its black overlay to the front (clearVideo()):
+        // the hint must be above it each time it is shown
+        udpFullView.bringToFront();
+        udpFullView.setVisibility(View.VISIBLE);
+        udpViewShown = true;
+        menuManager.setUdpShown(true);
+    }
+
+    /** Hide the UDP view; true if it was shown. The caller starts what comes next. */
+    private boolean leaveUdpView() {
+        if (!udpViewShown) return false;
+        udpViewShown = false;
+        menuManager.setUdpShown(false);
+        if (udpFullView != null) udpFullView.setVisibility(View.GONE);
+        mSurface.setVisibility(View.VISIBLE);
+        return true;
     }
 
     @Override
@@ -567,8 +621,9 @@ public class Decoder extends Activity
             for (int col = 0; col < size; col++) {
                 int idx = row * size + col;
                 if (idx >= CAM_COUNT) {
-                    // The last cell of a 3x3 grid: no slot, stays black
-                    lr.addView(new View(this), new LinearLayout.LayoutParams(
+                    // The ninth cell of a 3x3 grid is reserved for a pushed UDP RTP stream
+                    // (#68); until the receiver exists it explains what will appear there
+                    lr.addView(udpHintCell(), new LinearLayout.LayoutParams(
                             0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
                     continue;
                 }
@@ -603,6 +658,49 @@ public class Decoder extends Activity
                         0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
             }
         }
+    }
+
+    /** Port of the reserved UDP RTP cell (#68); 5600 is the usual default for pushed RTP. */
+    static final int UDP_RTP_PORT = 5600;
+    /** The UDP cell full-screen (menu button U); there is no receiver yet (#68). */
+    private TextView udpFullView;
+    private boolean udpViewShown;
+
+    private TextView udpHintCell() {
+        TextView hint = new TextView(this);
+        hint.setText(udpHintText(localIpv4(), UDP_RTP_PORT));
+        hint.setTextColor(Color.GRAY);
+        hint.setTextSize(13);
+        hint.setGravity(Gravity.CENTER);
+        hint.setPadding(dp(12), dp(12), dp(12), dp(12));
+        hint.setBackgroundColor(Color.BLACK);
+        // Like the camera cells and the video view: a tap opens the menu
+        hint.setOnClickListener(v -> menuManager.showMenu(findViewById(R.id.decoder),
+                quadEnabled, mActive, mVersion, BuildConfig.GIT_HASH, mHosts));
+        return hint;
+    }
+
+    static String udpHintText(String ip, int port) {
+        String target = (ip != null ? ip : "this device") + ":" + port;
+        return "UDP RTP \u00b7 port " + port + "\nWaiting for a stream\u2026\n\n"
+                + "Send the camera's RTP/UDP output to\n" + target;
+    }
+
+    /** First site-local IPv4 address of this device, or null. */
+    static String localIpv4() {
+        try {
+            for (NetworkInterface nif : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                if (!nif.isUp() || nif.isLoopback()) continue;
+                for (InetAddress a : Collections.list(nif.getInetAddresses())) {
+                    if (a instanceof Inet4Address && a.isSiteLocalAddress()) {
+                        return a.getHostAddress();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "No local address: " + e.getMessage());
+        }
+        return null;
     }
 
     private void createQuadCells() {
@@ -950,6 +1048,8 @@ public class Decoder extends Activity
         super.onPause();
         mResumed = false;
         menuManager.onPauseDismissBrowser();
+        // The UDP view is not a saved mode: after a resume the slot or grid comes back
+        leaveUdpView();
         stopStreams();
     }
 
@@ -999,6 +1099,7 @@ public class Decoder extends Activity
         // Android 10+ may deliver it to the resumed activity without onPause()/onResume():
         // apply the shared link now
         if (mResumed) {
+            leaveUdpView();
             stopStreams();
             startStreams();
         }
