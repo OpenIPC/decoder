@@ -1,5 +1,5 @@
 /*
- * Copyright (c) OpenIPC  https://openipc.org  MIT License
+ * Copyright (c) OpenIPC  https://openipc.org  Prosperity Public License 3.0.0
  *
  * MenuManager.java — popup menu, URL editor, WebUI browser
  *

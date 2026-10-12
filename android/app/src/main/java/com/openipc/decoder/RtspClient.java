@@ -1,5 +1,5 @@
 /*
- * Copyright (c) OpenIPC  https://openipc.org  MIT License
+ * Copyright (c) OpenIPC  https://openipc.org  Prosperity Public License 3.0.0
  *
  * RtspClient.java — RTSP handshake and RTP-over-TCP streaming client
  *
@@ -31,7 +31,6 @@ class RtspClient {
 
     static final int RTP_PT_H265 = 97;
     static final int RTP_PT_H264 = 96;
-    static final int RTP_PT_PCMU_DEFAULT = 100;
 
     private static final long WATCHDOG_MS = 8000;
 
@@ -50,10 +49,7 @@ class RtspClient {
 
     // Decoder state
     private volatile boolean codecH265;
-    private volatile String audioCodec = "PCM";
-    private volatile int audioSampleRate = 8000;
-    private volatile boolean audioBigEndian = true;
-    private volatile int audioPt = RTP_PT_PCMU_DEFAULT;
+    private volatile AudioConfig audioConfig = new AudioConfig();
     private volatile String videoTrackUrl;
     private volatile String audioTrackUrl;
 
@@ -77,8 +73,7 @@ class RtspClient {
 
     interface Listener {
         void onStatusChanged(String status);
-        void onCodecChanged(boolean codecH265, String audioCodec, int audioSampleRate,
-                            boolean audioBigEndian, int audioPt);
+        void onCodecChanged(boolean codecH265, AudioConfig audio);
         void onJitterSample(int avgJitter);
     }
 
@@ -400,7 +395,7 @@ class RtspClient {
         if ((data[0] & 0x0F) != 0 || (data[0] & 0x10) != 0) { framePool.recycle(frame); return; }
 
         int payload = (data[1] & 0x7F);
-        if (payload == audioPt) {
+        if (payload == audioConfig.pt) {
             if (audioManager != null) {
                 audioManager.onAudioFrame(frame);
             }
@@ -463,37 +458,29 @@ class RtspClient {
 
     private void parseSdpAndNotify(String sdp, String baseUrl) {
         boolean[] h265Out = new boolean[1];
-        int[] audioPtOut = new int[1];
-        audioPtOut[0] = -1;
-        String[] audioInfo = new String[3]; // codec, bigEndianStr, rateStr
-        String[] controls = parseSdp(sdp, baseUrl, h265Out, audioPtOut, audioInfo);
+        AudioConfig audio = new AudioConfig();
+        String[] controls = parseSdp(sdp, baseUrl, h265Out, audio);
         codecH265 = h265Out[0];
-        audioPt = audioPtOut[0];
+        audioConfig = audio;
         videoTrackUrl = controls[0];
         audioTrackUrl = controls[1];
-        audioCodec = audioInfo[0];
-        audioBigEndian = "true".equals(audioInfo[1]);
-        if (audioInfo[2] != null) {
-            try { audioSampleRate = Integer.parseInt(audioInfo[2]); }
-            catch (NumberFormatException ignored) {}
-        }
         if (listenerCb != null) {
-            listenerCb.onCodecChanged(codecH265, audioCodec, audioSampleRate,
-                    audioBigEndian, audioPt);
+            listenerCb.onCodecChanged(codecH265, audio);
         }
     }
 
+    /**
+     * Parse the SDP: returns { videoControlUrl, audioControlUrl }, stores the video codec
+     * into {@code codecH265Out[0]} and the audio track parameters into {@code audioOut}
+     * (both may be null).
+     */
     static String[] parseSdp(String sdp, String baseUrl,
-                             boolean[] codecH265Out, int[] audioPtOut,
-                             String[] audioInfoOut) {
+                             boolean[] codecH265Out, AudioConfig audioOut) {
         String base = baseUrl;
         String[] controls = { null, null };
         int track = -1;
         boolean codecH265 = false;
-        int audioPt = -1;
-        String audioCodec = "PCM";
-        boolean audioBigEndian = false;
-        int audioSampleRate = 0;
+        AudioConfig audio = audioOut != null ? audioOut : new AudioConfig();
 
         for (String line : sdp.split("[\r\n]+")) {
             if (line.startsWith("m=video")) {
@@ -510,60 +497,55 @@ class RtspClient {
                 String[] parts = line.split("\\s+");
                 if (parts.length >= 4) {
                     try {
-                        audioPt = Integer.parseInt(parts[3]);
+                        audio.pt = Integer.parseInt(parts[3]);
+                        audio.applyStaticPayloadType();
                     } catch (NumberFormatException ignored) {}
                 }
+            } else if (line.startsWith("m=")) {
+                track = 2; // other media, ignored
             } else if (line.startsWith("a=control:")) {
                 String ctrl = line.substring("a=control:".length()).trim();
                 if (track == -1) {
                     base = ctrl.startsWith("rtsp://") ? ctrl : baseUrl + "/" + ctrl;
-                } else {
+                } else if (track < 2) {
                     controls[track] = ctrl.startsWith("rtsp://") ? ctrl : base + "/" + ctrl;
                 }
-            } else if (audioPt >= 0 && line.startsWith("a=rtpmap:" + audioPt + " ")) {
-                String encoding = line.substring(("a=rtpmap:" + audioPt + " ").length());
-                String codecName = encoding.split("/")[0].toUpperCase(Locale.ROOT);
-
-                if (codecName.contains("MP4A") || codecName.contains("AAC")) {
-                    audioCodec = "AAC";
-                    audioBigEndian = false;
-                } else if (codecName.contains("PCMA") || codecName.contains("PCMU")) {
-                    audioCodec = "G711";
-                    audioBigEndian = false;
-                } else if (codecName.startsWith("L16")) {
-                    audioCodec = "PCM";
-                    audioBigEndian = true;
-                } else {
-                    audioCodec = "PCM";
-                    audioBigEndian = false;
-                }
-
-                int slash = encoding.indexOf('/');
-                if (slash >= 0) {
-                    int end = encoding.indexOf('/', slash + 1);
-                    String rateStr = (end >= 0
-                            ? encoding.substring(slash + 1, end)
-                            : encoding.substring(slash + 1)).trim();
-                    try {
-                        int rate = Integer.parseInt(rateStr);
-                        if (rate > 0 && rate <= 192000) {
-                            audioSampleRate = rate;
-                        }
-                    } catch (NumberFormatException ignored) {}
-                }
+            } else if (track == 1 && audio.pt >= 0
+                    && line.startsWith("a=rtpmap:" + audio.pt + " ")) {
+                audio.applyRtpmap(line.substring(("a=rtpmap:" + audio.pt + " ").length()));
+            } else if (track == 1 && audio.pt >= 0
+                    && line.startsWith("a=fmtp:" + audio.pt + " ")) {
+                audio.applyFmtp(line.substring(("a=fmtp:" + audio.pt + " ").length()));
             }
         }
+        audio.finish();
         if (controls[0] == null) controls[0] = base + "/trackID=0";
         if (controls[1] == null) controls[1] = base + "/trackID=1";
 
         if (codecH265Out != null && codecH265Out.length > 0) codecH265Out[0] = codecH265;
-        if (audioPtOut != null && audioPtOut.length > 0) audioPtOut[0] = audioPt;
-        if (audioInfoOut != null && audioInfoOut.length >= 3) {
-            audioInfoOut[0] = audioCodec;
-            audioInfoOut[1] = String.valueOf(audioBigEndian);
-            audioInfoOut[2] = audioSampleRate > 0 ? String.valueOf(audioSampleRate) : null;
-        }
         return controls;
+    }
+
+    /**
+     * Length of the RTP header including CSRC list and header extension,
+     * or -1 when the packet is malformed.
+     */
+    static int rtpHeaderLength(byte[] data, int length) {
+        if (length < 12 || (data[0] & 0xC0) != 0x80) return -1;
+        int len = 12 + 4 * (data[0] & 0x0F);
+        if ((data[0] & 0x10) != 0) {
+            if (len + 4 > length) return -1;
+            int extWords = ((data[len + 2] & 0xFF) << 8) | (data[len + 3] & 0xFF);
+            len += 4 + 4 * extWords;
+        }
+        return len <= length ? len : -1;
+    }
+
+    /** Payload end offset: packet length minus RTP padding, or -1 when malformed. */
+    static int rtpPayloadEnd(byte[] data, int length) {
+        if ((data[0] & 0x20) == 0) return length;
+        int pad = data[length - 1] & 0xFF;
+        return pad <= length ? length - pad : -1;
     }
 
     static String readLine(InputStream in) throws IOException {

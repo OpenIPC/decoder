@@ -1,5 +1,5 @@
 /*
- * Copyright (c) OpenIPC  https://openipc.org  MIT License
+ * Copyright (c) OpenIPC  https://openipc.org  Prosperity Public License 3.0.0
  *
  * QuadCell.java — single camera stream in quad mode
  *
@@ -302,11 +302,8 @@ class QuadCell {
 
             // Parse SDP for video track only — reuse RtspClient's parser
             boolean[] h265Out = new boolean[1];
-            int[] audioPtOut = new int[1];
-            audioPtOut[0] = -1;
-            String[] audioInfo = new String[3];
             String[] trackUrls = RtspClient.parseSdp(sdpBuf.toString(), rtspUrl,
-                    h265Out, audioPtOut, audioInfo);
+                    h265Out, null);
             codecH265 = h265Out[0];
             String videoControl = trackUrls[0];
 
