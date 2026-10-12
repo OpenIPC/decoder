@@ -326,21 +326,27 @@ public class Decoder extends Activity
             edit.apply();
         }
 
-        mActive = 0;
-        quadEnabled = false;
+        // Restore the last camera and mode (#22); both are saved but were never read back
+        mActive = clampSlot(pref.getInt("active", 0));
+        quadEnabled = pref.getBoolean("quad_enabled", false);
         for (int i = 0; i < CAM_COUNT; i++) {
             mHosts[i] = pref.getString("host_" + i, DEFAULT_URL);
         }
-        applyActiveCamera();
 
         Intent intent = getIntent();
         String link = intent.getStringExtra(Intent.EXTRA_TEXT);
         if (link != null) {
             Log.d(TAG, "Link: " + Uri.parse(link).getHost());
             mHosts[mActive] = sanitizeUrl(link);
-            mHost = mHosts[mActive];
+            // A shared link is meant to be watched: show it in single view
+            quadEnabled = false;
             intent.removeExtra(Intent.EXTRA_TEXT);
         }
+        applyActiveCamera();
+    }
+
+    static int clampSlot(int slot) {
+        return slot >= 0 && slot < CAM_COUNT ? slot : 0;
     }
 
     static String sanitizeUrl(String url) {
@@ -464,10 +470,7 @@ public class Decoder extends Activity
         closeDecoder();
         closeAudio();
         nalQueue.clear();
-        if (executor != null) {
-            executor.shutdownNow();
-            executor = null;
-        }
+        stopExecutor();
 
         mSurface.setVisibility(View.GONE);
         quadContainer.setVisibility(View.VISIBLE);
@@ -676,6 +679,9 @@ public class Decoder extends Activity
         listenerGen++;
         final int gen = listenerGen;
 
+        // The previous pool's threads exit on the generation check; shut it down so its
+        // idle threads do not leak on every camera switch (#23)
+        stopExecutor();
         executor = Executors.newFixedThreadPool(2);
 
         // Video decode thread
@@ -685,9 +691,12 @@ public class Decoder extends Activity
                 try {
                     Frame buffer = nalQueue.poll(5, TimeUnit.MILLISECONDS);
                     if (buffer != null) {
-                        boolean needCreate = videoDecoder.decodeFrame(buffer, codecH265, 0);
+                        if (videoDecoder.decodeFrame(buffer, codecH265, 0)) {
+                            createDecoder();
+                            // The frame that triggered creation (often the SPS) goes in too
+                            videoDecoder.decodeFrame(buffer, codecH265, 0);
+                        }
                         framePool.recycle(buffer);
-                        if (needCreate) createDecoder();
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -725,21 +734,28 @@ public class Decoder extends Activity
         if (rtspClient != null) {
             rtspClient.stop();
         }
-        if (executor != null) {
-            executor.shutdownNow();
+        // Disabled first: the decode thread can no longer create a decoder after this
+        videoDecoder.setEnabled(false);
+        // Short, bounded wait so the audio thread is out of AudioTrack before it is released
+        // (#32: this used to block the UI thread for seconds)
+        ExecutorService ex = executor;
+        stopExecutor();
+        if (ex != null) {
             try {
-                if (!executor.awaitTermination(2, TimeUnit.SECONDS)) {
-                    executor.shutdownNow();
-                }
+                ex.awaitTermination(300, TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
-                executor.shutdownNow();
                 Thread.currentThread().interrupt();
             }
-            executor = null;
         }
-        closeDecoder();
         closeAudio();
         nalQueue.clear();
+    }
+
+    private void stopExecutor() {
+        if (executor != null) {
+            executor.shutdownNow();
+            executor = null;
+        }
     }
 
     @Override
@@ -753,6 +769,7 @@ public class Decoder extends Activity
         super.onResume();
 
         loadSettings();
+        videoDecoder.setEnabled(true);
         if (quadEnabled) {
             mSurface.setVisibility(View.GONE);
             quadContainer.setVisibility(View.VISIBLE);
@@ -773,6 +790,9 @@ public class Decoder extends Activity
             getSharedPreferences("settings", MODE_PRIVATE).edit()
                     .putBoolean("quad_enabled", true).apply();
         } else {
+            // The views may still be in Quad layout from before the pause
+            quadContainer.setVisibility(View.GONE);
+            mSurface.setVisibility(View.VISIBLE);
             boolean configured = mHost != null && !mHost.isEmpty() && !mHost.equals(DEFAULT_URL);
             if (configured) {
                 rtspClient.configure(mHost, mUserAgent);
