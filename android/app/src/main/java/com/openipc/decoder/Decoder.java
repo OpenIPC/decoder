@@ -322,15 +322,15 @@ public class Decoder extends Activity
         if (udpFullView == null) {
             udpFullView = udpHintCell();
             udpFullView.setTextSize(20);
-            // The video view that normally opens the menu on a tap is hidden here
-            udpFullView.setOnClickListener(v -> menuManager.showMenu(findViewById(R.id.decoder),
-                    quadEnabled, mActive, mVersion, BuildConfig.GIT_HASH, mHosts));
             ((FrameLayout) findViewById(R.id.decoder)).addView(udpFullView,
                     new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
                             FrameLayout.LayoutParams.MATCH_PARENT));
         } else {
             udpFullView.setText(udpHintText(localIpv4(), UDP_RTP_PORT));
         }
+        // An unconfigured slot brings its black overlay to the front (clearVideo()):
+        // the hint must be above it each time it is shown
+        udpFullView.bringToFront();
         udpFullView.setVisibility(View.VISIBLE);
         udpViewShown = true;
         menuManager.setUdpShown(true);
@@ -674,6 +674,9 @@ public class Decoder extends Activity
         hint.setGravity(Gravity.CENTER);
         hint.setPadding(dp(12), dp(12), dp(12), dp(12));
         hint.setBackgroundColor(Color.BLACK);
+        // Like the camera cells and the video view: a tap opens the menu
+        hint.setOnClickListener(v -> menuManager.showMenu(findViewById(R.id.decoder),
+                quadEnabled, mActive, mVersion, BuildConfig.GIT_HASH, mHosts));
         return hint;
     }
 
