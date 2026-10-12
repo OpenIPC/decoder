@@ -7,7 +7,6 @@
 
 package com.openipc.decoder;
 
-import android.media.MediaCodec;
 import android.util.Log;
 import android.view.Surface;
 import android.view.TextureView;
@@ -36,9 +35,8 @@ class QuadCell implements RtspSession.Callback {
     private volatile boolean threadsStarted;
 
     private volatile Surface surface;
-    private MediaCodecManager mediaCodecManager;
-    private final Object decoderLock = new Object();
-    private volatile boolean decoderFailed;
+    /** One decoder manager for the cell's lifetime; decoders are created on the decode thread. */
+    private final MediaCodecManager decoder;
 
     private final BlockingQueue<Frame> nalQueue = new ArrayBlockingQueue<>(30);
     private final NalAssembler nalAssembler;
@@ -63,6 +61,13 @@ class QuadCell implements RtspSession.Callback {
         this.userAgent = userAgent;
         this.listener = listener;
         this.session = new RtspSession(tag, this);
+        this.decoder = new MediaCodecManager(new MediaCodecManager.Listener() {
+            @Override public void onResolutionChanged(int w, int h) {}
+            @Override public void onDecoderStarted() {
+                if (listener != null) listener.onRemoveOverlay(index);
+            }
+            @Override public void onDecoderFailed() {}
+        });
         this.nalSink = nal -> {
             if (!nalQueue.offer(nal)) {
                 // Rate-limited: one aggregation packet can carry many NAL units
@@ -72,14 +77,10 @@ class QuadCell implements RtspSession.Callback {
                 pool.recycle(nal);
             }
         };
+        // On a codec switch the decoder is released; the decode thread creates a new one (#20)
         this.nalAssembler = new NalAssembler(512 * 1024, () -> {
             nalQueue.clear();
-            synchronized (decoderLock) {
-                if (mediaCodecManager != null) {
-                    mediaCodecManager.closeDecoder();
-                    decoderFailed = false;
-                }
-            }
+            decoder.closeDecoder();
         }, pool);
     }
 
@@ -87,6 +88,7 @@ class QuadCell implements RtspSession.Callback {
         if (started) return;
         started = true;
         running = true;
+        decoder.setEnabled(true);
         view.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
             @Override
             public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture st, int w, int h) {
@@ -168,23 +170,12 @@ class QuadCell implements RtspSession.Callback {
         running = false;
         session.stop();
         nalAssembler.reset();
+        // Disabling releases the decoder and stops the decode thread from creating another,
+        // so there is nothing to wait for on the UI thread (#32)
+        decoder.setEnabled(false);
         if (executor != null) {
             executor.shutdownNow();
-            try {
-                if (!executor.awaitTermination(2, TimeUnit.SECONDS)) {
-                    executor.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                executor.shutdownNow();
-                Thread.currentThread().interrupt();
-            }
             executor = null;
-        }
-        synchronized (decoderLock) {
-            if (mediaCodecManager != null) {
-                mediaCodecManager.closeDecoder();
-            }
-            decoderFailed = false;
         }
         nalQueue.clear();
         surface = null;
@@ -201,7 +192,6 @@ class QuadCell implements RtspSession.Callback {
         lastUnknownPayload = -1;
         videoPt = sdp.videoPt;
         codecH265 = sdp.videoH265;
-        initDecoder();
     }
 
     @Override
@@ -222,48 +212,13 @@ class QuadCell implements RtspSession.Callback {
 
     private void decode(Frame buffer) {
         if (buffer.length() < 5) return;
-
-        int flag = 0;
-        int frag = NalAssembler.fragment(buffer.data()[4], codecH265);
-        boolean config = codecH265
-                ? (frag == MediaCodecManager.H265_NAL_VPS || frag == MediaCodecManager.H265_NAL_SPS || frag == MediaCodecManager.H265_NAL_PPS)
-                : (frag == MediaCodecManager.H264_NAL_SPS || frag == MediaCodecManager.H264_NAL_PPS);
-        if (config) flag = MediaCodec.BUFFER_FLAG_CODEC_CONFIG;
-
-        boolean needCreate = false;
-        synchronized (decoderLock) {
-            if (mediaCodecManager == null) {
-                needCreate = !decoderFailed;
-            } else {
-                needCreate = mediaCodecManager.decodeFrame(buffer, codecH265, 0);
-            }
+        if (decoder.decodeFrame(buffer, codecH265, 0)) {
+            Surface s = surface;
+            if (s == null || !s.isValid()) return;
+            decoder.setSurface(s);
+            decoder.createDecoder(codecH265);
+            // Feed the frame that triggered creation (often the SPS) to the new decoder
+            decoder.decodeFrame(buffer, codecH265, 0);
         }
-        if (needCreate) initDecoder();
-    }
-
-    private void initDecoder() {
-        synchronized (decoderLock) {
-            if (mediaCodecManager != null) return;
-        }
-        Surface s = surface;
-        if (s == null || !s.isValid()) return;
-
-        MediaCodecManager mgr = new MediaCodecManager(new MediaCodecManager.Listener() {
-            @Override public void onResolutionChanged(int w, int h) {}
-            @Override public void onDecoderStarted() {}
-            @Override public void onDecoderFailed() { decoderFailed = true; }
-        });
-        mgr.setSurface(s);
-        mgr.createDecoder(codecH265);
-
-        synchronized (decoderLock) {
-            // Another thread was faster, or stop() ran meanwhile (onSdp is on the network thread)
-            if (mediaCodecManager != null || !running) {
-                mgr.closeDecoder();
-                return;
-            }
-            mediaCodecManager = mgr;
-        }
-        if (listener != null) listener.onRemoveOverlay(index);
     }
 }
