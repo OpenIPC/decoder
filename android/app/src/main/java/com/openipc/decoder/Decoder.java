@@ -371,7 +371,6 @@ public class Decoder extends Activity
 
         listenerGen++;
         if (rtspClient != null) {
-            rtspClient.invalidateGen();
             rtspClient.stop();
         }
         audioManager.closeAudio();
@@ -460,7 +459,6 @@ public class Decoder extends Activity
 
     private void startQuad() {
         if (rtspClient != null) {
-            rtspClient.invalidateGen();
             rtspClient.stop();
         }
         closeDecoder();
@@ -725,7 +723,6 @@ public class Decoder extends Activity
 
         listenerGen++;
         if (rtspClient != null) {
-            rtspClient.invalidateGen();
             rtspClient.stop();
         }
         if (executor != null) {
