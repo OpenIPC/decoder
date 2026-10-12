@@ -64,8 +64,8 @@ class RtspClient implements RtspSession.Callback {
     void setAudioManager(AudioManager am) { this.audioManager = am; }
     void setAudioRoute(int route) { this.audioRoute = route; }
 
-    void configure(String host, String userAgent) {
-        session.configure(host, userAgent, true);
+    void configure(String host, String userAgent, Transport.Mode transport) {
+        session.configure(host, userAgent, true, transport);
     }
 
     boolean isActive() { return session.isActive(); }

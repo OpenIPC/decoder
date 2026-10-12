@@ -23,6 +23,7 @@ class QuadCell implements RtspSession.Callback {
 
     private final int index;
     private final String host;
+    private final Transport.Mode transport;
     private final SurfaceView view;
     private final String tag;
     private final FramePool cellFramePool;
@@ -66,9 +67,11 @@ class QuadCell implements RtspSession.Callback {
 
     private final Listener listener;
 
-    QuadCell(int index, String host, SurfaceView view, FramePool pool, String userAgent, Listener listener) {
+    QuadCell(int index, String host, Transport.Mode transport, SurfaceView view, FramePool pool,
+             String userAgent, Listener listener) {
         this.index = index;
         this.host = host;
+        this.transport = transport;
         this.view = view;
         this.tag = "Quad-" + index;
         this.cellFramePool = pool;
@@ -160,7 +163,7 @@ class QuadCell implements RtspSession.Callback {
 
         Log.i(TAG, tag + ": surface ready, starting session");
         // Audio is set up too, so switching the audible cell needs no reconnect (#12)
-        session.configure(host, userAgent, true);
+        session.configure(host, userAgent, true, transport);
         session.start();
     }
 

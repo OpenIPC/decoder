@@ -40,7 +40,7 @@ public class QuadAudioTest {
 
     @Test
     public void onlyTheSelectedCellPlaysAudio() {
-        QuadCell cell = new QuadCell(1, "rtsp://cam/s", null, new FramePool(4), "", index -> {});
+        QuadCell cell = new QuadCell(1, "rtsp://cam/s", Transport.Mode.TCP, null, new FramePool(4), "", index -> {});
         CountingAudio audio = new CountingAudio();
         byte[] a = rtp(98);
 
@@ -64,7 +64,7 @@ public class QuadAudioTest {
 
     @Test
     public void audioConfigGoesToTheSinkWithTheCellsRoute() {
-        QuadCell cell = new QuadCell(2, "rtsp://cam/s", null, new FramePool(4), "", index -> {});
+        QuadCell cell = new QuadCell(2, "rtsp://cam/s", Transport.Mode.TCP, null, new FramePool(4), "", index -> {});
         CountingAudio audio = new CountingAudio();
         Sdp sdp = Sdp.parse("m=video 0 RTP/AVP 96\r\nm=audio 0 RTP/AVP 0\r\n", "rtsp://cam/s");
 

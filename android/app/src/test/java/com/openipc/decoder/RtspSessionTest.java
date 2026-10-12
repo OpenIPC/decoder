@@ -19,7 +19,10 @@ import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
@@ -37,6 +40,14 @@ public class RtspSessionTest {
             "m=audio 0 RTP/AVP 98\r\na=rtpmap:98 L16/16000\r\na=control:trackID=1\r\n";
     private static final String SDP_VIDEO_ONLY =
             "v=0\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\na=control:trackID=0\r\n";
+
+    /** RTP packet as sent over UDP: no interleaved header, a real sequence number. */
+    static byte[] udpPacket(int pt, int seq) {
+        byte[] p = FakeServer.packet(0, pt);
+        p[6] = (byte) (seq >> 8);
+        p[7] = (byte) seq;
+        return java.util.Arrays.copyOfRange(p, 4, p.length);
+    }
 
     /** Scripted RTSP server: answers each connection with the configured behaviour. */
     private static final class FakeServer implements AutoCloseable {
@@ -65,6 +76,12 @@ public class RtspSessionTest {
         volatile boolean streamContinuously;
         final AtomicInteger unauthorized = new AtomicInteger();
         volatile int audioPackets = 1;
+        /** Reply 461 Unsupported Transport to a UDP SETUP. */
+        volatile boolean udpUnsupported;
+        /** Accept a UDP SETUP but never send a datagram. */
+        volatile boolean udpSilent;
+        /** Send the datagrams from this local address instead of 127.0.0.1. */
+        volatile String udpFrom = "127.0.0.1";
 
         FakeServer() throws IOException {
             server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
@@ -97,6 +114,8 @@ public class RtspSessionTest {
                 if (n <= failFirst) return;
                 InputStream in = new BufferedInputStream(socket.getInputStream());
                 OutputStream out = socket.getOutputStream();
+                // Client RTP ports of this connection's UDP SETUPs: video, audio
+                int[] udpPorts = {-1, -1};
                 while (true) {
                     String line = RtspSession.readLine(in);
                     if (line == null) return;
@@ -129,10 +148,24 @@ public class RtspSessionTest {
                                     + "\r\n" + sdp;
                             break;
                         case "SETUP":
-                            int code = requestLine.contains("trackID=1") ? audioSetupStatus : 200;
+                            boolean audioTrack = requestLine.contains("trackID=1");
+                            int code = audioTrack ? audioSetupStatus : 200;
+                            Transport asked = Transport.parse(header(headers, "Transport"));
+                            String transport = "";
+                            if (asked.clientPort != null) {
+                                if (udpUnsupported) code = 461;
+                                if (code == 200) udpPorts[audioTrack ? 1 : 0] = asked.clientPort[0];
+                                transport = "Transport: RTP/AVP/UDP;unicast;client_port="
+                                        + asked.clientPort[0] + "-" + asked.clientPort[1]
+                                        + ";server_port=6970-6971\r\n";
+                            } else if (asked.interleaved != null) {
+                                transport = "Transport: RTP/AVP/TCP;unicast;interleaved="
+                                        + asked.interleaved[0] + "-" + asked.interleaved[1]
+                                        + "\r\n";
+                            }
                             reply = "RTSP/1.0 " + code + (code == 200 ? " OK" : " Not Found")
-                                    + "\r\nCSeq: " + cseq + "\r\nSession: ABC123;timeout="
-                                    + sessionTimeout + "\r\n\r\n";
+                                    + "\r\nCSeq: " + cseq + "\r\n" + (code == 200 ? transport : "")
+                                    + "Session: ABC123;timeout=" + sessionTimeout + "\r\n\r\n";
                             break;
                         case "GET_PARAMETER":
                             if (keepaliveUnauthorized) {
@@ -149,6 +182,10 @@ public class RtspSessionTest {
                             break;
                     }
                     write(out, reply);
+                    if (method.equals("PLAY") && udpPorts[0] > 0) {
+                        if (!udpSilent) sendUdp(udpPorts);
+                        continue;
+                    }
                     if (method.equals("PLAY") && streamContinuously) {
                         Thread writer = new Thread(() -> {
                             try {
@@ -177,6 +214,36 @@ public class RtspSessionTest {
                 }
             } catch (IOException ignored) {
             }
+        }
+
+        private void sendUdp(int[] ports) {
+            Thread sender = new Thread(() -> {
+                try (DatagramSocket ds = new DatagramSocket(
+                        new InetSocketAddress(InetAddress.getByName(udpFrom), 0))) {
+                    InetAddress to = InetAddress.getLoopbackAddress();
+                    int seq = 100;
+                    for (int i = 0; i < videoPackets; i++) {
+                        byte[] p = udpPacket(96, seq++);
+                        ds.send(new DatagramPacket(p, p.length, to, ports[0]));
+                    }
+                    for (int i = 0; i < audioPackets && ports[1] > 0; i++) {
+                        byte[] p = udpPacket(98, 500 + i);
+                        ds.send(new DatagramPacket(p, p.length, to, ports[1]));
+                    }
+                } catch (IOException ignored) {
+                }
+            });
+            sender.setDaemon(true);
+            sender.start();
+        }
+
+        private static String header(CharSequence headers, String name) {
+            for (String h : headers.toString().split("\n")) {
+                if (h.regionMatches(true, 0, name + ":", 0, name.length() + 1)) {
+                    return h.substring(name.length() + 1).trim();
+                }
+            }
+            return null;
         }
 
         private static void write(OutputStream out, String reply) throws IOException {
@@ -280,6 +347,7 @@ public class RtspSessionTest {
         RtspSession.minRetryMs = 1000;
         RtspSession.maxRetryMs = 30000;
         RtspSession.watchdogMs = 8000;
+        RtspSession.udpFirstPacketMs = 3000;
     }
 
     private void runUntilVideo(String url, boolean withAudio) throws InterruptedException {
@@ -511,5 +579,100 @@ public class RtspSessionTest {
         long perFirstConnection = server.snapshot().stream()
                 .filter(x -> x.startsWith("GET_PARAMETER")).count();
         assertTrue(perFirstConnection <= 2 * server.connections.get());
+    }
+
+    // ====================== UDP (#67) ======================
+
+    private void runUdp(Transport.Mode mode, boolean withAudio) {
+        session.configure(server.url(null), "User-Agent: test\r\n", withAudio, mode);
+        session.start();
+    }
+
+    private List<String> setups() {
+        List<String> out = new ArrayList<>();
+        for (String r : server.snapshot()) if (r.startsWith("SETUP")) out.add(r);
+        return out;
+    }
+
+    @Test
+    public void udpHandshakeAndPackets() throws Exception {
+        runUdp(Transport.Mode.UDP, true);
+        assertTrue("video over UDP", rec.videoLatch.await(5, TimeUnit.SECONDS));
+        long deadline = System.currentTimeMillis() + 2000;
+        while (rec.audio.get() == 0 && System.currentTimeMillis() < deadline) Thread.sleep(10);
+        assertEquals(1, rec.audio.get());
+
+        List<String> s = setups();
+        assertEquals(2, s.size());
+        for (String r : s) {
+            Transport t = Transport.parse(FakeServer.header(r, "Transport"));
+            assertFalse(t.tcp);
+            assertEquals("RTP port is even", 0, t.clientPort[0] % 2);
+            assertEquals(t.clientPort[0] + 1, t.clientPort[1]);
+        }
+        assertTrue(rec.statuses.contains("connected"));
+        assertEquals(1, server.connections.get());
+    }
+
+    @Test
+    public void autoFallsBackToTcpWhenUdpIsRefused() throws Exception {
+        server.udpUnsupported = true;
+        runUdp(Transport.Mode.AUTO, false);
+        assertTrue("video over TCP", rec.videoLatch.await(5, TimeUnit.SECONDS));
+        List<String> s = setups();
+        assertTrue(s.get(0).contains("client_port="));
+        assertTrue(s.get(1).contains("interleaved=0-1"));
+        // Same connection: the refusal is answered by a second SETUP, not a reconnect
+        assertEquals(1, server.connections.get());
+    }
+
+    @Test
+    public void udpModeDoesNotFallBack() throws Exception {
+        server.udpUnsupported = true;
+        runUdp(Transport.Mode.UDP, false);
+        assertFalse(rec.videoLatch.await(500, TimeUnit.MILLISECONDS));
+        for (String r : setups()) assertFalse(r.contains("interleaved"));
+        assertTrue("keeps retrying", server.connections.get() > 1);
+    }
+
+    @Test
+    public void autoFallsBackToTcpWhenNoDatagramArrives() throws Exception {
+        server.udpSilent = true;
+        RtspSession.udpFirstPacketMs = 300;
+        runUdp(Transport.Mode.AUTO, false);
+        assertTrue("video over TCP", rec.videoLatch.await(5, TimeUnit.SECONDS));
+        List<String> m = server.methods();
+        assertTrue("UDP session torn down", m.contains("TEARDOWN " + base() + " RTSP/1.0"));
+        List<String> s = setups();
+        assertTrue(s.get(0).contains("client_port="));
+        assertTrue(s.get(s.size() - 1).contains("interleaved=0-1"));
+        assertEquals(2, server.connections.get());
+    }
+
+    @Test
+    public void stopTearsDownTheUdpSession() throws Exception {
+        runUdp(Transport.Mode.UDP, false);
+        assertTrue(rec.videoLatch.await(5, TimeUnit.SECONDS));
+        session.stop();
+        long deadline = System.currentTimeMillis() + 2000;
+        while (!server.methods().contains("TEARDOWN " + base() + " RTSP/1.0")
+                && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10);
+        }
+        assertTrue(server.methods().contains("TEARDOWN " + base() + " RTSP/1.0"));
+    }
+
+    @Test
+    public void datagramsFromAnotherAddressAreIgnored() throws Exception {
+        // 127.0.0.2 is a different loopback address on Linux (the CI runner)
+        org.junit.Assume.assumeTrue(System.getProperty("os.name").startsWith("Linux"));
+        server.udpFrom = "127.0.0.2";
+        runUdp(Transport.Mode.UDP, false);
+        assertFalse(rec.videoLatch.await(500, TimeUnit.MILLISECONDS));
+        assertEquals(0, rec.video.get());
+    }
+
+    private String base() {
+        return "rtsp://127.0.0.1:" + server.server.getLocalPort() + "/stream=0";
     }
 }

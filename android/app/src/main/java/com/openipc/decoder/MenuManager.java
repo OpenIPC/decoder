@@ -32,6 +32,8 @@ import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.TextView;
 
 class MenuManager {
@@ -342,7 +344,7 @@ class MenuManager {
         return text;
     }
 
-    void showUrlEditor(int mActive, String[] mHosts) {
+    void showUrlEditor(int mActive, String[] mHosts, Transport.Mode[] mTransports) {
         AlertDialog.Builder builder = new AlertDialog.Builder(activity);
         builder.setTitle("Camera " + (mActive + 1) + " URL");
 
@@ -351,12 +353,34 @@ class MenuManager {
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         input.setSelectAllOnFocus(true);
         input.setSelection(input.getText().length());
-        builder.setView(input);
+
+        // RTP transport of the slot (#67): Auto tries UDP and falls back to TCP
+        RadioGroup transport = new RadioGroup(activity);
+        transport.setOrientation(RadioGroup.HORIZONTAL);
+        Transport.Mode[] modes = Transport.Mode.values();
+        String[] labels = {"TCP", "UDP", "Auto"};
+        for (int i = 0; i < modes.length; i++) {
+            RadioButton b = new RadioButton(activity);
+            b.setId(View.generateViewId());
+            b.setText(labels[i]);
+            b.setTag(modes[i]);
+            transport.addView(b);
+            if (modes[i] == mTransports[mActive]) b.setChecked(true);
+        }
+
+        LinearLayout content = new LinearLayout(activity);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(16), dp(8), dp(16), 0);
+        content.addView(input);
+        content.addView(transport);
+        builder.setView(content);
 
         final int slot = mActive;
         builder.setPositiveButton("Save", (dialog, which) -> {
             String url = input.getText().toString().trim();
             mHosts[slot] = Decoder.sanitizeUrl(url);
+            View checked = transport.findViewById(transport.getCheckedRadioButtonId());
+            if (checked != null) mTransports[slot] = (Transport.Mode) checked.getTag();
             if (listener != null) listener.onSaveSettings(); // triggers save + reconnect
         });
         builder.setNegativeButton("Cancel", (dialog, which) -> dialog.cancel());
