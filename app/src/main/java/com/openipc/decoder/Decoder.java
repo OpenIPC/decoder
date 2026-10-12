@@ -48,16 +48,19 @@ import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.TextView;
 
-import java.io.BufferedReader;
+import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -74,16 +77,24 @@ public class Decoder extends Activity {
     private AudioTrack audioTrack;
     private TextView mConnect;
 
-    private boolean codecH265;
+    private volatile boolean codecH265;
     private boolean lastCodec;
-    private boolean listener;
-    private boolean activeStream;
+    private volatile boolean activeStream;
+    // Incremented on every start/stop; worker threads exit when it no longer matches
+    private volatile int listenerGen;
+    private volatile Socket mSocket;
+    // Guards mSocket and activeStream against a generation change from onPause/onResume
+    private final Object streamLock = new Object();
     private int lastWidth;
     private int lastHeight;
-    private long lastFrame;
+    private volatile long lastFrame;
 
-    private String mHost;
-    private boolean mType;
+    private volatile String mHost;
+
+    // Stream parameters taken from the SDP of the current session
+    private volatile int videoPt = -1;
+    private volatile int audioPt = -1;
+    private volatile int audioRate;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -132,6 +143,7 @@ public class Decoder extends Activity {
 
         mConnect.setText(mHost);
         activeStream = false;
+        closeSocket();
     }
 
     private void createMenu(View menu) {
@@ -375,6 +387,10 @@ public class Decoder extends Activity {
     }
 
     private void playAudio(Frame data) {
+        // A reconnect may announce another rate: recreate the track
+        if (audioTrack != null && audioRate > 0 && audioTrack.getSampleRate() != audioRate) {
+            closeAudio();
+        }
         if (audioTrack == null) {
             createAudio(data.length);
         } else {
@@ -388,7 +404,7 @@ public class Decoder extends Activity {
 
         byte[] data = new byte[length];
         System.arraycopy(frame.data(), header, data, 0, length);
-        for (int i = 0; i < length; i += 2) {
+        for (int i = 0; i + 1 < length; i += 2) {
             byte tmp = data[i];
             data[i] = data[i + 1];
             data[i + 1] = tmp;
@@ -403,7 +419,8 @@ public class Decoder extends Activity {
     }
 
     private void createAudio(int length) {
-        int sample = length * 25;
+        // Rate from the SDP; legacy guess for servers that do not announce it
+        int sample = audioRate > 0 ? audioRate : length * 25;
         int format = AudioFormat.CHANNEL_OUT_MONO;
 
         Log.d(TAG, "Create audio decoder (" + sample + "hz)");
@@ -508,13 +525,223 @@ public class Decoder extends Activity {
         }
     }
 
-    private void rtsp_connect() throws Exception {
+    private void closeSocket() {
+        Socket s;
+        synchronized (streamLock) {
+            s = mSocket;
+        }
+        if (s != null) {
+            try {
+                s.close();
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
+    private static final class Response {
+        int code;
+        final Map<String, String> headers = new HashMap<>();
+        String body = "";
+    }
+
+    /** Read one CRLF-terminated line byte by byte, so no stream data is buffered away. */
+    private static String readLine(InputStream in) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        int c;
+        while ((c = in.read()) != '\n') {
+            if (c < 0) throw new IOException("Connection closed");
+            if (c != '\r') {
+                if (sb.length() > 8192) throw new IOException("RTSP line too long");
+                sb.append((char) c);
+            }
+        }
+        return sb.toString();
+    }
+
+    private static void readFully(InputStream in, byte[] data, int len) throws IOException {
+        int read = 0;
+        while (read < len) {
+            int n = in.read(data, read, len - read);
+            if (n < 0) throw new IOException("Connection closed");
+            read += n;
+        }
+    }
+
+    private Response readResponse(InputStream in) throws IOException {
+        Response r = new Response();
+        // Some servers start sending interleaved RTP before the PLAY response: skip it
+        in.mark(1);
+        while (in.read() == 0x24) {
+            int channel = in.read();
+            int hi = in.read();
+            int lo = in.read();
+            if ((channel | hi | lo) < 0) throw new IOException("Connection closed");
+            int len = (hi << 8) | lo;
+            readFully(in, new byte[len], len);
+            in.mark(1);
+        }
+        in.reset();
+        String status = readLine(in);
+        Log.i(TAG, status);
+        String[] parts = status.split(" ", 3);
+        if (parts.length < 2 || !parts[0].startsWith("RTSP/")) {
+            throw new IOException("Bad RTSP response: " + status);
+        }
+        try {
+            r.code = Integer.parseInt(parts[1]);
+        } catch (NumberFormatException e) {
+            throw new IOException("Bad RTSP status: " + status);
+        }
+
+        String line;
+        while (!(line = readLine(in)).isEmpty()) {
+            Log.i(TAG, line);
+            int colon = line.indexOf(':');
+            if (colon > 0) {
+                r.headers.put(line.substring(0, colon).trim().toLowerCase(Locale.ROOT),
+                        line.substring(colon + 1).trim());
+            }
+        }
+
+        String length = r.headers.get("content-length");
+        if (length != null) {
+            int len = Integer.parseInt(length);
+            if (len < 0 || len > 65536) throw new IOException("Bad Content-Length: " + len);
+            byte[] body = new byte[len];
+            readFully(in, body, len);
+            r.body = new String(body, StandardCharsets.UTF_8);
+        }
+        return r;
+    }
+
+    private Response request(InputStream in, OutputStream w, String method, String url,
+                             int seq, String headers) throws IOException {
+        String req = method + " " + url + " RTSP/1.0\r\n" +
+                "CSeq: " + seq + "\r\n" + headers + "\r\n";
+        w.write(req.getBytes(StandardCharsets.UTF_8));
+        w.flush();
+        return readResponse(in);
+    }
+
+    private static String resolveControl(String base, String control) {
+        if (control == null || control.equals("*")) return base;
+        if (control.startsWith("rtsp://") || control.startsWith("rtsps://")) return control;
+        if (control.startsWith("/")) {
+            // Root-relative: keep only scheme://host:port of the base
+            int hostEnd = base.indexOf('/', base.indexOf("://") + 3);
+            return (hostEnd < 0 ? base : base.substring(0, hostEnd)) + control;
+        }
+        return base.endsWith("/") ? base + control : base + "/" + control;
+    }
+
+    /** Parse the SDP: returns { videoUrl, audioUrl or null } and sets the stream parameters. */
+    private String[] parseSdp(String sdp, String base) {
+        String[] urls = { null, null };
+        String[] controls = { null, null };
+        String session = null;
+        int media = -1; // -1 session level, 0 video, 1 audio, 2 other
+        // Payload types offered per media line, and their rtpmap: pt -> { NAME, rate }
+        List<Integer> vPts = new ArrayList<>();
+        List<Integer> aPts = new ArrayList<>();
+        Map<Integer, String[]> vMap = new HashMap<>();
+        Map<Integer, String[]> aMap = new HashMap<>();
+        boolean hasAudio = false;
+
+        for (String line : sdp.split("\r?\n")) {
+            if (line.startsWith("m=")) {
+                media = line.startsWith("m=video") ? 0 : line.startsWith("m=audio") ? 1 : 2;
+                if (media == 1) hasAudio = true;
+                String[] p = line.split("\\s+");
+                for (int i = 3; i < p.length && media < 2; i++) {
+                    try {
+                        (media == 0 ? vPts : aPts).add(Integer.parseInt(p[i]));
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+            } else if (line.startsWith("a=control:")) {
+                String ctrl = line.substring(10).trim();
+                if (media == -1) session = ctrl;
+                else if (media < 2) controls[media] = ctrl;
+            } else if (line.startsWith("a=rtpmap:") && (media == 0 || media == 1)) {
+                // a=rtpmap:<pt> <name>/<rate>[/<channels>]
+                String[] p = line.substring(9).trim().split("[\\s/]+");
+                if (p.length < 2) continue;
+                try {
+                    (media == 0 ? vMap : aMap).put(Integer.parseInt(p[0]), new String[] {
+                            p[1].toUpperCase(Locale.ROOT), p.length > 2 ? p[2] : "" });
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
+
+        // Video: first offered H.264/H.265; without rtpmap keep the legacy 96/97 convention
+        int vPt = -1;
+        String vCodec = null;
+        for (int pt : vPts) {
+            String[] m = vMap.get(pt);
+            String name = m != null ? m[0] : pt == 97 ? "H265" : pt == 96 ? "H264" : null;
+            if ("H264".equals(name) || "H265".equals(name) || "HEVC".equals(name)) {
+                vPt = pt;
+                vCodec = name;
+                break;
+            }
+        }
+        if (vPt < 0 && !vPts.isEmpty()) vPt = vPts.get(0);
+
+        // Audio: first offered L16, the only format played; without rtpmap the legacy PT 100
+        int aPt = -1;
+        int aRate = 0;
+        String aCodec = null;
+        for (int pt : aPts) {
+            String[] m = aMap.get(pt);
+            if (m != null ? m[0].equals("L16") : pt == 100) {
+                aPt = pt;
+                aCodec = "L16";
+                try {
+                    if (m != null) aRate = Integer.parseInt(m[1]);
+                } catch (NumberFormatException ignored) {
+                }
+                break;
+            }
+        }
+
+        String sessionBase = resolveControl(base, session);
+        urls[0] = resolveControl(sessionBase, controls[0] != null ? controls[0] : "trackID=0");
+        if (hasAudio) {
+            urls[1] = resolveControl(sessionBase, controls[1] != null ? controls[1] : "trackID=1");
+        }
+
+        videoPt = vPt;
+        codecH265 = vCodec != null ? !vCodec.equals("H264") : vPt == 97;
+        audioPt = aPt;
+        audioRate = aRate > 0 && aRate <= 192000 ? aRate : 0;
+
+        Log.i(TAG, "SDP: video pt " + vPt + " " + (codecH265 ? "H265" : "H264")
+                + ", audio pt " + aPt + (aCodec != null ? " L16" : " (none played)"));
+        return urls;
+    }
+
+    private void rtsp_connect(int gen) throws Exception {
         Uri uri = Uri.parse(mHost);
-        try (Socket s = new Socket()) {
-            int port = Uri.parse(mHost).getPort();
-            s.connect(new InetSocketAddress(uri.getHost(), port < 0 ? 554 : port), 1000);
-            s.setSoTimeout(1000);
-            BufferedReader r = new BufferedReader(new InputStreamReader(s.getInputStream()));
+        String host = uri.getHost();
+        if (host == null || host.isEmpty()) throw new IOException("No host in URL");
+        int port = uri.getPort();
+
+        // Request URL without user:password, which goes into the Authorization header
+        String path = uri.getEncodedPath();
+        String query = uri.getEncodedQuery();
+        String url = "rtsp://" + host + (port >= 0 ? ":" + port : "")
+                + (path != null ? path : "") + (query != null ? "?" + query : "");
+
+        Socket s = new Socket();
+        try {
+            synchronized (streamLock) {
+                if (gen != listenerGen) return;
+                mSocket = s;
+            }
+            s.connect(new InetSocketAddress(host, port < 0 ? 554 : port), 3000);
+            s.setSoTimeout(3000);
+            InputStream in = new BufferedInputStream(s.getInputStream(), 65536);
             OutputStream w = s.getOutputStream();
 
             Log.d(TAG, "Start rtsp connection");
@@ -522,134 +749,112 @@ public class Decoder extends Activity {
             String user = uri.getUserInfo();
             String auth = "";
             if (user != null) {
-                auth = "Authorization: Basic " +
-                        Base64.encodeToString(user.getBytes(), Base64.NO_WRAP) + "\r\n";
+                auth = "Authorization: Basic " + Base64.encodeToString(
+                        user.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP) + "\r\n";
             }
 
             int seq = 1;
-            String desc = "DESCRIBE " + mHost + " RTSP/1.0\r\n" +
-                    "CSeq: " + seq + "\r\n" + auth + "Accept: application/sdp\r\n\r\n";
-            w.write(desc.getBytes());
-            w.flush();
+            Response r = request(in, w, "DESCRIBE", url, seq++,
+                    auth + "Accept: application/sdp\r\n");
+            if (r.code / 100 != 2) throw new IOException("DESCRIBE failed: " + r.code);
+            String base = r.headers.get("content-base");
+            String[] tracks = parseSdp(r.body, base != null ? base : url);
 
-            String line;
-            while ((line = r.readLine()) != null && !line.isEmpty()) {
-                Log.i(TAG, line);
-            }
+            r = request(in, w, "SETUP", tracks[0], seq++,
+                    auth + "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n");
+            if (r.code / 100 != 2) throw new IOException("SETUP video failed: " + r.code);
+            String session = r.headers.get("session");
+            if (session == null) throw new IOException("No Session header");
+            session = session.split(";")[0].trim();
 
-            seq++;
-            String type = mType ? "RTP/AVP/UDP;unicast;client_port=5000"
-                    : "RTP/AVP/TCP;unicast;interleaved=0-1";
-            String video = "SETUP " + mHost + "/trackID=0 RTSP/1.0\r\n" +
-                    "CSeq: " + seq + "\r\n" + auth + "Transport: " + type + "\r\n\r\n";
-            w.write(video.getBytes());
-            w.flush();
-
-            String session = null;
-            while ((line = r.readLine()) != null && !line.isEmpty()) {
-                if (line.startsWith("Session:")) {
-                    session = line.replace("Session:", "").split(";")[0].trim();
+            if (tracks[1] != null) {
+                r = request(in, w, "SETUP", tracks[1], seq++, auth +
+                        "Transport: RTP/AVP/TCP;unicast;interleaved=2-3\r\n" +
+                        "Session: " + session + "\r\n");
+                if (r.code / 100 != 2) {
+                    Log.w(TAG, "SETUP audio failed: " + r.code + ", continuing without audio");
+                    audioPt = -1;
                 }
-                Log.i(TAG, line);
             }
 
-            seq++;
-            type = mType ? "RTP/AVP/UDP;unicast;client_port=5002"
-                    : "RTP/AVP/TCP;unicast;interleaved=2-3";
-            String audio = "SETUP " + mHost + "/trackID=1 RTSP/1.0\r\n" +
-                    "CSeq: " + seq + "\r\n" + auth + "Transport: " + type + "\r\n" +
-                    "Session: " + session + "\r\n\r\n";
-            w.write(audio.getBytes());
-            w.flush();
+            r = request(in, w, "PLAY", url, seq, auth + "Session: " + session + "\r\n");
+            if (r.code / 100 != 2) throw new IOException("PLAY failed: " + r.code);
 
-            while ((line = r.readLine()) != null && !line.isEmpty()) {
-                Log.i(TAG, line);
+            synchronized (streamLock) {
+                // Paused meanwhile: do not mark an obsolete connection active
+                if (gen != listenerGen) return;
+                lastFrame = SystemClock.elapsedRealtime();
+                activeStream = true;
             }
-
-            seq++;
-            String play = "PLAY " + mHost + " RTSP/1.0\r\n" +
-                    "CSeq: " + seq + "\r\n" + auth + "Session: " + session + "\r\n\r\n";
-            w.write(play.getBytes());
-            w.flush();
-
-            while ((line = r.readLine()) != null && !line.isEmpty()) {
-                Log.i(TAG, line);
+            tcp_stream(in, gen);
+        } finally {
+            // A thread from an older generation must not clobber the state of a newer one
+            synchronized (streamLock) {
+                if (mSocket == s) mSocket = null;
+                if (gen == listenerGen) activeStream = false;
             }
-
-            activeStream = true;
-            if (mType) {
-                try (DatagramSocket d = new DatagramSocket(5000)) {
-                    udp_stream(d);
-                }
-            } else {
-                tcp_stream(s.getInputStream());
+            try {
+                s.close();
+            } catch (IOException ignored) {
             }
         }
     }
 
-    private void udp_stream(DatagramSocket d) throws IOException {
-        while (activeStream) {
-            byte[] data = new byte[2048];
-            DatagramPacket packet = new DatagramPacket(data, data.length);
-            d.receive(packet);
-            processPacket(new Frame(packet.getData(), packet.getLength()));
-        }
-    }
-
-    private void tcp_stream(InputStream input) throws IOException {
-        while (activeStream) {
-            if (input.read() != 0x24) {
+    private void tcp_stream(InputStream input, int gen) throws IOException {
+        while (activeStream && gen == listenerGen) {
+            int b = input.read();
+            if (b < 0) throw new IOException("Connection closed");
+            if (b != 0x24) {
                 continue;
             }
 
             int channel = input.read();
-            int len = (input.read() << 8) | input.read();
+            int hi = input.read();
+            int lo = input.read();
+            if ((channel | hi | lo) < 0) throw new IOException("Connection closed");
+            int len = (hi << 8) | lo;
             byte[] data = new byte[len];
+            readFully(input, data, len);
 
-            int read = 0;
-            while (read < len) {
-                read += input.read(data, read, len - read);
-            }
-
-            if (channel == 0 || channel == 2) {
-                processPacket(new Frame(data, len));
+            if ((channel == 0 || channel == 2) && len > 13) {
+                processPacket(new Frame(data, len), channel);
             }
         }
     }
 
-    private void processPacket(Frame frame) {
+    private int lastUnknownPayload = -1;
+
+    private void processPacket(Frame frame, int channel) {
         byte[] data = frame.data();
         int payload = (data[1] & 0x7F);
-        if (payload == 100) {
-            processAudio(frame);
-            return;
-        } else if (payload == 99) {
-            //Log.w(TAG, "AAC codec not supported");
-            return;
-        } else if (payload == 98) {
-            //Log.w(TAG, "Opus codec not supported");
-            return;
-        } else if (payload == 97 || payload == 96) {
-            codecH265 = payload == 97;
+        // Channel 0 carries the video track and channel 2 the audio track (see SETUP)
+        if (channel == 0 && payload == videoPt) {
+            lastFrame = SystemClock.elapsedRealtime();
             Frame output = buildFrame(frame);
-            if (output != null) {
-                try {
-                    nalQueue.put(output);
-                } catch (InterruptedException e) {
-                    Log.w(TAG, "Frame queue is full");
-                }
+            if (output != null && !nalQueue.offer(output)) {
+                Log.w(TAG, "Frame queue is full");
             }
-
+            return;
+        } else if (channel == 2 && payload == audioPt) {
+            processAudio(frame);
             return;
         }
 
-        Log.w(TAG, "Unknown rtp type: " + payload);
+        if (payload != lastUnknownPayload) {
+            lastUnknownPayload = payload;
+            Log.w(TAG, "Ignored rtp type: " + payload);
+        }
     }
 
     private void startListener() {
         Log.i(TAG, "Start network listener");
+        final int gen;
+        synchronized (streamLock) {
+            gen = ++listenerGen;
+        }
+
         new Thread(() -> {
-            while (listener) {
+            while (gen == listenerGen) {
                 try {
                     if (!activeStream) {
                         runOnUiThread(() -> {
@@ -657,63 +862,66 @@ public class Decoder extends Activity {
                             mSurface.setVisibility(View.VISIBLE);
                             mConnect.setVisibility(View.VISIBLE);
                         });
-                        rtsp_connect();
+                        rtsp_connect(gen);
                     }
                 } catch (Exception e) {
                     Log.w(TAG, "Cannot connect rtsp: " + e.getMessage());
                     SystemClock.sleep(1000);
                 }
             }
-        }).start();
+        }, "rtsp-network").start();
 
         new Thread(() -> {
-            while (listener) {
-                if (activeStream) {
-                    if (SystemClock.elapsedRealtime() - lastFrame > 3000) {
-                        Log.w(TAG, "Stream is inactive");
-                        activeStream = false;
-                    }
+            while (gen == listenerGen) {
+                if (activeStream && SystemClock.elapsedRealtime() - lastFrame > 3000) {
+                    Log.w(TAG, "Stream is inactive");
+                    activeStream = false;
+                    closeSocket();
                 }
                 SystemClock.sleep(1000);
             }
-        }).start();
+        }, "rtsp-watchdog").start();
 
         new Thread(() -> {
-            while (listener) {
+            while (gen == listenerGen) {
                 try {
                     Frame buffer = nalQueue.poll(5, TimeUnit.MILLISECONDS);
-                    if (buffer != null) {
+                    if (buffer != null && gen == listenerGen) {
                         decodeFrame(buffer);
                     }
                 } catch (InterruptedException e) {
                     Log.w(TAG, "Cannot decode video: " + e.getMessage());
                 }
             }
-        }).start();
+        }, "rtsp-video").start();
 
         new Thread(() -> {
-            while (listener) {
+            while (gen == listenerGen) {
                 try {
                     Frame buffer = pcmQueue.poll(5, TimeUnit.MILLISECONDS);
-                    if (buffer != null) {
+                    if (buffer != null && gen == listenerGen) {
                         playAudio(buffer);
                     }
                 } catch (InterruptedException e) {
                     Log.w(TAG, "Cannot decode audio: " + e.getMessage());
                 }
             }
-        }).start();
+        }, "rtsp-audio").start();
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-        if (listener) {
-            listener = false;
+        // Old threads see the new generation and exit; closing the socket unblocks the reader
+        synchronized (streamLock) {
+            listenerGen++;
             activeStream = false;
-            closeDecoder();
-            closeAudio();
         }
+        closeSocket();
+        closeDecoder();
+        closeAudio();
+        nalQueue.clear();
+        pcmQueue.clear();
     }
 
     @Override
@@ -721,10 +929,7 @@ public class Decoder extends Activity {
         super.onResume();
 
         loadSettings();
-        if (!listener) {
-            listener = true;
-            startListener();
-        }
+        startListener();
 
         mConnect.setText(mHost);
         mConnect.setVisibility(View.VISIBLE);
