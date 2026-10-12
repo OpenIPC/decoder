@@ -231,7 +231,12 @@ public class Decoder extends Activity
                 quadViews[idx].setOnClickListener(cv ->
                         menuManager.showMenu(menuAnchor, quadEnabled, mActive, mVersion,
                                 BuildConfig.GIT_HASH, mHosts));
-                lr.addView(quadViews[idx], new LinearLayout.LayoutParams(
+                // Each cell is a FrameLayout so overlays can be stacked on the video
+                FrameLayout cell = new FrameLayout(this);
+                cell.addView(quadViews[idx], new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT));
+                lr.addView(cell, new LinearLayout.LayoutParams(
                         0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
             }
         }
@@ -536,7 +541,8 @@ public class Decoder extends Activity
         for (int i = 0; i < 4; i++) {
             TextureView t = quadViews[i];
             if (t == null) continue;
-            View overlay = t.findViewWithTag("quad_overlay_" + i);
+            FrameLayout cell = (FrameLayout) t.getParent();
+            View overlay = cell.findViewWithTag("quad_overlay_" + i);
             if (overlay == null) {
                 overlay = new View(this);
                 overlay.setTag("quad_overlay_" + i);
@@ -544,7 +550,7 @@ public class Decoder extends Activity
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT));
                 overlay.setBackgroundColor(Color.BLACK);
-                ((FrameLayout) t.getParent()).addView(overlay);
+                cell.addView(overlay);
             }
             overlay.setVisibility(View.VISIBLE);
             overlay.bringToFront();
@@ -554,7 +560,7 @@ public class Decoder extends Activity
     private void removeQuadOverlay(int index) {
         if (index < 0 || index >= quadViews.length || quadViews[index] == null) return;
         TextureView t = quadViews[index];
-        View overlay = t.findViewWithTag("quad_overlay_" + index);
+        View overlay = ((View) t.getParent()).findViewWithTag("quad_overlay_" + index);
         if (overlay != null) {
             overlay.setVisibility(View.GONE);
         }
