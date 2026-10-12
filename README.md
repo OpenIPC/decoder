@@ -92,7 +92,6 @@ Shows all configured slots in a 2×2 grid. Each cell has its own connection and 
 > These are known gaps that we plan to address. Each one has an issue — comments, test results and pull requests are welcome.
 >
 > - **RTSP over TCP only.** No UDP or multicast — [#7](https://github.com/OpenIPC/decoder/issues/7)
-> - **Simplified RTP handling for video:** no STAP-A/AP aggregation, packets with CSRC or header extensions are dropped, no packet-loss recovery — [#10](https://github.com/OpenIPC/decoder/issues/10)
 > - **No audio in Quad mode** — [#12](https://github.com/OpenIPC/decoder/issues/12)
 > - **Only 4 camera slots** — [#13](https://github.com/OpenIPC/decoder/issues/13)
 > - **Audio formats not supported:** MP4A-LATM, Opus, G.726, and AAC frames split across RTP packets — [#14](https://github.com/OpenIPC/decoder/issues/14)

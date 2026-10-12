@@ -92,7 +92,6 @@
 > Это известные пробелы, которые мы планируем закрыть. На каждый заведён issue — комментарии, результаты проверок и pull request приветствуются.
 >
 > - **Только RTSP поверх TCP.** UDP и multicast не поддерживаются — [#7](https://github.com/OpenIPC/decoder/issues/7)
-> - **Упрощённая обработка RTP для видео:** нет агрегации STAP-A/AP, пакеты с CSRC или расширением заголовка отбрасываются, потери пакетов не обрабатываются — [#10](https://github.com/OpenIPC/decoder/issues/10)
 > - **В режиме Quad нет звука** — [#12](https://github.com/OpenIPC/decoder/issues/12)
 > - **Только 4 слота для камер** — [#13](https://github.com/OpenIPC/decoder/issues/13)
 > - **Не поддерживаются форматы звука** MP4A-LATM, Opus, G.726, а также AAC-кадры, разбитые на несколько RTP-пакетов — [#14](https://github.com/OpenIPC/decoder/issues/14)
