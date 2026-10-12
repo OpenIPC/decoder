@@ -30,8 +30,12 @@ class MediaCodecManager {
     private final DecoderRetry retry = new DecoderRetry();
     /** While false no decoder is created, so none can appear after a pause or stop. */
     private volatile boolean enabled = true;
-    /** A fresh decoder skips input until the first parameter set (SPS/VPS/PPS). */
+    /** Parameter sets seen since the decoder was created (bit per NAL type). */
+    private int configSeen;
+    /** A fresh decoder skips non-config input until all parameter sets arrived. */
     private boolean awaitingConfig;
+    /** Bumped by setEnabled(); a creation started in an older generation is discarded. */
+    private int lifecycle;
     private final MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
 
     // Surface set by the owning activity
@@ -55,8 +59,24 @@ class MediaCodecManager {
 
     /** Enable or disable decoding; disabling also releases the decoder. */
     void setEnabled(boolean enabled) {
-        this.enabled = enabled;
-        if (!enabled) closeDecoder();
+        MediaCodec codec;
+        synchronized (decoderLock) {
+            this.enabled = enabled;
+            lifecycle++;
+            if (enabled) return;
+            retry.onSuccess();
+            codec = decoder;
+            decoder = null;
+        }
+        // stop()/release() can take a while: never on the caller's (UI) thread
+        if (codec != null) releaseAsync(codec);
+    }
+
+    private static void releaseAsync(MediaCodec codec) {
+        new Thread(() -> {
+            try { codec.stop(); } catch (Exception ignored) {}
+            try { codec.release(); } catch (Exception ignored) {}
+        }, "decoder-release").start();
     }
 
     /** Release the decoder on purpose (codec switch, camera switch): no back-off. */
@@ -81,8 +101,10 @@ class MediaCodecManager {
     }
 
     void createDecoder(boolean codecH265) {
+        final int gen;
         synchronized (decoderLock) {
             if (decoder != null || !enabled || !retry.mayCreate(nowMs())) return;
+            gen = lifecycle;
         }
 
         Surface s = surface;
@@ -109,20 +131,24 @@ class MediaCodecManager {
                 throw e;
             }
         } catch (Exception e) {
-            retry.onFailure(nowMs());
+            synchronized (decoderLock) {
+                // A creation cancelled by a pause must not delay the next start
+                if (gen != lifecycle || !enabled) return;
+                retry.onFailure(nowMs());
+            }
             Log.e(TAG, "Cannot setup decoder (attempt " + retry.failures() + "): " + e.getMessage());
             return;
         }
 
         synchronized (decoderLock) {
             // Disabled meanwhile (pause/stop) or another thread was faster
-            if (decoder != null || !enabled) {
-                try { local.stop(); } catch (Exception ignored) {}
-                local.release();
+            if (decoder != null || !enabled || gen != lifecycle) {
+                releaseAsync(local);
                 return;
             }
             decoder = local;
             awaitingConfig = true;
+            configSeen = 0;
         }
     }
 
@@ -151,10 +177,16 @@ class MediaCodecManager {
             if (codec == null) {
                 needCreate = enabled && retry.mayCreate(nowMs());
             } else if (awaitingConfig && !isConfigNal) {
-                // P-frames without parameter sets only produce errors in a new decoder
+                // Frames before the full parameter set only produce errors in a new decoder
                 return false;
             } else {
-                awaitingConfig = false;
+                if (isConfigNal) {
+                    configSeen |= 1 << fragment;
+                    int needed = codecH265
+                            ? (1 << H265_NAL_VPS) | (1 << H265_NAL_SPS) | (1 << H265_NAL_PPS)
+                            : (1 << H264_NAL_SPS) | (1 << H264_NAL_PPS);
+                    if ((configSeen & needed) == needed) awaitingConfig = false;
+                }
                 try {
                     int inputBufferId = codec.dequeueInputBuffer(5_000);
                     if (inputBufferId >= 0) {

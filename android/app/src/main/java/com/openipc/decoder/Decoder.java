@@ -338,8 +338,13 @@ public class Decoder extends Activity
         if (link != null) {
             Log.d(TAG, "Link: " + Uri.parse(link).getHost());
             mHosts[mActive] = sanitizeUrl(link);
-            // A shared link is meant to be watched: show it in single view
+            // A shared link is meant to be watched: single view, and saved so that it is
+            // still there after the next pause/resume
             quadEnabled = false;
+            pref.edit()
+                    .putString("host_" + mActive, mHosts[mActive])
+                    .putBoolean("quad_enabled", false)
+                    .apply();
             intent.removeExtra(Intent.EXTRA_TEXT);
         }
         applyActiveCamera();
@@ -736,18 +741,10 @@ public class Decoder extends Activity
         }
         // Disabled first: the decode thread can no longer create a decoder after this
         videoDecoder.setEnabled(false);
-        // Short, bounded wait so the audio thread is out of AudioTrack before it is released
-        // (#32: this used to block the UI thread for seconds)
-        ExecutorService ex = executor;
+        // Same for audio: a worker still running cannot start playback again. Nothing to wait
+        // for on the UI thread (#32: this used to block it for seconds)
+        audioManager.setEnabled(false);
         stopExecutor();
-        if (ex != null) {
-            try {
-                ex.awaitTermination(300, TimeUnit.MILLISECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }
-        closeAudio();
         nalQueue.clear();
     }
 
@@ -770,6 +767,7 @@ public class Decoder extends Activity
 
         loadSettings();
         videoDecoder.setEnabled(true);
+        audioManager.setEnabled(true);
         if (quadEnabled) {
             mSurface.setVisibility(View.GONE);
             quadContainer.setVisibility(View.VISIBLE);
