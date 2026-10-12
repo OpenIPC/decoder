@@ -732,8 +732,12 @@ public class Decoder extends Activity
     @Override
     protected void onPause() {
         super.onPause();
+        mResumed = false;
         menuManager.onPauseDismissBrowser();
+        stopStreams();
+    }
 
+    private void stopStreams() {
         if (quadCells != null) {
             for (QuadCell cell : quadCells) {
                 if (cell != null) cell.stop();
@@ -772,12 +776,24 @@ public class Decoder extends Activity
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        // Android 10+ may deliver it to the resumed activity without onPause()/onResume():
+        // apply the shared link now
+        if (mResumed) {
+            stopStreams();
+            startStreams();
+        }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        mResumed = true;
+        startStreams();
+    }
 
+    private boolean mResumed;
+
+    private void startStreams() {
         loadSettings();
         videoDecoder.setEnabled(true);
         audioManager.setEnabled(true);
