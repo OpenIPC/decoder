@@ -35,7 +35,7 @@ import android.widget.TextView;
 
 class MenuManager {
     private static final String TAG = "OpenIPCDecoder";
-    private static final int CAM_COUNT = 4;
+    private static final int CAM_COUNT = Decoder.CAM_COUNT;
     private static final String DEFAULT_URL = "rtsp://root:12345@192.168.1.10:554/stream=0";
 
     private final Decoder activity;

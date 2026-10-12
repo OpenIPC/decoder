@@ -69,9 +69,10 @@ public class DecoderRetryTest {
 
     @Test
     public void savedSlotIsClamped() {
-        // #22: a stored slot outside 0..3 falls back to the first camera
+        // #22: a stored slot outside 0..CAM_COUNT-1 falls back to the first camera (#13: 8 slots)
         assertEquals(2, Decoder.clampSlot(2));
+        assertEquals(7, Decoder.clampSlot(7));
         assertEquals(0, Decoder.clampSlot(-1));
-        assertEquals(0, Decoder.clampSlot(4));
+        assertEquals(0, Decoder.clampSlot(Decoder.CAM_COUNT));
     }
 }

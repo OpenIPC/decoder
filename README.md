@@ -31,11 +31,11 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 
 - **Video:** RTSP playback, hardware H.264/H.265 decoding via MediaCodec
 - **Audio:** AAC (RFC 3640 `mpeg4-generic`, ADTS, MP4A-LATM), Opus, G.711 μ-law/A-law, L16 PCM (mono/stereo)
-- **Display:** single camera, or Quad mode with 4 cameras at once
+- **Display:** single camera, or Quad mode with up to 8 cameras at once (2×2 or 3×3 grid)
 - **Controls:** pinch-to-zoom, pan, double-tap to reset, Android TV remote (Leanback launcher)
 - **Network:** Basic and Digest authentication, RTSP keepalive, automatic reconnection with exponential back-off, connection-quality indicator
 - **WebUI:** built-in browser for the camera's web interface
-- **More:** long-press screenshot, 4 camera slots, URLs can be shared from other apps
+- **More:** long-press screenshot, 8 camera slots, URLs can be shared from other apps
 
 ## Requirements
 
@@ -60,7 +60,7 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 | Item         | Action                                                                                                                                                                             |
 |--------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Q**        | Turn Quad mode on or off                                                                                                                                                           |
-| **1**–**4**  | Switch to a camera slot. The active slot's number shows the connection quality: green under 100 ms of jitter, yellow 100–300 ms, red above 300 ms. A grey number is an empty slot. |
+| **1**–**8**  | Switch to a camera slot. The active slot's number shows the connection quality: green under 100 ms of jitter, yellow 100–300 ms, red above 300 ms. A grey number is an empty slot. |
 | **Settings** | Edit the RTSP URL of the active slot (single-camera mode only)                                                                                                                     |
 | **WebUI**    | Open the camera's web interface; credentials come from the RTSP URL (single-camera mode only)                                                                                      |
 | **Exit**     | Close the app. The small text next to it is the app version and build hash.                                                                                                        |
@@ -81,7 +81,7 @@ The app accepts plain-text shares (`ACTION_SEND`, `text/plain`). Sharing an `rts
 
 ### Quad mode
 
-Shows all configured slots in a 2×2 grid. Each cell has its own connection and decoder. Long-press a cell to play its audio (long-press it again to mute); the selected cell shows an AUDIO badge and is remembered. Tap any cell to open the menu.
+Shows the configured slots in a 2×2 grid, or in a 3×3 grid once any of slots 5–8 is used. Each cell has its own connection and decoder, so the device's video decoder limits how many high-resolution streams play smoothly: with five or more cameras, their substreams are a good choice. Some cameras accept only one RTSP client at a time. Long-press a cell to play its audio (long-press it again to mute); the selected cell shows an AUDIO badge and is remembered. Tap any cell to open the menu.
 
 ## Known limitations
 
@@ -89,7 +89,6 @@ Shows all configured slots in a 2×2 grid. Each cell has its own connection and 
 > These are known gaps that we plan to address. Each one has an issue — comments, test results and pull requests are welcome.
 >
 > - **RTSP over TCP only.** No UDP or multicast — [#7](https://github.com/OpenIPC/decoder/issues/7)
-> - **Only 4 camera slots** — [#13](https://github.com/OpenIPC/decoder/issues/13)
 > - **G.726 audio is not supported** — [#14](https://github.com/OpenIPC/decoder/issues/14)
 > - **Credentials are sent in clear text** over plain RTSP/HTTP (Basic auth unless the camera asks for Digest); RTSPS is not supported and not planned — [#16](https://github.com/OpenIPC/decoder/issues/16)
 >
