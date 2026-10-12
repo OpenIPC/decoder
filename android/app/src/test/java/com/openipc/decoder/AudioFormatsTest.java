@@ -9,6 +9,7 @@ package com.openipc.decoder;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 
 import org.junit.Test;
@@ -28,8 +29,16 @@ public class AudioFormatsTest {
 
     // StreamMuxConfig: version 0, sameTimeFraming 1, numSubFrames 0, numProgram 0,
     // numLayer 0, then ASC: AAC LC (2), 16 kHz (index 8), mono (1), GASpecific 000
+    // ... GASpecificConfig 000, frameLengthType 000, latmBufferFullness 0xFF,
+    // otherDataPresent 0, crcCheckPresent 0
     private static final String SMC_16K_MONO =
-            "0 1 000000 0000 000 00010 1000 0001 000 000 00000000";
+            "0 1 000000 0000 000 00010 1000 0001 000 000 11111111 0 0";
+
+    /** SMC_16K_MONO with the bits from {@code from} replaced by {@code bits}. */
+    private static String smcWith(int from, String bits) {
+        String b = SMC_16K_MONO.replaceAll("[^01]", "");
+        return b.substring(0, from) + bits + b.substring(from + bits.length());
+    }
 
     private static AudioConfig parse(String sdp) {
         return Sdp.parse(sdp, "rtsp://x").audio;
@@ -124,9 +133,9 @@ public class AudioFormatsTest {
     public void fragmentedAuIsReassembled() {
         AudioManager.AuAssembler a = new AudioManager.AuAssembler();
         AudioConfig c = aacHbr();
-        assertEquals(0, a.push(auPacket(10, 4, 1), 0, 8, c, false).size());
-        assertEquals(0, a.push(auPacket(10, 4, 2), 0, 8, c, false).size());
-        List<byte[]> out = a.push(auPacket(10, 2, 3), 0, 6, c, true);
+        assertEquals(0, a.push(auPacket(10, 4, 1), 0, 8, c, false, 1).size());
+        assertEquals(0, a.push(auPacket(10, 4, 2), 0, 8, c, false, 2).size());
+        List<byte[]> out = a.push(auPacket(10, 2, 3), 0, 6, c, true, 3);
         assertEquals(1, out.size());
         assertArrayEquals(new byte[] {1, 1, 1, 1, 2, 2, 2, 2, 3, 3}, out.get(0));
     }
@@ -135,11 +144,11 @@ public class AudioFormatsTest {
     public void incompleteFragmentIsDropped() {
         AudioManager.AuAssembler a = new AudioManager.AuAssembler();
         AudioConfig c = aacHbr();
-        a.push(auPacket(10, 4, 1), 0, 8, c, false);
+        a.push(auPacket(10, 4, 1), 0, 8, c, false, 4);
         // Marker on the next piece, but 2 bytes are still missing
-        assertEquals(0, a.push(auPacket(10, 4, 2), 0, 8, c, true).size());
+        assertEquals(0, a.push(auPacket(10, 4, 2), 0, 8, c, true, 5).size());
         // A normal, complete AU afterwards is delivered
-        List<byte[]> out = a.push(auPacket(3, 3, 7), 0, 7, c, true);
+        List<byte[]> out = a.push(auPacket(3, 3, 7), 0, 7, c, true, 6);
         assertEquals(1, out.size());
         assertArrayEquals(new byte[] {7, 7, 7}, out.get(0));
     }
@@ -149,8 +158,60 @@ public class AudioFormatsTest {
         AudioManager.AuAssembler a = new AudioManager.AuAssembler();
         // Two AUs (3 and 2 bytes) in one packet
         byte[] p = {0x00, 0x20, 0x00, 0x18, 0x00, 0x10, 1, 1, 1, 2, 2};
-        List<byte[]> out = a.push(p, 0, p.length, aacHbr(), true);
+        List<byte[]> out = a.push(p, 0, p.length, aacHbr(), true, 7);
         assertEquals(2, out.size());
         assertArrayEquals(new byte[] {2, 2}, out.get(1));
+    }
+
+    @Test
+    public void lossBetweenFragmentsDropsTheStaleAu() {
+        AudioManager.AuAssembler a = new AudioManager.AuAssembler();
+        AudioConfig c = aacHbr();
+        a.push(auPacket(10, 4, 1), 0, 8, c, false, 100);
+        // Packet 101 lost; 102 is the start of a new AU of the same size
+        assertEquals(0, a.push(auPacket(10, 4, 2), 0, 8, c, false, 102).size());
+        assertEquals(0, a.push(auPacket(10, 4, 3), 0, 8, c, false, 103).size());
+        List<byte[]> out = a.push(auPacket(10, 2, 4), 0, 6, c, true, 104);
+        assertEquals(1, out.size());
+        assertArrayEquals("only bytes of the new AU",
+                new byte[] {2, 2, 2, 2, 3, 3, 3, 3, 4, 4}, out.get(0));
+    }
+
+    @Test
+    public void latmElementAcrossPackets() {
+        AudioManager.LatmAssembler a = new AudioManager.LatmAssembler();
+        byte[] part1 = {5, 1, 1};        // length 5, first 2 bytes
+        byte[] part2 = {1, 1, 1};        // remaining 3 bytes, marker set
+        assertNull(a.push(part1, 0, 3, false, 10));
+        byte[] element = a.push(part2, 0, 3, true, 11);
+        assertArrayEquals(new byte[] {5, 1, 1, 1, 1, 1}, element);
+        List<int[]> u = AudioManager.splitLatm(element, 0, element.length);
+        assertArrayEquals(new int[] {1, 5}, u.get(0));
+    }
+
+    @Test
+    public void latmElementWithALostPieceIsDropped() {
+        AudioManager.LatmAssembler a = new AudioManager.LatmAssembler();
+        assertNull(a.push(new byte[] {5, 1}, 0, 2, false, 10));
+        assertNull("piece 11 lost", a.push(new byte[] {1, 1}, 0, 2, true, 12));
+        // The next element is fine
+        assertArrayEquals(new byte[] {1, 9}, a.push(new byte[] {1, 9}, 0, 2, true, 13));
+    }
+
+    @Test
+    public void latmRejectsLayoutsTheRtpPathCannotHandle() {
+        // bit offsets in SMC_16K_MONO: 1 sameTimeFraming, 2..7 numSubFrames,
+        // 15..19 objectType, 20..23 freqIndex, 24..27 channels, 31..33 frameLengthType,
+        // 42 otherDataPresent, 43 crcCheckPresent
+        assertNotNull(AudioConfig.latmToAsc(bits(SMC_16K_MONO)));
+        assertNull("not same time framing", AudioConfig.latmToAsc(bits(smcWith(1, "0"))));
+        assertNull("two subframes", AudioConfig.latmToAsc(bits(smcWith(2, "000001"))));
+        assertNull("AAC Main", AudioConfig.latmToAsc(bits(smcWith(15, "00001"))));
+        assertNull("reserved rate", AudioConfig.latmToAsc(bits(smcWith(20, "1101"))));
+        assertNull("5.1", AudioConfig.latmToAsc(bits(smcWith(24, "0110"))));
+        assertNull("frameLengthType 1", AudioConfig.latmToAsc(bits(smcWith(31, "001"))));
+        assertNull("other data", AudioConfig.latmToAsc(bits(smcWith(42, "1"))));
+        assertNull("CRC", AudioConfig.latmToAsc(bits(smcWith(43, "1"))));
+        assertNull("multichannel ASC info", AudioConfig.ascInfo(new byte[] {0x14, 0x30}));
     }
 }

@@ -130,6 +130,7 @@ class AudioManager {
         releaseAacDecoder();
         aacQueue.clear();
         auAssembler.reset();
+        latmAssembler.reset();
         if (!AudioConfig.AAC.equals(audio.codec)) {
             pcmSampleRate = audio.sampleRate;
             pcmChannels = audio.channels;
@@ -145,15 +146,20 @@ class AudioManager {
         int end = RtspSession.rtpPayloadEnd(data, frame.length());
         if (end <= start) return;
 
+        boolean marker = (data[1] & 0x80) != 0;
+        int seq = ((data[2] & 0xFF) << 8) | (data[3] & 0xFF);
         AudioConfig c = config;
         switch (c.codec) {
             case AudioConfig.AAC:
-                processAac(c, data, start, end, (data[1] & 0x80) != 0, r);
+                processAac(c, data, start, end, marker, seq, r);
                 break;
             case AudioConfig.LATM:
                 ensureAacDecoder(c, false);
-                for (int[] u : splitLatm(data, start, end)) {
-                    offerAac(Arrays.copyOfRange(data, u[0], u[0] + u[1]), r);
+                byte[] element = latmAssembler.push(data, start, end, marker, seq);
+                if (element != null) {
+                    for (int[] u : splitLatm(element, 0, element.length)) {
+                        offerAac(Arrays.copyOfRange(element, u[0], u[0] + u[1]), r);
+                    }
                 }
                 break;
             case AudioConfig.OPUS:
@@ -370,13 +376,14 @@ class AudioManager {
     }
 
     private final AuAssembler auAssembler = new AuAssembler();
+    private final LatmAssembler latmAssembler = new LatmAssembler();
 
     private void processAac(AudioConfig c, byte[] data, int start, int end, boolean marker,
-                            int r) {
+                            int seq, int r) {
         List<int[]> units;
         if (c.sizeLength > 0) {
             ensureAacDecoder(c, false);
-            for (byte[] au : auAssembler.push(data, start, end, c, marker)) offerAac(au, r);
+            for (byte[] au : auAssembler.push(data, start, end, c, marker, seq)) offerAac(au, r);
             return;
         } else if (end - start >= 7 && isAdtsSync(data, start)) {
             ensureAacDecoder(c, true);
@@ -426,11 +433,19 @@ class AudioManager {
     static final class AuAssembler {
         private byte[] fragment;
         private int have;
+        private int lastSeq = -1;
 
-        void reset() { fragment = null; }
+        void reset() {
+            fragment = null;
+            lastSeq = -1;
+        }
 
-        List<byte[]> push(byte[] data, int start, int end, AudioConfig c, boolean marker) {
+        List<byte[]> push(byte[] data, int start, int end, AudioConfig c, boolean marker,
+                          int seq) {
             List<byte[]> out = new ArrayList<>();
+            // A lost packet in the middle of an AU: the pending fragment is not trustworthy
+            if (lastSeq >= 0 && seq != ((lastSeq + 1) & 0xFFFF)) fragment = null;
+            lastSeq = seq;
             if (end - start < 2) return out;
             int headerBits = ((data[start] & 0xFF) << 8) | (data[start + 1] & 0xFF);
             int pos = start + 2 + (headerBits + 7) / 8;
@@ -467,6 +482,36 @@ class AudioManager {
                 out.add(Arrays.copyOfRange(data, u[0], u[0] + u[1]));
             }
             return out;
+        }
+    }
+
+    /**
+     * RFC 6416: an AudioMuxElement may span several RTP packets, the marker bit is set on
+     * the last one. Returns the complete element, or null while it is incomplete or after
+     * a loss (then the rest of that element is skipped).
+     */
+    static final class LatmAssembler {
+        private final java.io.ByteArrayOutputStream pending = new java.io.ByteArrayOutputStream();
+        private int lastSeq = -1;
+        private boolean broken;
+
+        void reset() {
+            pending.reset();
+            lastSeq = -1;
+            broken = false;
+        }
+
+        byte[] push(byte[] data, int start, int end, boolean marker, int seq) {
+            if (lastSeq >= 0 && seq != ((lastSeq + 1) & 0xFFFF) && pending.size() > 0) {
+                broken = true; // a piece of the current element is missing
+            }
+            lastSeq = seq;
+            if (!broken) pending.write(data, start, end - start);
+            if (!marker) return null;
+            byte[] element = broken ? null : pending.toByteArray();
+            pending.reset();
+            broken = false;
+            return element;
         }
     }
 

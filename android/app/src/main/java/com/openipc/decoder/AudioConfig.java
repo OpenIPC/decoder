@@ -122,9 +122,11 @@ class AudioConfig {
             if (asc == null) {
                 codec = NONE;
             } else {
-                aacConfig = asc;
                 int[] info = ascInfo(asc);
-                if (info != null) {
+                if (info == null) {
+                    codec = NONE;
+                } else {
+                    aacConfig = asc;
                     sampleRate = info[0];
                     channels = info[1];
                 }
@@ -138,25 +140,35 @@ class AudioConfig {
     };
 
     /**
-     * StreamMuxConfig (audioMuxVersion 0, one program, one layer) to a 2-byte
-     * AudioSpecificConfig, or null if the layout is not supported.
+     * StreamMuxConfig to a 2-byte AudioSpecificConfig, or null unless it is the one layout
+     * the RTP path handles: audioMuxVersion 0, all streams same time framing, one subframe,
+     * one program, one layer, AAC-LC, a standard sampling rate, mono or stereo,
+     * frameLengthType 0 (byte-aligned PayloadLengthInfo), no other data and no CRC.
      */
     static byte[] latmToAsc(byte[] smc) {
         BitReader r = new BitReader(smc);
-        if (r.bits(1) != 0) return null;  // audioMuxVersion 1 is not supported
-        r.bits(1);                         // allStreamsSameTimeFraming
-        r.bits(6);                         // numSubFrames
-        if (r.bits(4) != 0) return null;  // numProgram + 1 must be 1
-        if (r.bits(3) != 0) return null;  // numLayer + 1 must be 1
+        if (r.bits(1) != 0) return null;  // audioMuxVersion 1
+        if (r.bits(1) != 1) return null;  // allStreamsSameTimeFraming
+        if (r.bits(6) != 0) return null;  // numSubFrames: exactly one
+        if (r.bits(4) != 0) return null;  // numProgram: exactly one
+        if (r.bits(3) != 0) return null;  // numLayer: exactly one
+        // AudioSpecificConfig
         int objectType = r.bits(5);
-        if (objectType == 31) objectType = 32 + r.bits(6);
         int freqIndex = r.bits(4);
-        if (freqIndex == 15) return null;  // explicit frequency: not supported
         int channelConfig = r.bits(4);
-        if (r.overrun() || objectType < 1 || objectType > 4 || channelConfig < 1
-                || channelConfig > 7) {
-            return null;
-        }
+        if (objectType != 2) return null;                       // AAC-LC only (decoder profile)
+        if (freqIndex >= AAC_RATES.length) return null;         // reserved / explicit rate
+        if (channelConfig < 1 || channelConfig > 2) return null; // playback is mono/stereo
+        // GASpecificConfig
+        r.bits(1);                                              // frameLengthFlag
+        if (r.bits(1) == 1) r.bits(14);                         // dependsOnCoreCoder
+        if (r.bits(1) != 0) return null;                        // extensionFlag
+        // Back in StreamMuxConfig
+        if (r.bits(3) != 0) return null;  // frameLengthType 0: PayloadLengthInfo in bytes
+        r.bits(8);                         // latmBufferFullness
+        if (r.bits(1) != 0) return null;  // otherDataPresent
+        if (r.bits(1) != 0) return null;  // crcCheckPresent
+        if (r.overrun()) return null;
         return new byte[] {
                 (byte) ((objectType << 3) | (freqIndex >> 1)),
                 (byte) (((freqIndex & 1) << 7) | (channelConfig << 3))
@@ -168,8 +180,8 @@ class AudioConfig {
         if (asc == null || asc.length < 2) return null;
         int freqIndex = ((asc[0] & 0x07) << 1) | ((asc[1] & 0x80) >> 7);
         int channelConfig = (asc[1] & 0x78) >> 3;
-        if (freqIndex >= AAC_RATES.length || channelConfig < 1) return null;
-        return new int[] {AAC_RATES[freqIndex], Math.min(channelConfig, 2)};
+        if (freqIndex >= AAC_RATES.length || channelConfig < 1 || channelConfig > 2) return null;
+        return new int[] {AAC_RATES[freqIndex], channelConfig};
     }
 
     private static final class BitReader {
