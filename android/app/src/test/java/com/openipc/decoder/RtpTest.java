@@ -21,24 +21,24 @@ public class RtpTest {
     public void headerLengthWithCsrcAndExtension() {
         byte[] p = new byte[40];
         p[0] = (byte) 0x80;
-        assertEquals(12, RtspClient.rtpHeaderLength(p, 40));
+        assertEquals(12, RtspSession.rtpHeaderLength(p, 40));
         p[0] = (byte) 0x82; // 2 CSRC
-        assertEquals(20, RtspClient.rtpHeaderLength(p, 40));
+        assertEquals(20, RtspSession.rtpHeaderLength(p, 40));
         p[0] = (byte) 0x90; // extension, length 2 words at bytes 14..15
         p[15] = 2;
-        assertEquals(24, RtspClient.rtpHeaderLength(p, 40));
+        assertEquals(24, RtspSession.rtpHeaderLength(p, 40));
     }
 
     @Test
     public void malformedHeaders() {
         byte[] p = new byte[40];
         p[0] = (byte) 0x40; // version 1
-        assertEquals(-1, RtspClient.rtpHeaderLength(p, 40));
+        assertEquals(-1, RtspSession.rtpHeaderLength(p, 40));
         p[0] = (byte) 0x80;
-        assertEquals(-1, RtspClient.rtpHeaderLength(p, 11));
+        assertEquals(-1, RtspSession.rtpHeaderLength(p, 11));
         p[0] = (byte) 0x90;
         p[15] = 100; // extension longer than the packet
-        assertEquals(-1, RtspClient.rtpHeaderLength(p, 40));
+        assertEquals(-1, RtspSession.rtpHeaderLength(p, 40));
     }
 
     @Test
@@ -46,9 +46,9 @@ public class RtpTest {
         byte[] p = new byte[40];
         p[0] = (byte) 0xA0;
         p[39] = 4;
-        assertEquals(36, RtspClient.rtpPayloadEnd(p, 40));
+        assertEquals(36, RtspSession.rtpPayloadEnd(p, 40));
         p[0] = (byte) 0x80;
-        assertEquals(40, RtspClient.rtpPayloadEnd(p, 40));
+        assertEquals(40, RtspSession.rtpPayloadEnd(p, 40));
     }
 
     private static BufferedInputStream stream(int... bytes) {
@@ -61,7 +61,7 @@ public class RtpTest {
     public void interleavedPacketAfterGarbage() throws IOException {
         byte[] buf = new byte[65535];
         // 'R' 'T' garbage, then $ channel 2 length 3
-        int total = RtspClient.readInterleavedPacket(stream('R', 'T', '$', 2, 0, 3, 7, 8, 9), buf);
+        int total = RtspSession.readInterleavedPacket(stream('R', 'T', '$', 2, 0, 3, 7, 8, 9), buf);
         assertEquals(7, total);
         assertEquals(2, buf[1]);
         assertEquals(9, buf[6]);
@@ -70,9 +70,9 @@ public class RtpTest {
     @Test
     public void cleanEofAndTruncation() throws IOException {
         byte[] buf = new byte[65535];
-        assertEquals(-1, RtspClient.readInterleavedPacket(stream(), buf));
-        assertThrows(IOException.class, () -> RtspClient.readInterleavedPacket(stream('$', 0), buf));
+        assertEquals(-1, RtspSession.readInterleavedPacket(stream(), buf));
+        assertThrows(IOException.class, () -> RtspSession.readInterleavedPacket(stream('$', 0), buf));
         assertThrows(IOException.class,
-                () -> RtspClient.readInterleavedPacket(stream('$', 0, 0, 5, 1, 2), buf));
+                () -> RtspSession.readInterleavedPacket(stream('$', 0, 0, 5, 1, 2), buf));
     }
 }
