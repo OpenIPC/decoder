@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 8.13.1" type="baseline" client="gradle" dependencies="false" name="AGP (8.13.1)" variant="all" version="8.13.1">
+
+    <issue
+        id="GestureBackNavigation"
+        message="If intercepting back events, this should be handled through the registration of callbacks; see https://developer.android.com/guide/navigation/custom-back/predictive-back-gesture"
+        errorLine1="            case KeyEvent.KEYCODE_BACK:"
+        errorLine2="                 ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/openipc/decoder/Decoder.java"
+            line="802"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="SuspiciousIndentation"
+        message="Suspicious indentation: This is indented but is not nested under the previous expression (`if (listenerCb != nu`...)"
+        errorLine1="            s.setSoTimeout(0);"
+        errorLine2="            ~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/openipc/decoder/RtspClient.java"
+            line="303"
+            column="13"/>
+        <location
+            file="src/main/java/com/openipc/decoder/RtspClient.java"
+            line="301"
+            column="9"
+            message="Previous statement here"/>
+    </issue>
+
+    <issue
+        id="UnusedAttribute"
+        message="Attribute `usesCleartextTraffic` is only used in API level 23 and higher (current min is 21)"
+        errorLine1="        android:usesCleartextTraffic=&quot;true&quot;>"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="20"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="DefaultUncaughtExceptionDelegation"
+        message="Must call `getDefaultUncaughtExceptionHandler()` to get the existing handler, and call `existingHandler.uncaughtException(thread, throwable)` from your new handler"
+        errorLine1="        Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {"
+        errorLine2="        ^">
+        <location
+            file="src/main/java/com/openipc/decoder/App.java"
+            line="21"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of Gradle than 8.13 is available: 8.14.6"
+        errorLine1="distributionUrl=https\://services.gradle.org/distributions/gradle-8.13-bin.zip"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="$HOME/Test/decoder/android/gradle/wrapper/gradle-wrapper.properties"
+            line="4"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of com.android.application than 8.13.1 is available: 9.4.1. (There is also a newer version of 8.13.𝑥 available, if upgrading to 9.4.1 is difficult: 8.13.2)"
+        errorLine1="agp = &quot;8.13.1&quot;"
+        errorLine2="      ~~~~~~~~">
+        <location
+            file="$HOME/Test/decoder/android/gradle/libs.versions.toml"
+            line="8"
+            column="7"/>
+    </issue>
+
+    <issue
+        id="DiscouragedApi"
+        message="Fixed screen orientations will be ignored in most cases, starting from Android 16. Android is moving toward a model where apps are expected to adapt to various orientations, display sizes, and aspect ratios."
+        errorLine1="            android:screenOrientation=&quot;sensorLandscape&quot;"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="27"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="AuthLeak"
+        message="Possible credential leak"
+        errorLine1="    private static final String DEFAULT_URL = &quot;rtsp://root:12345@192.168.1.10:554/stream=0&quot;;"
+        errorLine2="                                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/openipc/decoder/Decoder.java"
+            line="89"
+            column="48"/>
+    </issue>
+
+    <issue
+        id="AuthLeak"
+        message="Possible credential leak"
+        errorLine1="    private static final String DEFAULT_URL = &quot;rtsp://root:12345@192.168.1.10:554/stream=0&quot;;"
+        errorLine2="                                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/openipc/decoder/MenuManager.java"
+            line="38"
+            column="48"/>
+    </issue>
+
+    <issue
+        id="DataExtractionRules"
+        message="The attribute `android:allowBackup` is deprecated from Android 12 and higher and may be removed in future versions. Consider adding the attribute `android:dataExtractionRules` specifying an `@xml` resource which configures cloud backups and device transfers on Android 12 and higher."
+        errorLine1="        android:allowBackup=&quot;false&quot;"
+        errorLine2="                             ~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="15"
+            column="30"/>
+    </issue>
+
+    <issue
+        id="MergeRootFrame"
+        message="This `&lt;FrameLayout>` can be replaced with a `&lt;merge>` tag"
+        errorLine1="&lt;FrameLayout xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;"
+        errorLine2="^">
+        <location
+            file="src/main/res/layout/decoder.xml"
+            line="2"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="ClickableViewAccessibility"
+        message="Custom view ``TextureView`` has `setOnTouchListener` called on it but does not override `performClick`"
+        errorLine1="        mSurface.setOnTouchListener((v, event) -> {"
+        errorLine2="        ^">
+        <location
+            file="src/main/java/com/openipc/decoder/Decoder.java"
+            line="213"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="ClickableViewAccessibility"
+        message="`onTouch` lambda should call `View#performClick` when a click is detected"
+        errorLine1="        mSurface.setOnTouchListener((v, event) -> {"
+        errorLine2="                                    ^">
+        <location
+            file="src/main/java/com/openipc/decoder/Decoder.java"
+            line="213"
+            column="37"/>
+    </issue>
+
+    <issue
+        id="SetTextI18n"
+        message="Do not concatenate text displayed with `setText`. Use resource string with placeholders."
+        errorLine1="        statusText.setText(&quot;Connected • &quot; + videoCodec + aCodec + bps);"
+        errorLine2="                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/openipc/decoder/Decoder.java"
+            line="419"
+            column="28"/>
+    </issue>
+
+    <issue
+        id="SetTextI18n"
+        message="String literal in `setText` can not be translated. Use Android resources instead."
+        errorLine1="        statusText.setText(&quot;Connected • &quot; + videoCodec + aCodec + bps);"
+        errorLine2="                           ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/openipc/decoder/Decoder.java"
+            line="419"
+            column="28"/>
+    </issue>
+
+</issues>
