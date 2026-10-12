@@ -687,12 +687,10 @@ public class Decoder extends Activity
     // ====================== Video decode thread ======================
 
     private void startListener() {
-        listenerGen++;
-        final int gen = listenerGen;
-
-        // The previous pool's threads exit on the generation check; shut it down so its
-        // idle threads do not leak on every camera switch (#23)
+        // Stop the previous pool first (#23): stopExecutor() bumps listenerGen itself, so the
+        // generation for the new threads must be taken after it
         stopExecutor();
+        final int gen = listenerGen;
         executor = Executors.newFixedThreadPool(2);
 
         // Video decode thread
