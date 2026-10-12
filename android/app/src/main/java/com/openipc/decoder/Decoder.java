@@ -30,6 +30,7 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.Surface;
+import android.view.SurfaceView;
 import android.view.TextureView;
 import android.view.View;
 import android.view.WindowInsets;
@@ -82,7 +83,7 @@ public class Decoder extends Activity
     private boolean quadEnabled;
     private QuadCell[] quadCells;
     private LinearLayout quadContainer;
-    private final TextureView[] quadViews = new TextureView[4];
+    private final SurfaceView[] quadViews = new SurfaceView[4];
     // Quad audio (#12): the cell whose sound plays, -1 for none
     private int quadAudio = -1;
     private final TextView[] quadAudioBadges = new TextView[4];
@@ -245,7 +246,7 @@ public class Decoder extends Activity
                     LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
             for (int col = 0; col < 2; col++) {
                 int idx = row * 2 + col;
-                quadViews[idx] = new TextureView(this);
+                quadViews[idx] = new SurfaceView(this);
                 quadViews[idx].setOnClickListener(cv ->
                         menuManager.showMenu(menuAnchor, quadEnabled, mActive, mVersion,
                                 BuildConfig.GIT_HASH, mHosts));
@@ -675,7 +676,7 @@ public class Decoder extends Activity
 
     private void clearQuadViews() {
         for (int i = 0; i < 4; i++) {
-            TextureView t = quadViews[i];
+            SurfaceView t = quadViews[i];
             if (t == null) continue;
             FrameLayout cell = (FrameLayout) t.getParent();
             View overlay = cell.findViewWithTag("quad_overlay_" + i);
@@ -695,7 +696,7 @@ public class Decoder extends Activity
 
     private void removeQuadOverlay(int index) {
         if (index < 0 || index >= quadViews.length || quadViews[index] == null) return;
-        TextureView t = quadViews[index];
+        SurfaceView t = quadViews[index];
         View overlay = ((View) t.getParent()).findViewWithTag("quad_overlay_" + index);
         if (overlay != null) {
             overlay.setVisibility(View.GONE);

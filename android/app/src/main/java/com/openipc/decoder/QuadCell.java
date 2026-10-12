@@ -9,7 +9,8 @@ package com.openipc.decoder;
 
 import android.util.Log;
 import android.view.Surface;
-import android.view.TextureView;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
 
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -22,7 +23,7 @@ class QuadCell implements RtspSession.Callback {
 
     private final int index;
     private final String host;
-    private final TextureView view;
+    private final SurfaceView view;
     private final String tag;
     private final FramePool cellFramePool;
     private final String userAgent;
@@ -65,7 +66,7 @@ class QuadCell implements RtspSession.Callback {
 
     private final Listener listener;
 
-    QuadCell(int index, String host, TextureView view, FramePool pool, String userAgent, Listener listener) {
+    QuadCell(int index, String host, SurfaceView view, FramePool pool, String userAgent, Listener listener) {
         this.index = index;
         this.host = host;
         this.view = view;
@@ -102,50 +103,35 @@ class QuadCell implements RtspSession.Callback {
         started = true;
         running = true;
         decoder.setEnabled(true);
-        view.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
-            @Override
-            public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture st, int w, int h) {
-                if (threadsStarted) return;
-                Surface old = surface;
-                surface = new Surface(st);
-                if (old != null) {
-                    try { old.release(); } catch (Exception e) {
-                        Log.e(TAG, tag + " Error releasing old surface", e);
-                    }
-                }
-                startThreads();
-            }
-            @Override
-            public void onSurfaceTextureSizeChanged(android.graphics.SurfaceTexture st, int w, int h) {
-                Surface old = surface;
-                surface = new Surface(st);
-                if (old != null) {
-                    try { old.release(); } catch (Exception e) {
-                        Log.e(TAG, tag + " Error releasing surface on size change", e);
-                    }
-                }
-            }
-            @Override
-            public boolean onSurfaceTextureDestroyed(android.graphics.SurfaceTexture st) {
-                Surface s = surface;
-                surface = null;
-                if (s != null) {
-                    try { s.release(); } catch (Exception e) {
-                        Log.e(TAG, tag + " Error releasing surface on destroy", e);
-                    }
-                }
-                return true;
-            }
-            @Override
-            public void onSurfaceTextureUpdated(android.graphics.SurfaceTexture st) {}
-        });
-        if (view.isAvailable()) {
-            if (surface == null) {
-                surface = new Surface(view.getSurfaceTexture());
-            }
+        // SurfaceView, not TextureView (#61): with a TextureView every decoded frame raises a
+        // frame-available callback that the framework delivers by attaching a native thread to
+        // the VM, which allocated about 1 MB/s of garbage with four streams
+        view.getHolder().addCallback(holderCallback);
+        Surface s = view.getHolder().getSurface();
+        if (s != null && s.isValid()) {
+            surface = s;
             if (!threadsStarted) startThreads();
         }
     }
+
+    private final SurfaceHolder.Callback holderCallback = new SurfaceHolder.Callback() {
+        @Override
+        public void surfaceCreated(SurfaceHolder holder) {
+            // The surface belongs to the SurfaceView: it is used, never released, here
+            surface = holder.getSurface();
+            if (!threadsStarted) startThreads();
+        }
+        @Override
+        public void surfaceChanged(SurfaceHolder holder, int format, int w, int h) {}
+        @Override
+        public void surfaceDestroyed(SurfaceHolder holder) {
+            // Nothing may render into the surface once this returns, and a recreated surface
+            // needs a decoder configured for it: close the decoder, the decode thread creates
+            // a new one when the next surface is there
+            surface = null;
+            decoder.closeDecoder();
+        }
+    };
 
     private void startThreads() {
         if (threadsStarted) return;
@@ -193,6 +179,7 @@ class QuadCell implements RtspSession.Callback {
             executor = null;
         }
         nalQueue.clear();
+        if (view != null) view.getHolder().removeCallback(holderCallback);
         surface = null;
     }
 
