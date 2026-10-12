@@ -27,8 +27,6 @@ final class DecodePlanner {
     static final long SETTLE_MS = 3000;
     /** Quiet time after which a load counts as proven and a promotion beyond capacity is tried. */
     static final long PROBE_QUIET_MS = 30_000;
-    /** How far above the capacity a probe may go. */
-    static final double PROBE_MARGIN = 1.25;
 
     static final class Cell {
         int index;
@@ -70,6 +68,8 @@ final class DecodePlanner {
     private boolean learnt;
     /** Largest full-rate load that played without losses for PROBE_QUIET_MS. */
     private long proven;
+    /** Smallest load at which the decoder lost frames: probes stay below it. */
+    private long failedLoad = Long.MAX_VALUE;
     private int lossySamples;
     private long quietSinceMs = -1;
     private long lastChangeMs = -1;
@@ -123,6 +123,7 @@ final class DecodePlanner {
                 Cell c = cells.get(i);
                 if (c.full && !c.paused && c.playing && c.known) {
                     // Losses at this load: the capacity is below it, but not below a proven load
+                    failedLoad = Math.min(failedLoad, load);
                     capacity = Math.max(proven, Math.round(load * 0.9));
                     learnt = true;
                     return change(nowMs, Action.DEMOTE, c.index);
@@ -144,8 +145,9 @@ final class DecodePlanner {
             if (c.full || c.paused) continue;
             if (!c.known) return Decision.NONE; // keep the priority order: wait for it
             boolean fits = load + c.fullLoad <= capacity;
+            // Beyond the capacity only after a quiet period, and never up to a load that failed
             boolean probe = nowMs - quietSinceMs >= PROBE_QUIET_MS
-                    && load + c.fullLoad <= capacity * PROBE_MARGIN;
+                    && load + c.fullLoad < failedLoad;
             if (fits || probe) {
                 if (!fits) quietSinceMs = nowMs; // a probe starts a new quiet period
                 return change(nowMs, Action.PROMOTE, c.index);
