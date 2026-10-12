@@ -88,8 +88,43 @@ class AudioManager {
         }
     }
 
+    // Audio routes: every source (single view, the audible Quad cell) gets a route number.
+    // Frames, configs and track creation of an older route are ignored, so a stopped source
+    // cannot leak into the next one.
+    private final Object routeLock = new Object();
+    private int route;
+
+    /** Start a new route: closes current audio and invalidates all older producers. */
+    int newRoute() {
+        int r;
+        synchronized (routeLock) {
+            r = ++route;
+            pcmQueue.clear();
+            aacQueue.clear();
+        }
+        closeAudio();
+        return r;
+    }
+
+    /** Number of decoded frames waiting for playback (for tests and diagnostics). */
+    int queuedPcmFrames() { return pcmQueue.size(); }
+
+    private boolean isRoute(int r) {
+        synchronized (routeLock) {
+            return r == route;
+        }
+    }
+
+    /** Audio parameters of route {@code r}; ignored if that route is no longer current. */
+    void configure(AudioConfig audio, int r) {
+        synchronized (routeLock) {
+            if (r != route) return;
+            configure(audio);
+        }
+    }
+
     /** Called on every RTSP (re)connect, before PLAY. */
-    void configure(AudioConfig audio) {
+    private void configure(AudioConfig audio) {
         config = audio;
         // Parameters may differ after a reconnect: the AAC decoder is recreated on the next packet
         releaseAacDecoder();
@@ -100,8 +135,9 @@ class AudioManager {
         }
     }
 
-    /** Called from the network thread to deliver an audio RTP packet. */
-    void onAudioFrame(Frame frame) {
+    /** Called from a network thread to deliver an audio RTP packet of route {@code r}. */
+    void onAudioFrame(Frame frame, int r) {
+        if (!isRoute(r)) return;
         byte[] data = frame.data();
         int start = RtspSession.rtpHeaderLength(data, frame.length());
         if (start < 0) return;
@@ -111,16 +147,16 @@ class AudioManager {
         AudioConfig c = config;
         switch (c.codec) {
             case AudioConfig.AAC:
-                processAac(c, data, start, end);
+                processAac(c, data, start, end, r);
                 break;
             case AudioConfig.PCMU:
-                offerPcm(decodeG711(data, start, end, ULAW_TABLE));
+                offerPcm(decodeG711(data, start, end, ULAW_TABLE), r);
                 break;
             case AudioConfig.PCMA:
-                offerPcm(decodeG711(data, start, end, ALAW_TABLE));
+                offerPcm(decodeG711(data, start, end, ALAW_TABLE), r);
                 break;
             case AudioConfig.PCM:
-                offerPcm(decodeL16(data, start, end, c.bigEndian));
+                offerPcm(decodeL16(data, start, end, c.bigEndian), r);
                 break;
             default:
                 if (!c.codec.equals(lastUnsupported)) {
@@ -165,10 +201,14 @@ class AudioManager {
 
     // ====================== PCM ======================
 
-    private void offerPcm(byte[] pcm) {
+    private void offerPcm(byte[] pcm, int r) {
         if (pcm.length == 0) return;
-        if (!pcmQueue.offer(new Frame(pcm, pcm.length))) {
-            Log.w(TAG, "Audio queue full, frame dropped");
+        synchronized (routeLock) {
+            // Checked under the lock that newRoute() clears the queue with: no leftovers
+            if (r != route) return;
+            if (!pcmQueue.offer(new Frame(pcm, pcm.length))) {
+                Log.w(TAG, "Audio queue full, frame dropped");
+            }
         }
     }
 
@@ -242,6 +282,10 @@ class AudioManager {
 
     private AudioTrack createPcmAudio(int sample, int channels) {
         if (!enabled) return null;
+        final int trackRoute;
+        synchronized (routeLock) {
+            trackRoute = route;
+        }
         int mask = channels == 2 ? AudioFormat.CHANNEL_OUT_STEREO : AudioFormat.CHANNEL_OUT_MONO;
 
         Log.d(TAG, "Create PCM audio (" + sample + "hz, " + channels + "ch)");
@@ -283,8 +327,8 @@ class AudioManager {
 
         AudioTrack old;
         synchronized (trackLock) {
-            // Paused while the track was being created: do not publish it
-            if (!enabled) {
+            // Paused or switched to another source while the track was being created
+            if (!enabled || !isRoute(trackRoute)) {
                 try { track.stop(); } catch (Exception ignored) {}
                 track.release();
                 return null;
@@ -313,7 +357,7 @@ class AudioManager {
         }
     }
 
-    private void processAac(AudioConfig c, byte[] data, int start, int end) {
+    private void processAac(AudioConfig c, byte[] data, int start, int end, int r) {
         List<int[]> units;
         if (c.sizeLength > 0) {
             ensureAacDecoder(c, false);
@@ -328,7 +372,7 @@ class AudioManager {
             units = Collections.singletonList(new int[] {start, end - start});
         }
         for (int[] u : units) {
-            offerAac(Arrays.copyOfRange(data, u[0], u[0] + u[1]));
+            offerAac(Arrays.copyOfRange(data, u[0], u[0] + u[1]), r);
         }
     }
 
@@ -388,9 +432,12 @@ class AudioManager {
         return value;
     }
 
-    private void offerAac(byte[] au) {
-        if (!aacQueue.offer(au)) {
-            Log.w(TAG, "AAC audio queue full, frame dropped");
+    private void offerAac(byte[] au, int r) {
+        synchronized (routeLock) {
+            if (r != route) return;
+            if (!aacQueue.offer(au)) {
+                Log.w(TAG, "AAC audio queue full, frame dropped");
+            }
         }
     }
 
@@ -450,11 +497,12 @@ class AudioManager {
                 aacExecutor = Executors.newSingleThreadExecutor(
                         r -> new Thread(r, "rtsp-aac-decode"));
             }
-            aacExecutor.execute(() -> aacLoop(codec));
+            final int codecRoute = route;
+            aacExecutor.execute(() -> aacLoop(codec, codecRoute));
         }
     }
 
-    private void aacLoop(MediaCodec codec) {
+    private void aacLoop(MediaCodec codec, int codecRoute) {
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
         byte[] pending = null;
         while (aacRunning && !Thread.currentThread().isInterrupted()) {
@@ -486,7 +534,7 @@ class AudioManager {
                         }
                     }
                     // Drain on idle iterations too, so the last decoded frame is not held back
-                    drainAacOutput(codec, info);
+                    drainAacOutput(codec, info, codecRoute);
                 } catch (Exception e) {
                     Log.e(TAG, "AAC decode error", e);
                     pending = null;
@@ -495,7 +543,7 @@ class AudioManager {
         }
     }
 
-    private void drainAacOutput(MediaCodec codec, MediaCodec.BufferInfo info) {
+    private void drainAacOutput(MediaCodec codec, MediaCodec.BufferInfo info, int codecRoute) {
         int outId;
         while ((outId = codec.dequeueOutputBuffer(info, 0)) != MediaCodec.INFO_TRY_AGAIN_LATER) {
             if (outId == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
@@ -510,7 +558,7 @@ class AudioManager {
                 byte[] pcm = new byte[info.size];
                 outBuf.position(info.offset);
                 outBuf.get(pcm);
-                offerPcm(pcm);
+                offerPcm(pcm, codecRoute);
             }
             codec.releaseOutputBuffer(outId, false);
         }

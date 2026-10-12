@@ -5,4 +5,5 @@
     <string name="status_disconnected">Disconnected</string>
     <string name="status_buffering">Buffering…</string>
     <string name="status_unconfigured">No camera configured</string>
+    <string name="quad_audio_badge">AUDIO</string>
 </resources>

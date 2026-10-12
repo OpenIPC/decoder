@@ -83,6 +83,11 @@ public class Decoder extends Activity
     private QuadCell[] quadCells;
     private LinearLayout quadContainer;
     private final TextureView[] quadViews = new TextureView[4];
+    // Quad audio (#12): the cell whose sound plays, -1 for none
+    private int quadAudio = -1;
+    private final TextView[] quadAudioBadges = new TextView[4];
+    private volatile int quadAudioGen;
+    private ExecutorService quadAudioExecutor;
 
     // Camera settings
     private static final int CAM_COUNT = 4;
@@ -151,7 +156,7 @@ public class Decoder extends Activity
             public void onCodecChanged(boolean h265, AudioConfig audio) {
                 codecH265 = h265;
                 audioCodec = audio.codec;
-                audioManager.configure(audio);
+                // RtspClient configures the AudioManager itself, on its own audio route
             }
             @Override public void onJitterSample(int avg) {
                 menuManager.updateQuality(avg);
@@ -236,6 +241,24 @@ public class Decoder extends Activity
                 cell.addView(quadViews[idx], new FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT));
+                // Long press selects the cell whose audio plays (#12)
+                quadViews[idx].setOnLongClickListener(v -> {
+                    toggleQuadAudio(idx);
+                    return true;
+                });
+                TextView badge = new TextView(this);
+                badge.setText(R.string.quad_audio_badge);
+                badge.setTextColor(Color.WHITE);
+                badge.setTextSize(11);
+                badge.setBackgroundColor(0x99000000);
+                badge.setPadding(dp(6), dp(2), dp(6), dp(2));
+                badge.setVisibility(View.GONE);
+                FrameLayout.LayoutParams bp = new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
+                bp.setMargins(dp(4), dp(4), dp(4), dp(4));
+                cell.addView(badge, bp);
+                quadAudioBadges[idx] = badge;
                 lr.addView(cell, new LinearLayout.LayoutParams(
                         0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
             }
@@ -487,13 +510,7 @@ public class Decoder extends Activity
         ensureQuadLaidOut();
         removeClearOverlay();
 
-        quadCells = new QuadCell[4];
-        for (int i = 0; i < 4; i++) {
-            String url = mHosts[i];
-            if (url == null || url.isEmpty() || url.equals(DEFAULT_URL)) continue;
-            quadCells[i] = new QuadCell(i, url, quadViews[i], framePool, mUserAgent, index -> runOnUiThread(() -> removeQuadOverlay(index)));
-            quadCells[i].start();
-        }
+        createQuadCells();
 
         quadEnabled = true;
         getSharedPreferences("settings", MODE_PRIVATE).edit()
@@ -501,6 +518,7 @@ public class Decoder extends Activity
     }
 
     private void stopQuad() {
+        stopQuadAudio();
         quadEnabled = false;
         getSharedPreferences("settings", MODE_PRIVATE).edit()
                 .putBoolean("quad_enabled", false).apply();
@@ -534,6 +552,78 @@ public class Decoder extends Activity
             decor.requestLayout();
             decor.invalidate();
         }, 500);
+    }
+
+    private void createQuadCells() {
+        quadCells = new QuadCell[4];
+        for (int i = 0; i < 4; i++) {
+            String url = mHosts[i];
+            if (url == null || url.isEmpty() || url.equals(DEFAULT_URL)) continue;
+            quadCells[i] = new QuadCell(i, url, quadViews[i], framePool, mUserAgent,
+                    index -> runOnUiThread(() -> removeQuadOverlay(index)));
+            quadCells[i].start();
+        }
+        quadAudio = getSharedPreferences("settings", MODE_PRIVATE).getInt("quad_audio", -1);
+        startQuadAudio();
+    }
+
+    // ====================== Quad audio (#12) ======================
+
+    private void toggleQuadAudio(int index) {
+        quadAudio = quadAudio == index ? -1 : index;
+        getSharedPreferences("settings", MODE_PRIVATE).edit()
+                .putInt("quad_audio", quadAudio).apply();
+        applyQuadAudio();
+        Toast.makeText(this, quadAudio < 0 ? "Audio off"
+                : "Audio: camera " + (quadAudio + 1), Toast.LENGTH_SHORT).show();
+    }
+
+    /** Route audio of the selected cell to the AudioManager and update the badges. */
+    private void applyQuadAudio() {
+        // A new route: audio of a previously selected cell can no longer reach playback
+        int route = audioManager.newRoute();
+        QuadCell[] cells = quadCells;
+        for (int i = 0; i < 4; i++) {
+            QuadCell cell = cells != null ? cells[i] : null;
+            boolean on = i == quadAudio && cell != null;
+            if (cell != null) cell.setAudioSink(on ? audioManager : null, route);
+            if (on) audioManager.configure(cell.getAudioConfig(), route);
+            if (quadAudioBadges[i] != null) {
+                quadAudioBadges[i].setVisibility(on ? View.VISIBLE : View.GONE);
+            }
+        }
+    }
+
+    /** The playback thread for Quad audio (single view has its own in startListener). */
+    private void startQuadAudio() {
+        stopQuadAudio();
+        applyQuadAudio();
+        final int gen = ++quadAudioGen;
+        quadAudioExecutor = Executors.newSingleThreadExecutor(r -> new Thread(r, "quad-audio"));
+        quadAudioExecutor.execute(() -> {
+            while (gen == quadAudioGen && !Thread.currentThread().isInterrupted()) {
+                audioManager.playPcmFrame();
+            }
+        });
+    }
+
+    private void stopQuadAudio() {
+        quadAudioGen++;
+        if (quadAudioExecutor != null) {
+            quadAudioExecutor.shutdownNow();
+            quadAudioExecutor = null;
+        }
+        QuadCell[] cells = quadCells;
+        if (cells != null) {
+            for (QuadCell cell : cells) {
+                if (cell != null) cell.setAudioSink(null, 0);
+            }
+        }
+        // Invalidates in-flight Quad frames and track creation, clears the queues
+        audioManager.newRoute();
+        for (TextView badge : quadAudioBadges) {
+            if (badge != null) badge.setVisibility(View.GONE);
+        }
     }
 
     /** Clear the video view so no stale frame lingers. */
@@ -712,6 +802,8 @@ public class Decoder extends Activity
         // generation for the new threads must be taken after it
         stopExecutor();
         final int gen = listenerGen;
+        // The single-view stream gets its own audio route (nothing from Quad leaks in)
+        rtspClient.setAudioRoute(audioManager.newRoute());
         executor = Executors.newFixedThreadPool(2);
 
         // Video decode thread
@@ -764,6 +856,7 @@ public class Decoder extends Activity
             quadCells = null;
         }
 
+        stopQuadAudio();
         listenerGen++;
         if (rtspClient != null) {
             rtspClient.stop();
@@ -830,13 +923,7 @@ public class Decoder extends Activity
                 quadCells = null;
             }
             clearQuadViews();
-            quadCells = new QuadCell[4];
-            for (int i = 0; i < 4; i++) {
-                String url = mHosts[i];
-                if (url == null || url.isEmpty() || url.equals(DEFAULT_URL)) continue;
-                quadCells[i] = new QuadCell(i, url, quadViews[i], framePool, mUserAgent, index -> runOnUiThread(() -> removeQuadOverlay(index)));
-                quadCells[i].start();
-            }
+            createQuadCells();
             getSharedPreferences("settings", MODE_PRIVATE).edit()
                     .putBoolean("quad_enabled", true).apply();
         } else {
