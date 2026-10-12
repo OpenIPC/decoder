@@ -35,8 +35,8 @@ class RtspSession {
 
     private static final int CONNECT_TIMEOUT_MS = 5000;
     private static final int HANDSHAKE_TIMEOUT_MS = 5000;
-    private static final long WATCHDOG_MS = 8000;
-    // Reconnect back-off; not final so unit tests can shorten it
+    // Not final so unit tests can shorten them
+    static volatile long watchdogMs = 8000;
     static volatile int minRetryMs = 1000;
     static volatile int maxRetryMs = 30000;
 
@@ -47,8 +47,11 @@ class RtspSession {
         /** Session parameters, before PLAY. Audio is NONE when it was not set up. */
         void onSdp(Sdp sdp);
 
-        /** One RTP packet: {@code length} bytes of {@code buf} starting at {@code offset}. */
-        void onPacket(int channel, byte[] buf, int offset, int length);
+        /**
+         * One RTP packet: {@code length} bytes of {@code buf} starting at {@code offset}.
+         * Returns true if a video packet was usable; only those feed the watchdog.
+         */
+        boolean onPacket(int channel, byte[] buf, int offset, int length);
     }
 
     private final String tag;
@@ -146,7 +149,7 @@ class RtspSession {
                 failures = 0;
             }
             try {
-                Thread.sleep(retryMs + (long) (Math.random() * retryMs / 2));
+                Thread.sleep(retryDelay(retryMs));
             } catch (InterruptedException e) {
                 break;
             }
@@ -154,9 +157,14 @@ class RtspSession {
         }
     }
 
+    /** Back-off delay with jitter, never beyond maxRetryMs. */
+    static long retryDelay(int retryMs) {
+        return Math.min(maxRetryMs, retryMs + (long) (Math.random() * retryMs / 2));
+    }
+
     private void watchdogLoop(int gen) {
         while (gen == generation) {
-            if (active && System.nanoTime() / 1_000_000 - lastPacketMs > WATCHDOG_MS) {
+            if (active && System.nanoTime() / 1_000_000 - lastPacketMs > watchdogMs) {
                 Log.w(TAG, tag + ": stream is inactive, reconnecting");
                 active = false;
                 synchronized (lock) {
@@ -164,7 +172,7 @@ class RtspSession {
                 }
             }
             try {
-                Thread.sleep(1000);
+                Thread.sleep(Math.min(1000, watchdogMs / 4 + 1));
             } catch (InterruptedException e) {
                 break;
             }
@@ -196,8 +204,16 @@ class RtspSession {
             Response r = request(in, out, "DESCRIBE", u.requestUrl, cseq++,
                     common + "Accept: application/sdp\r\n");
             r.require("DESCRIBE");
+            if (r.header("content-length") == null && r.body.isEmpty()) {
+                // Some servers omit Content-Length: take what arrives until the line goes quiet
+                r.body = readUntilIdle(s, in);
+            }
             String base = r.header("content-base");
             Sdp sdp = Sdp.parse(r.body, base != null ? base : u.requestUrl);
+            if (sdp.videoPt < 0) {
+                // Nothing we could decode: fail so that the back-off applies, not a black view
+                throw new IOException("No H.264/H.265 video track in SDP");
+            }
 
             r = request(in, out, "SETUP", sdp.videoUrl, cseq++,
                     common + "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n");
@@ -257,15 +273,16 @@ class RtspSession {
             if (total < 0) throw new IOException("Connection closed by server");
             streamBytes += total;
             int channel = buf[1] & 0xFF;
-            if (channel == CHANNEL_VIDEO) {
+            if (gen != generation) break;
+            boolean usable = callback.onPacket(channel, buf, 4, total - 4);
+            // Only usable video keeps the session alive and counts as connected
+            if (channel == CHANNEL_VIDEO && usable) {
                 lastPacketMs = System.nanoTime() / 1_000_000;
                 if (first) {
                     first = false;
                     status(gen, "connected");
                 }
             }
-            if (gen != generation) break;
-            callback.onPacket(channel, buf, 4, total - 4);
         }
     }
 
@@ -355,6 +372,26 @@ class RtspSession {
             r.body = body.toString("UTF-8");
         }
         return r;
+    }
+
+    /** Read a body of unknown length: everything until 300 ms of silence, at most 64 KiB. */
+    private static String readUntilIdle(Socket s, InputStream in) throws IOException {
+        int timeout = s.getSoTimeout();
+        ByteArrayOutputStream body = new ByteArrayOutputStream();
+        byte[] chunk = new byte[4096];
+        s.setSoTimeout(300);
+        try {
+            while (body.size() < 65536) {
+                int n = in.read(chunk, 0, Math.min(chunk.length, 65536 - body.size()));
+                if (n < 0) break;
+                body.write(chunk, 0, n);
+            }
+        } catch (java.net.SocketTimeoutException ignored) {
+            // Line went quiet: the body is complete
+        } finally {
+            s.setSoTimeout(timeout);
+        }
+        return body.toString("UTF-8");
     }
 
     private static void skipFully(InputStream in, int len) throws IOException {

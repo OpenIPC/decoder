@@ -32,11 +32,12 @@ class Sdp {
     static Sdp parse(String sdp, String base) {
         Sdp out = new Sdp();
         String session = null;
-        String[] controls = { null, null };
+        String audioControl = null;
         int media = -1; // -1 session level, 0 video, 1 audio, 2 other
         boolean hasAudio = false;
-        List<Integer> videoPts = new ArrayList<>();
-        Map<Integer, String> videoCodecs = new HashMap<>();
+        // Each m=video section keeps its own payloads, rtpmap and control
+        List<VideoSection> videos = new ArrayList<>();
+        VideoSection video = null;
         AudioConfig audio = out.audio;
 
         for (String line : sdp.split("[\r\n]+")) {
@@ -44,9 +45,11 @@ class Sdp {
                 String[] parts = line.split("\\s+");
                 if (line.startsWith("m=video")) {
                     media = 0;
+                    video = new VideoSection();
+                    videos.add(video);
                     for (int i = 3; i < parts.length; i++) {
                         try {
-                            videoPts.add(Integer.parseInt(parts[i]));
+                            video.pts.add(Integer.parseInt(parts[i]));
                         } catch (NumberFormatException ignored) {}
                     }
                 } else if (line.startsWith("m=audio")) {
@@ -65,15 +68,17 @@ class Sdp {
                 String ctrl = line.substring("a=control:".length()).trim();
                 if (media == -1) {
                     session = ctrl;
-                } else if (media < 2) {
-                    controls[media] = ctrl;
+                } else if (media == 0) {
+                    video.control = ctrl;
+                } else if (media == 1 && audioControl == null) {
+                    audioControl = ctrl;
                 }
             } else if (media == 0 && line.startsWith("a=rtpmap:")) {
                 // a=rtpmap:<pt> <encoding>/<clock rate>
                 String[] parts = line.substring("a=rtpmap:".length()).trim().split("[\\s/]+");
                 if (parts.length >= 2) {
                     try {
-                        videoCodecs.put(Integer.parseInt(parts[0]),
+                        video.codecs.put(Integer.parseInt(parts[0]),
                                 parts[1].toUpperCase(Locale.ROOT));
                     } catch (NumberFormatException ignored) {}
                 }
@@ -87,25 +92,36 @@ class Sdp {
         }
         audio.finish();
 
-        // Video: the first offered H.264/H.265 payload; legacy 96/97 when there is no rtpmap
-        for (int pt : videoPts) {
-            String codec = videoCodecs.get(pt);
-            if (codec == null) {
-                codec = pt == PT_H265 ? "H265" : pt == PT_H264 ? "H264" : null;
-            }
-            if ("H264".equals(codec) || "H265".equals(codec) || "HEVC".equals(codec)) {
-                out.videoPt = pt;
-                out.videoH265 = !"H264".equals(codec);
-                break;
+        // Video: the first section offering H.264/H.265 (legacy 96/97 without rtpmap);
+        // payload type and control URL always come from that same section
+        String sessionBase = resolve(base, session);
+        String videoControl = null;
+        outer:
+        for (VideoSection v : videos) {
+            for (int pt : v.pts) {
+                String codec = v.codecs.get(pt);
+                if (codec == null) {
+                    codec = pt == PT_H265 ? "H265" : pt == PT_H264 ? "H264" : null;
+                }
+                if ("H264".equals(codec) || "H265".equals(codec) || "HEVC".equals(codec)) {
+                    out.videoPt = pt;
+                    out.videoH265 = !"H264".equals(codec);
+                    videoControl = v.control;
+                    break outer;
+                }
             }
         }
-
-        String sessionBase = resolve(base, session);
-        out.videoUrl = resolve(sessionBase, controls[0] != null ? controls[0] : "trackID=0");
+        out.videoUrl = resolve(sessionBase, videoControl != null ? videoControl : "trackID=0");
         if (hasAudio) {
-            out.audioUrl = resolve(sessionBase, controls[1] != null ? controls[1] : "trackID=1");
+            out.audioUrl = resolve(sessionBase, audioControl != null ? audioControl : "trackID=1");
         }
         return out;
+    }
+
+    private static final class VideoSection {
+        final List<Integer> pts = new ArrayList<>();
+        final Map<Integer, String> codecs = new HashMap<>();
+        String control;
     }
 
     /** Resolve an a=control value against a base URL (RFC 2326 C.1.1). */

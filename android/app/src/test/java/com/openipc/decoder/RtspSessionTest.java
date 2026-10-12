@@ -50,6 +50,8 @@ public class RtspSessionTest {
         /** Close the connection after sending the packets instead of staying open. */
         volatile boolean closeAfterPackets;
         volatile int videoPackets = 3;
+        /** Send the DESCRIBE body without a Content-Length header. */
+        volatile boolean omitContentLength;
         volatile int audioPackets = 1;
 
         FakeServer() throws IOException {
@@ -100,8 +102,9 @@ public class RtspSessionTest {
                         case "DESCRIBE":
                             byte[] body = sdp.getBytes(StandardCharsets.UTF_8);
                             reply = "RTSP/1.0 200 OK\r\nCSeq: " + cseq + "\r\nContent-Type: "
-                                    + "application/sdp\r\nContent-Length: " + body.length
-                                    + "\r\n\r\n" + sdp;
+                                    + "application/sdp\r\n"
+                                    + (omitContentLength ? "" : "Content-Length: " + body.length + "\r\n")
+                                    + "\r\n" + sdp;
                             break;
                         case "SETUP":
                             int code = requestLine.contains("trackID=1") ? audioSetupStatus : 200;
@@ -162,6 +165,8 @@ public class RtspSessionTest {
         volatile Sdp sdp;
         final AtomicInteger sdpCount = new AtomicInteger();
         volatile CountDownLatch videoLatch = new CountDownLatch(3);
+        /** What onPacket reports for video packets. */
+        volatile boolean usable = true;
 
         @Override public void onStatus(String status) { statuses.add(status); }
 
@@ -170,13 +175,15 @@ public class RtspSessionTest {
             sdpCount.incrementAndGet();
         }
 
-        @Override public void onPacket(int channel, byte[] buf, int offset, int length) {
+        @Override public boolean onPacket(int channel, byte[] buf, int offset, int length) {
             if (channel == RtspSession.CHANNEL_VIDEO) {
                 video.incrementAndGet();
                 videoLatch.countDown();
+                return usable;
             } else if (channel == RtspSession.CHANNEL_AUDIO) {
                 audio.incrementAndGet();
             }
+            return false;
         }
     }
 
@@ -188,6 +195,7 @@ public class RtspSessionTest {
     public void setUp() throws IOException {
         RtspSession.minRetryMs = 5;
         RtspSession.maxRetryMs = 20;
+        RtspSession.watchdogMs = 8000;
         server = new FakeServer();
         session = new RtspSession("test", rec);
     }
@@ -198,6 +206,7 @@ public class RtspSessionTest {
         server.close();
         RtspSession.minRetryMs = 1000;
         RtspSession.maxRetryMs = 30000;
+        RtspSession.watchdogMs = 8000;
     }
 
     private void runUntilVideo(String url, boolean withAudio) throws InterruptedException {
@@ -290,5 +299,46 @@ public class RtspSessionTest {
         Thread.sleep(300);
         assertEquals("no reconnect after stop", sdpCount, rec.sdpCount.get());
         assertEquals("no status after stop", statusCount, rec.statuses.size());
+    }
+
+    @Test
+    public void describeWithoutContentLength() throws Exception {
+        server.omitContentLength = true;
+        runUntilVideo(server.url(null), true);
+        assertTrue(rec.sdp.videoH265);
+        assertTrue(server.methods().get(1).startsWith("SETUP"));
+    }
+
+    @Test
+    public void noSupportedVideoTrackFailsAndRetries() throws Exception {
+        server.sdp = "v=0\r\nm=video 0 RTP/AVP 26\r\na=rtpmap:26 JPEG/90000\r\n";
+        session.configure(server.url(null), "", true);
+        session.start();
+        long deadline = System.nanoTime() + 3_000_000_000L;
+        while (server.connections.get() < 3 && System.nanoTime() < deadline) Thread.sleep(10);
+        assertTrue("retried", server.connections.get() >= 3);
+        assertEquals("no SETUP without a usable video track", 0,
+                server.methods().stream().filter(m -> m.startsWith("SETUP")).count());
+        assertEquals(0, rec.sdpCount.get());
+    }
+
+    @Test
+    public void unusableVideoDoesNotKeepSessionAlive() throws Exception {
+        RtspSession.watchdogMs = 200;
+        rec.usable = false;
+        rec.videoLatch = new CountDownLatch(6); // packets from at least two sessions
+        runUntilVideo(server.url(null), true);
+        assertTrue("watchdog reconnected", server.connections.get() >= 2);
+        assertFalse("never connected", rec.statuses.contains("connected"));
+    }
+
+    @Test
+    public void retryDelayNeverExceedsMaximum() {
+        RtspSession.maxRetryMs = 30000;
+        for (int i = 0; i < 1000; i++) {
+            assertTrue(RtspSession.retryDelay(30000) <= 30000);
+            long d = RtspSession.retryDelay(1000);
+            assertTrue(d >= 1000 && d <= 1500);
+        }
     }
 }

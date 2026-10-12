@@ -94,24 +94,27 @@ class RtspClient implements RtspSession.Callback {
     }
 
     @Override
-    public void onPacket(int channel, byte[] buf, int offset, int length) {
-        if (length < 12) return;
+    public boolean onPacket(int channel, byte[] buf, int offset, int length) {
+        if (length < 12) return false;
         Frame frame = framePool.obtain(length);
         System.arraycopy(buf, offset, frame.data(), 0, length);
         frame.setLength(length);
 
+        boolean usable = false;
         if (channel == RtspSession.CHANNEL_VIDEO) {
-            processVideo(frame);
+            usable = processVideo(frame);
         } else if (channel == RtspSession.CHANNEL_AUDIO && audioManager != null) {
             audioManager.onAudioFrame(frame);
         }
         framePool.recycle(frame);
+        return usable;
     }
 
-    private void processVideo(Frame frame) {
+    /** Returns false for packets of the wrong payload type or with unsupported headers. */
+    private boolean processVideo(Frame frame) {
         byte[] data = frame.data();
         // CSRC and header extensions are not supported for video yet (#10)
-        if ((data[0] & 0x0F) != 0 || (data[0] & 0x10) != 0) return;
+        if ((data[0] & 0x0F) != 0 || (data[0] & 0x10) != 0) return false;
 
         int payload = data[1] & 0x7F;
         if (payload != videoPt) {
@@ -119,7 +122,7 @@ class RtspClient implements RtspSession.Callback {
                 lastUnknownPayload = payload;
                 Log.w(TAG, "Unexpected video rtp type: " + payload + " (expected " + videoPt + ")");
             }
-            return;
+            return false;
         }
 
         updateJitter(data);
@@ -129,6 +132,7 @@ class RtspClient implements RtspSession.Callback {
             Log.w(TAG, "Video queue full, frame dropped");
             framePool.recycle(output);
         }
+        return true;
     }
 
     private void updateJitter(byte[] data) {

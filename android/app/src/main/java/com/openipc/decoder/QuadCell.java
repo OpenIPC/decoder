@@ -187,17 +187,17 @@ class QuadCell implements RtspSession.Callback {
     }
 
     @Override
-    public void onPacket(int channel, byte[] buf, int offset, int length) {
-        if (channel != RtspSession.CHANNEL_VIDEO || length < 12) return;
+    public boolean onPacket(int channel, byte[] buf, int offset, int length) {
+        if (channel != RtspSession.CHANNEL_VIDEO || length < 12) return false;
         // CSRC and header extensions are not supported for video yet (#10)
-        if ((buf[offset] & 0x0F) != 0 || (buf[offset] & 0x10) != 0) return;
+        if ((buf[offset] & 0x0F) != 0 || (buf[offset] & 0x10) != 0) return false;
         int pt = buf[offset + 1] & 0x7F;
         if (pt != videoPt) {
             if (pt != lastUnknownPayload) {
                 lastUnknownPayload = pt;
                 Log.w(TAG, tag + " unexpected PT: " + pt + " (expected " + videoPt + ")");
             }
-            return;
+            return false;
         }
 
         Frame frame = cellFramePool.obtain(length);
@@ -209,6 +209,7 @@ class QuadCell implements RtspSession.Callback {
             Log.w(TAG, tag + " queue full, dropping frame");
             cellFramePool.recycle(output);
         }
+        return true;
     }
 
     private void decode(Frame buffer) {
@@ -248,7 +249,8 @@ class QuadCell implements RtspSession.Callback {
         mgr.createDecoder(codecH265);
 
         synchronized (decoderLock) {
-            if (mediaCodecManager != null) {
+            // Another thread was faster, or stop() ran meanwhile (onSdp is on the network thread)
+            if (mediaCodecManager != null || !running) {
                 mgr.closeDecoder();
                 return;
             }

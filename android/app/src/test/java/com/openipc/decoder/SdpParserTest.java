@@ -153,4 +153,15 @@ public class SdpParserTest {
         assertEquals(-1, parse("m=video 0 RTP/AVP 26\r\na=rtpmap:26 JPEG/90000\r\n",
                 "rtsp://x").videoPt);
     }
+
+    @Test
+    public void payloadAndControlComeFromTheSameVideoSection() {
+        Sdp sdp = parse("m=video 0 RTP/AVP 26\r\na=rtpmap:26 JPEG/90000\r\na=control:mjpeg\r\n" +
+                "m=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\na=control:h264\r\n" +
+                "m=video 0 RTP/AVP 97\r\na=rtpmap:97 H265/90000\r\na=control:h265\r\n",
+                "rtsp://cam/s");
+        assertEquals(96, sdp.videoPt);
+        assertFalse(sdp.videoH265);
+        assertEquals("rtsp://cam/s/h264", sdp.videoUrl);
+    }
 }
