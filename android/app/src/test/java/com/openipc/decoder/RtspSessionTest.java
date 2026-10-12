@@ -82,6 +82,8 @@ public class RtspSessionTest {
         volatile boolean udpSilent;
         /** Send the datagrams from this local address instead of 127.0.0.1. */
         volatile String udpFrom = "127.0.0.1";
+        /** Answer a UDP SETUP with this Transport value instead of the client's ports. */
+        volatile String udpReply;
 
         FakeServer() throws IOException {
             server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
@@ -155,9 +157,10 @@ public class RtspSessionTest {
                             if (asked.clientPort != null) {
                                 if (udpUnsupported) code = 461;
                                 if (code == 200) udpPorts[audioTrack ? 1 : 0] = asked.clientPort[0];
-                                transport = "Transport: RTP/AVP/UDP;unicast;client_port="
+                                transport = "Transport: " + (udpReply != null ? udpReply
+                                        : "RTP/AVP/UDP;unicast;client_port="
                                         + asked.clientPort[0] + "-" + asked.clientPort[1]
-                                        + ";server_port=6970-6971\r\n";
+                                        + ";server_port=6970-6971") + "\r\n";
                             } else if (asked.interleaved != null) {
                                 transport = "Transport: RTP/AVP/TCP;unicast;interleaved="
                                         + asked.interleaved[0] + "-" + asked.interleaved[1]
@@ -338,6 +341,7 @@ public class RtspSessionTest {
         RtspSession.watchdogMs = 8000;
         server = new FakeServer();
         session = new RtspSession("test", rec);
+        RtspSession.udpFailedAt.clear();
     }
 
     @After
@@ -674,5 +678,44 @@ public class RtspSessionTest {
 
     private String base() {
         return "rtsp://127.0.0.1:" + server.server.getLocalPort() + "/stream=0";
+    }
+
+    @Test
+    public void autoRemembersTheFallbackForTheUrl() throws Exception {
+        server.udpUnsupported = true;
+        runUdp(Transport.Mode.AUTO, false);
+        assertTrue(rec.videoLatch.await(5, TimeUnit.SECONDS));
+        session.stop();
+
+        // A resumed view or a rebuilt grid cell goes straight to TCP
+        server.requests.clear();
+        RtspSession again = new RtspSession("again", new Recorder());
+        again.configure(server.url(null), "User-Agent: test\r\n", false, Transport.Mode.AUTO);
+        again.start();
+        try {
+            long deadline = System.currentTimeMillis() + 3000;
+            while (setups().isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(10);
+            assertTrue(setups().get(0).contains("interleaved=0-1"));
+        } finally {
+            again.stop();
+        }
+    }
+
+    @Test
+    public void autoFallsBackOnAMulticastReply() throws Exception {
+        server.udpReply = "RTP/AVP;multicast;destination=239.1.2.3;port=5000-5001;ttl=4";
+        runUdp(Transport.Mode.AUTO, false);
+        assertTrue("video over TCP", rec.videoLatch.await(5, TimeUnit.SECONDS));
+        List<String> s = setups();
+        assertTrue(s.get(s.size() - 1).contains("interleaved=0-1"));
+    }
+
+    @Test
+    public void autoFallsBackWhenTheReplyNamesOtherPorts() throws Exception {
+        server.udpReply = "RTP/AVP/UDP;unicast;client_port=1000-1001;server_port=6970-6971";
+        runUdp(Transport.Mode.AUTO, false);
+        assertTrue("video over TCP", rec.videoLatch.await(5, TimeUnit.SECONDS));
+        List<String> s = setups();
+        assertTrue(s.get(s.size() - 1).contains("interleaved=0-1"));
     }
 }

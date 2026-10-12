@@ -96,4 +96,17 @@ public class TransportTest {
         assertNull(RtspSession.sourceAddress("camera.example"));
         assertNull(RtspSession.sourceAddress(null));
     }
+
+    @Test
+    public void usableUdpReplies() {
+        assertTrue(RtspSession.udpReplyUsable(Transport.parse(
+                "RTP/AVP/UDP;unicast;client_port=50000-50001;server_port=1-2"), 50000));
+        // No ports or no header at all: taken as agreement
+        assertTrue(RtspSession.udpReplyUsable(Transport.parse("RTP/AVP;unicast"), 50000));
+        assertTrue(RtspSession.udpReplyUsable(Transport.parse(null), 50000));
+        assertFalse(RtspSession.udpReplyUsable(Transport.parse(
+                "RTP/AVP;unicast;client_port=4000-4001"), 50000));
+        assertFalse(RtspSession.udpReplyUsable(Transport.parse(
+                "RTP/AVP;multicast;destination=239.1.2.3;port=5000-5001"), 50000));
+    }
 }
