@@ -112,4 +112,18 @@ public class CredentialStoreTest {
         assertEquals("00017f80ff", CredentialStore.toHex(b));
         assertArrayEquals(b, CredentialStore.fromHex("00017F80ff"));
     }
+
+    @Test
+    public void unreadableSlotSurvivesSavingOtherSlots() throws Exception {
+        CredentialStore store = new CredentialStore(new TestCipher());
+        String placeholder = "rtsp://root:12345@192.168.1.10:554/stream=0";
+        String unreadable = CredentialStore.PREFIX + "00112233";
+        // Slot not edited: the original stored value is written back unchanged
+        assertEquals(unreadable, store.sealForSlot(placeholder, unreadable, placeholder));
+        // Slot edited by the user: the new URL is sealed
+        String sealed = store.sealForSlot(URL, unreadable, placeholder);
+        assertEquals(URL, store.open(sealed));
+        // Normal slot
+        assertEquals(URL, store.open(store.sealForSlot(URL, null, placeholder)));
+    }
 }

@@ -93,6 +93,8 @@ public class Decoder extends Activity
     private String mVersion;
     // Camera URLs (with passwords) are encrypted at rest (#16)
     private CredentialStore credentials;
+    // Stored values that could not be decrypted: kept as they are until the slot is edited
+    private final String[] mUnreadable = new String[CAM_COUNT];
     String mUserAgent = "User-Agent: OpenIPC-Decoder/1.0\r\n";
 
     // Thread management
@@ -342,6 +344,7 @@ public class Decoder extends Activity
             String stored = pref.getString("host_" + i, null);
             String url = credentials.open(stored);
             mHosts[i] = url != null ? url : DEFAULT_URL;
+            mUnreadable[i] = url == null && stored != null ? stored : null;
             // Plain URLs from older versions are re-saved encrypted right away
             if (credentials.needsMigration(stored)) {
                 if (migrate == null) migrate = pref.edit();
@@ -359,7 +362,8 @@ public class Decoder extends Activity
             // still there after the next pause/resume
             quadEnabled = false;
             pref.edit()
-                    .putString("host_" + mActive, credentials.seal(mHosts[mActive]))
+                    .putString("host_" + mActive, credentials.sealForSlot(
+                            mHosts[mActive], mUnreadable[mActive], DEFAULT_URL))
                     .putBoolean("quad_enabled", false)
                     .apply();
             intent.removeExtra(Intent.EXTRA_TEXT);
@@ -390,7 +394,8 @@ public class Decoder extends Activity
         SharedPreferences.Editor edit = pref.edit();
         edit.putInt("active", mActive);
         for (int i = 0; i < CAM_COUNT; i++) {
-            edit.putString("host_" + i, credentials.seal(mHosts[i]));
+            edit.putString("host_" + i,
+                    credentials.sealForSlot(mHosts[i], mUnreadable[i], DEFAULT_URL));
         }
         edit.apply();
 

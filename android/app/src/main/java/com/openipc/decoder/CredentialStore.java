@@ -76,6 +76,17 @@ class CredentialStore {
         }
     }
 
+    /**
+     * Value to store for a slot. If the slot's stored value could not be opened
+     * ({@code unreadable} != null) and the slot still shows the placeholder, the original
+     * stored value is kept, so a temporarily unavailable key does not destroy it when
+     * another slot is saved. A slot the user edited is sealed as usual.
+     */
+    String sealForSlot(String url, String unreadable, String placeholder) {
+        if (unreadable != null && (url == null || url.equals(placeholder))) return unreadable;
+        return seal(url);
+    }
+
     /** True if {@code stored} is a plain value that should be re-saved sealed. */
     boolean needsMigration(String stored) {
         return cipher != null && stored != null && !stored.startsWith(PREFIX);
