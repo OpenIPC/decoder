@@ -68,9 +68,10 @@ class NalAssembler {
                     nalBuffer[nalSize++] = 0;
                     nalBuffer[nalSize++] = 0;
                     nalBuffer[nalSize++] = 1;
-                    nalBuffer[nalSize++] = (byte)((rx[cp] & 0x81) | ((rx[cp + 2] & 0x7F) << 1));
-                    int donlField = (rx[cp + 1] & 0x80) >> 7;
-                    cp += donlField != 0 ? 3 : 2;
+                    // 2-byte NAL header: F + FU type + layer-id MSB, then layer-id/TID as sent
+                    nalBuffer[nalSize++] = (byte)((rx[cp] & 0x81) | ((rx[cp + 2] & 0x3F) << 1));
+                    nalBuffer[nalSize++] = rx[cp + 1];
+                    cp += 3; // payload header + FU header
                 } else {
                     nalBuffer[nalSize++] = 0;
                     nalBuffer[nalSize++] = 0;
