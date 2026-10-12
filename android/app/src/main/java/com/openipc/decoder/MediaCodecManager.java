@@ -128,6 +128,12 @@ class MediaCodecManager {
         }
     }
 
+    /**
+     * The decoder's declared throughput in 16x16 macroblocks per second, from the first decoder
+     * created (0 while unknown). The starting capacity for multi-view planning (#85).
+     */
+    static volatile long declaredBlocksPerSec;
+
     /** Give the instance slot back; called wherever the decoder is detached (decoderLock held). */
     private void releaseSlot() {
         if (heldMime != null) {
@@ -145,8 +151,15 @@ class MediaCodecManager {
             int max = caps.getMaxSupportedInstances();
             InstanceBudget.learn(mime, max);
             MediaCodecInfo.VideoCapabilities video = caps.getVideoCapabilities();
-            String fps1080 = video != null && video.isSizeSupported(1920, 1080)
-                    ? String.valueOf(video.getSupportedFrameRatesFor(1920, 1080).getUpper()) : "?";
+            String fps1080 = "?";
+            if (video != null && video.isSizeSupported(1920, 1080)) {
+                double fps = video.getSupportedFrameRatesFor(1920, 1080).getUpper();
+                fps1080 = String.valueOf(fps);
+                long blocks = DecodePlanner.fullLoad(1920, 1080, (float) fps);
+                if (declaredBlocksPerSec == 0 || blocks < declaredBlocksPerSec) {
+                    declaredBlocksPerSec = blocks;
+                }
+            }
             Log.i(TAG, "Decoder " + codec.getName() + " (" + mime + "): up to " + max
                     + " instances, declared 1080p frame rate in total " + fps1080);
         } catch (Exception e) {

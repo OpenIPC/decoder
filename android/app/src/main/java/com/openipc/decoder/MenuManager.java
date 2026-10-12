@@ -50,6 +50,8 @@ class MenuManager {
     private TextView[] mCachedCamButtons;
     private TextView mCachedQuadBtn;
     private TextView mCachedUdpBtn;
+    private TextView mCachedStatsBtn;
+    private boolean statsShown;
     /** The UDP RTP view is shown: neither a slot nor multi-view is active. */
     private boolean udpShown;
     private boolean mMenuIsCached;
@@ -66,6 +68,8 @@ class MenuManager {
         void onToggleQuad();
         /** U: the reserved UDP RTP cell full-screen (#68). */
         void onShowUdp();
+        /** D: debug text (resolution, codec, fps) in every multi-view cell on or off. */
+        void onToggleStats();
         void onExit();
         void onShowSettings();
         void onSaveSettings();
@@ -95,6 +99,8 @@ class MenuManager {
     }
 
     void setUdpShown(boolean shown) { udpShown = shown; }
+
+    void setStatsShown(boolean shown) { statsShown = shown; }
 
     void applyQualityToActive(boolean quadEnabled, int mActive) {
         if (camButtons != null && !quadEnabled && !udpShown) {
@@ -236,6 +242,21 @@ class MenuManager {
             if (listener != null) listener.onShowUdp();
         });
 
+        // D after U: the debug text in the multi-view cells, highlighted while on
+        final TextView statsBtn = createItem("D");
+        statsBtn.setGravity(Gravity.CENTER);
+        statsBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
+        camRow.addView(statsBtn, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        if (statsShown) highlightItem(statsBtn);
+        mCachedStatsBtn = statsBtn;
+        statsBtn.setOnClickListener(v -> {
+            PopupWindow p = mMenuPopup;
+            if (p != null) p.dismiss();
+            if (listener != null) listener.onToggleStats();
+        });
+
         String code = "Exit [v" + version + ", " + gitHash + "]";
         SpannableString s = new SpannableString(code);
         s.setSpan(new SuperscriptSpan(), 5, s.length(), 0);
@@ -286,6 +307,10 @@ class MenuManager {
         if (mCachedUdpBtn != null) {
             if (udpShown) highlightItem(mCachedUdpBtn);
             else resetItem(mCachedUdpBtn);
+        }
+        if (mCachedStatsBtn != null) {
+            if (statsShown) highlightItem(mCachedStatsBtn);
+            else resetItem(mCachedStatsBtn);
         }
         if (mCachedCamButtons != null && camButtons != null) {
             for (int i = 0; i < CAM_COUNT; i++) {

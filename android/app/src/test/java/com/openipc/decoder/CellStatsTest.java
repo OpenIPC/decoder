@@ -54,9 +54,31 @@ public class CellStatsTest {
         QuadCell c = cell();
         c.onFailure("ECONNREFUSED");
         c.onStatus("connected");
-        // A working connection clears the connection error; no frames yet
-        assertEquals("H.264 0/0 fps", c.sample(1000));
+        // A working connection clears the connection error; a new cell starts on key frames (#85)
+        assertEquals("H.264 key frames · 0.0 fps", c.sample(1000));
+        assertTrue(c.needsAttention());
+        c.setKeyFramesOnly(false);
+        assertEquals("H.264 0/0 fps", c.sample(2000));
+        assertFalse("playing at full rate: no text without D", c.needsAttention());
         assertFalse(c.isPaused());
+    }
+
+    @Test
+    public void keyNalUnits() {
+        // H.264: IDR, SPS, PPS pass; non-IDR slice and SEI do not
+        assertTrue(QuadCell.isKeyNal(5, false));
+        assertTrue(QuadCell.isKeyNal(7, false));
+        assertTrue(QuadCell.isKeyNal(8, false));
+        assertFalse(QuadCell.isKeyNal(1, false));
+        assertFalse(QuadCell.isKeyNal(6, false));
+        // H.265: IRAP (16-21), VPS/SPS/PPS pass; TRAIL_R and SEI do not
+        assertTrue(QuadCell.isKeyNal(19, true));
+        assertTrue(QuadCell.isKeyNal(32, true));
+        assertTrue(QuadCell.isKeyNal(34, true));
+        assertFalse(QuadCell.isKeyNal(1, true));
+        assertFalse(QuadCell.isKeyNal(39, true));
+        assertTrue(QuadCell.isKeyFrameNal(5, false));
+        assertFalse(QuadCell.isKeyFrameNal(7, false));
     }
 
     @Test

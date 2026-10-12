@@ -1,0 +1,125 @@
+/*
+ * Copyright (c) OpenIPC  https://openipc.org  Prosperity Public License 3.0.0
+ *
+ * DecodePlannerTest.java — full rate or key frames per multi-view cell (#85)
+ *
+ */
+
+package com.openipc.decoder;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
+import org.junit.Test;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class DecodePlannerTest {
+    /** 1080p at 30 fps: 120 x 68 blocks x 30. */
+    private static final long P1080_30 = DecodePlanner.fullLoad(1920, 1080, 30);
+    /** The AG-216's declared budget: 1080p at 60 fps. */
+    private static final long BUDGET = DecodePlanner.fullLoad(1920, 1080, 60);
+
+    private static List<DecodePlanner.Cell> keyCells(int n, long load) {
+        List<DecodePlanner.Cell> cells = new ArrayList<>();
+        for (int i = 0; i < n; i++) cells.add(new DecodePlanner.Cell(i, false, true, load, false));
+        return cells;
+    }
+
+    private static void apply(List<DecodePlanner.Cell> cells, DecodePlanner.Decision d) {
+        for (DecodePlanner.Cell c : cells) {
+            if (c.index != d.index) continue;
+            if (d.action == DecodePlanner.Action.PROMOTE) c.full = true;
+            if (d.action == DecodePlanner.Action.DEMOTE) c.full = false;
+            if (d.action == DecodePlanner.Action.PAUSE) c.paused = true;
+        }
+    }
+
+    private static int full(List<DecodePlanner.Cell> cells) {
+        int n = 0;
+        for (DecodePlanner.Cell c : cells) if (c.full) n++;
+        return n;
+    }
+
+    @Test
+    public void loadIsBlocksTimesFps() {
+        assertEquals(120L * 68 * 30, P1080_30);
+    }
+
+    @Test
+    public void promotesInPriorityOrderUpToTheBudget() {
+        DecodePlanner p = new DecodePlanner(BUDGET, false);
+        List<DecodePlanner.Cell> cells = keyCells(8, P1080_30);
+        long t = 0;
+        for (int i = 0; i < 20; i++, t += 1000) apply(cells, p.step(cells, t));
+        assertEquals("two 1080p30 cameras fit 1080p60", 2, full(cells));
+        assertTrue(cells.get(0).full && cells.get(1).full);
+    }
+
+    @Test
+    public void lossesDemoteTheLowestPriorityFullCellAndLowerTheCapacity() {
+        DecodePlanner p = new DecodePlanner(BUDGET * 2, false);
+        List<DecodePlanner.Cell> cells = keyCells(4, P1080_30);
+        long t = 0;
+        for (int i = 0; i < 20; i++, t += 1000) apply(cells, p.step(cells, t));
+        assertEquals(4, full(cells));
+        // The decoder starts losing frames
+        cells.get(0).lossy = true;
+        DecodePlanner.Decision d = DecodePlanner.Decision.NONE;
+        for (int i = 0; i < DecodePlanner.LOSS_SAMPLES; i++, t += 1000) d = p.step(cells, t);
+        assertEquals(DecodePlanner.Action.DEMOTE, d.action);
+        assertEquals(3, d.index);
+        assertTrue(p.isLearnt());
+        assertEquals(Math.round(4 * P1080_30 * 0.9), p.capacity());
+    }
+
+    @Test
+    public void keyFrameLossesWithNothingToDemotePauseAsLastResort() {
+        DecodePlanner p = new DecodePlanner(1, false); // nothing fits: every cell stays on key frames
+        List<DecodePlanner.Cell> cells = keyCells(3, P1080_30);
+        for (DecodePlanner.Cell c : cells) c.lossy = true;
+        DecodePlanner.Decision d = DecodePlanner.Decision.NONE;
+        long t = 0;
+        for (int i = 0; i < DecodePlanner.LOSS_SAMPLES; i++, t += 1000) d = p.step(cells, t);
+        assertEquals(DecodePlanner.Action.PAUSE, d.action);
+        assertEquals(2, d.index);
+    }
+
+    @Test
+    public void aQuietLoadIsProvenAndAProbeMayExceedTheCapacity() {
+        DecodePlanner p = new DecodePlanner(P1080_30, false); // one camera fits
+        List<DecodePlanner.Cell> cells = keyCells(2, P1080_30);
+        long t = 0;
+        apply(cells, p.step(cells, t));
+        assertEquals(1, full(cells));
+        DecodePlanner.Decision d = DecodePlanner.Decision.NONE;
+        for (t = 1000; t <= DecodePlanner.PROBE_QUIET_MS + 1000 && d.action == DecodePlanner.Action.NONE; t += 1000) {
+            d = p.step(cells, t);
+        }
+        assertEquals("after a quiet period the second camera is tried", DecodePlanner.Action.PROMOTE, d.action);
+        apply(cells, d);
+        // It plays without losses for another quiet period: the capacity is raised to that load
+        for (long end = t + DecodePlanner.PROBE_QUIET_MS + 1000; t <= end; t += 1000) p.step(cells, t);
+        assertEquals(2 * P1080_30, p.capacity());
+        assertTrue(p.isLearnt());
+    }
+
+    @Test
+    public void waitsForTheLoadOfAHigherPriorityCell() {
+        DecodePlanner p = new DecodePlanner(BUDGET, false);
+        List<DecodePlanner.Cell> cells = keyCells(2, P1080_30);
+        cells.get(0).known = false;
+        assertEquals(DecodePlanner.Action.NONE, p.step(cells, 0).action);
+    }
+
+    @Test
+    public void declaredBudgetIsIgnoredOnceLearnt() {
+        DecodePlanner p = new DecodePlanner(1000, true);
+        p.offerDeclared(5000);
+        assertEquals(1000, p.capacity());
+        DecodePlanner q = new DecodePlanner(1000, false);
+        q.offerDeclared(5000);
+        assertEquals(5000, q.capacity());
+    }
+}

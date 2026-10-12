@@ -67,8 +67,10 @@ class QuadCell implements RtspSession.Callback {
     private float outFps;
     /** Frames per second lost because the decoder did not keep up (queue full, no input buffer). */
     private float lostFps;
-    /** Consecutive samples in which the decoder fell behind (UI thread, #83). */
-    int behindSamples;
+    /** Decode only key frames and parameter sets (#85): a fraction of the load. */
+    private volatile boolean keyFramesOnly = true;
+    /** Just promoted to full rate: skip until the next key frame, the references are missing. */
+    private volatile boolean waitingKeyFrame;
 
     interface Listener {
         void onRemoveOverlay(int index);
@@ -278,13 +280,52 @@ class QuadCell implements RtspSession.Callback {
         int w = decoder.outWidth();
         int h = decoder.outHeight();
         String size = w > 0 ? w + "×" + h + " " : "";
-        return size + (codecH265 ? "H.265" : "H.264") + " "
-                + Math.round(outFps) + "/" + Math.round(inFps) + " fps";
+        String codec = codecH265 ? "H.265" : "H.264";
+        if (keyFramesOnly) {
+            String rate = outFps < 10 ? String.format(java.util.Locale.ROOT, "%.1f", outFps)
+                    : String.valueOf(Math.round(outFps));
+            return size + codec + " key frames · " + rate + " fps";
+        }
+        return size + codec + " " + Math.round(outFps) + "/" + Math.round(inFps) + " fps";
+    }
+
+    boolean isKeyFramesOnly() { return keyFramesOnly; }
+
+    /** Full rate or key frames only (#85). Going to full rate waits for the next key frame. */
+    void setKeyFramesOnly(boolean on) {
+        if (on == keyFramesOnly) return;
+        if (!on) waitingKeyFrame = true;
+        keyFramesOnly = on;
+    }
+
+    /** Resolution and frame rate are known, so the full-rate load can be estimated. */
+    boolean knowsLoad() {
+        return decoder.outWidth() > 0 && inFps > 0;
+    }
+
+    /** Macroblocks per second at full rate (#85). */
+    long fullLoad() {
+        return DecodePlanner.fullLoad(decoder.outWidth(), decoder.outHeight(), inFps);
+    }
+
+    /** A parameter set or a key frame (H.264 IDR; H.265 IRAP). */
+    static boolean isKeyNal(int type, boolean h265) {
+        if (h265) return (type >= 16 && type <= 21) || (type >= 32 && type <= 34);
+        return type == 5 || type == 7 || type == 8;
+    }
+
+    static boolean isKeyFrameNal(int type, boolean h265) {
+        return h265 ? type >= 16 && type <= 21 : type == 5;
     }
 
     float inFps() { return inFps; }
     float outFps() { return outFps; }
     float lostFps() { return lostFps; }
+
+    /** Something worth showing even without the debug text (D): not playing at full rate. */
+    boolean needsAttention() {
+        return pausedReason != null || problem != null || !"connected".equals(state) || keyFramesOnly;
+    }
     boolean isPaused() { return pausedReason != null; }
 
     /** Connected, not paused and a frame shown within the last {@code ms} milliseconds (#98). */
@@ -349,6 +390,11 @@ class QuadCell implements RtspSession.Callback {
 
     private void decode(Frame buffer) {
         if (buffer.length() < 5) return;
+        if (keyFramesOnly || waitingKeyFrame) {
+            int type = NalAssembler.fragment(buffer.data()[4], codecH265);
+            if (!isKeyNal(type, codecH265)) return;
+            if (!keyFramesOnly && isKeyFrameNal(type, codecH265)) waitingKeyFrame = false;
+        }
         if (decoder.decodeFrame(buffer, codecH265, 0)) {
             Surface s = surface;
             if (s == null || !s.isValid()) return;
