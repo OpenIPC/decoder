@@ -7,7 +7,6 @@
 
 package com.openipc.decoder;
 
-import android.util.Base64;
 import android.util.Log;
 
 import java.io.BufferedInputStream;
@@ -18,7 +17,9 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -38,6 +39,8 @@ class RtspSession {
     // Not final so unit tests can shorten them
     static volatile long watchdogMs = 8000;
     static volatile int minRetryMs = 1000;
+    /** Lower bound for the keepalive interval (half the session timeout). */
+    static volatile int minKeepaliveMs = 1000;
     static volatile int maxRetryMs = 30000;
 
     interface Callback {
@@ -194,15 +197,9 @@ class RtspSession {
             BufferedInputStream in = new BufferedInputStream(s.getInputStream(), 65536);
             OutputStream out = s.getOutputStream();
 
-            String auth = u.userInfo != null
-                    ? "Authorization: Basic " + Base64.encodeToString(
-                            u.userInfo.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP) + "\r\n"
-                    : "";
-            String common = auth + userAgent;
-            int cseq = 1;
+            Conn c = new Conn(in, out, new RtspAuth(u.userInfo));
 
-            Response r = request(in, out, "DESCRIBE", u.requestUrl, cseq++,
-                    common + "Accept: application/sdp\r\n");
+            Response r = exchange(c, "DESCRIBE", u.requestUrl, "Accept: application/sdp\r\n");
             r.require("DESCRIBE");
             if (r.header("content-length") == null && r.body.isEmpty()) {
                 // Some servers omit Content-Length: take what arrives until the line goes quiet
@@ -215,17 +212,18 @@ class RtspSession {
                 throw new IOException("No H.264/H.265 video track in SDP");
             }
 
-            r = request(in, out, "SETUP", sdp.videoUrl, cseq++,
-                    common + "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n");
+            r = exchange(c, "SETUP", sdp.videoUrl,
+                    "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n");
             r.require("SETUP video");
-            String session = r.header("session");
-            if (session == null) throw new IOException("No Session header in SETUP reply");
-            session = session.split(";")[0].trim();
+            String sessionHeader = r.header("session");
+            if (sessionHeader == null) throw new IOException("No Session header in SETUP reply");
+            String session = sessionHeader.split(";")[0].trim();
+            long keepaliveMs = keepaliveInterval(sessionHeader);
 
             boolean audio = withAudio && sdp.audioUrl != null
                     && !AudioConfig.NONE.equals(sdp.audio.codec);
             if (audio) {
-                r = request(in, out, "SETUP", sdp.audioUrl, cseq++, common +
+                r = exchange(c, "SETUP", sdp.audioUrl,
                         "Transport: RTP/AVP/TCP;unicast;interleaved=2-3\r\n" +
                         "Session: " + session + "\r\n");
                 if (!r.ok()) {
@@ -240,8 +238,7 @@ class RtspSession {
             callback.onSdp(sdp);
 
             // PLAY on the request URL, as before: accepted by the servers seen so far
-            r = request(in, out, "PLAY", u.requestUrl, cseq++,
-                    common + "Session: " + session + "\r\n");
+            r = exchange(c, "PLAY", u.requestUrl, "Session: " + session + "\r\n");
             r.require("PLAY");
 
             synchronized (lock) {
@@ -253,7 +250,7 @@ class RtspSession {
             }
             status(gen, "buffering");
             s.setSoTimeout(0); // the watchdog handles silence
-            receive(gen, in);
+            receive(gen, c, u.requestUrl, session, keepaliveMs);
             return true;
         } finally {
             synchronized (lock) {
@@ -265,11 +262,39 @@ class RtspSession {
         }
     }
 
-    private void receive(int gen, BufferedInputStream in) throws IOException {
+    /**
+     * Receive loop. Every keepaliveMs a GET_PARAMETER (or OPTIONS, if the server rejects
+     * it) is sent on the same connection; replies arrive between interleaved packets.
+     */
+    private void receive(int gen, Conn c, String url, String session, long keepaliveMs)
+            throws IOException {
         byte[] buf = new byte[65535 + 4];
         boolean first = true;
+        boolean useOptions = false;
+        long lastKeepalive = System.nanoTime() / 1_000_000;
+        String pending = null;
         while (active && gen == generation) {
-            int total = readInterleavedPacket(in, buf);
+            long now = System.nanoTime() / 1_000_000;
+            if (now - lastKeepalive >= keepaliveMs) {
+                pending = useOptions ? "OPTIONS" : "GET_PARAMETER";
+                send(c, pending, url, "Session: " + session + "\r\n");
+                lastKeepalive = now;
+            }
+
+            if (isResponseNext(c.in)) {
+                Response r = readResponse(c.in);
+                if (r.code == 401) {
+                    c.auth.onUnauthorized(r.authenticate); // next keepalive uses the new nonce
+                } else if (r.code == 454) {
+                    throw new IOException("Session expired on the server");
+                } else if (!r.ok() && "GET_PARAMETER".equals(pending)) {
+                    Log.i(TAG, tag + ": GET_PARAMETER rejected (" + r.code + "), using OPTIONS");
+                    useOptions = true;
+                }
+                continue;
+            }
+
+            int total = readInterleavedPacket(c.in, buf);
             if (total < 0) throw new IOException("Connection closed by server");
             streamBytes += total;
             int channel = buf[1] & 0xFF;
@@ -286,11 +311,39 @@ class RtspSession {
         }
     }
 
+    /** True if the next bytes are an RTSP reply ("RTSP/") rather than interleaved data. */
+    static boolean isResponseNext(BufferedInputStream in) throws IOException {
+        in.mark(5);
+        try {
+            if (in.read() != 'R') return false;
+            return in.read() == 'T' && in.read() == 'S' && in.read() == 'P' && in.read() == '/';
+        } finally {
+            in.reset();
+        }
+    }
+
+    /** Half the server's session timeout (default 60 s), at least minKeepaliveMs. */
+    static long keepaliveInterval(String sessionHeader) {
+        int timeoutSec = 60;
+        for (String part : sessionHeader.split(";")) {
+            String p = part.trim();
+            if (p.regionMatches(true, 0, "timeout=", 0, 8)) {
+                try {
+                    int t = Integer.parseInt(p.substring(8).trim());
+                    if (t > 0) timeoutSec = t;
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+        return Math.max(minKeepaliveMs, timeoutSec * 1000L / 2);
+    }
+
     // ====================== Protocol helpers ======================
 
     static final class Response {
         int code;
         final Map<String, String> headers = new HashMap<>();
+        /** Every WWW-Authenticate value; a server may offer several schemes. */
+        final List<String> authenticate = new ArrayList<>();
         String body = "";
 
         boolean ok() { return code >= 200 && code < 300; }
@@ -302,13 +355,42 @@ class RtspSession {
         }
     }
 
-    private Response request(InputStream in, OutputStream out, String method, String target,
-                             int cseq, String headers) throws IOException {
+    /** Connection state for one session: streams, CSeq counter and authentication. */
+    private final class Conn {
+        final BufferedInputStream in;
+        final OutputStream out;
+        final RtspAuth auth;
+        int cseq = 1;
+
+        Conn(BufferedInputStream in, OutputStream out, RtspAuth auth) {
+            this.in = in;
+            this.out = out;
+            this.auth = auth;
+        }
+    }
+
+    private void send(Conn c, String method, String target, String headers) throws IOException {
         String req = method + " " + target + " RTSP/1.0\r\n" +
-                "CSeq: " + cseq + "\r\n" + headers + "\r\n";
-        out.write(req.getBytes(StandardCharsets.UTF_8));
-        out.flush();
-        return readResponse(in);
+                "CSeq: " + c.cseq++ + "\r\n" + c.auth.header(method, target) + userAgent +
+                headers + "\r\n";
+        c.out.write(req.getBytes(StandardCharsets.UTF_8));
+        c.out.flush();
+    }
+
+    /** Send a request and read its reply, answering one authentication challenge. */
+    private Response exchange(Conn c, String method, String target, String headers)
+            throws IOException {
+        send(c, method, target, headers);
+        Response r = readResponse(c.in);
+        if (r.code == 401 && c.auth.onUnauthorized(r.authenticate)) {
+            send(c, method, target, headers);
+            r = readResponse(c.in);
+        }
+        if (r.code == 401) {
+            throw new IOException(method + ": authentication failed"
+                    + (c.auth.hasCredentials() ? "" : " (no user:password in the URL)"));
+        }
+        return r;
     }
 
     /**
@@ -348,8 +430,10 @@ class RtspSession {
             Log.d(TAG, line);
             int colon = line.indexOf(':');
             if (colon > 0) {
-                r.headers.put(line.substring(0, colon).trim().toLowerCase(Locale.ROOT),
-                        line.substring(colon + 1).trim());
+                String name = line.substring(0, colon).trim().toLowerCase(Locale.ROOT);
+                String value = line.substring(colon + 1).trim();
+                r.headers.put(name, value);
+                if (name.equals("www-authenticate")) r.authenticate.add(value);
             }
         }
 
