@@ -26,7 +26,12 @@ class MediaCodecManager {
 
     private volatile MediaCodec decoder;
     private final Object decoderLock = new Object();
-    private volatile boolean decoderFailed;
+    /** Back-off after failures, instead of giving up for good (#21). */
+    private final DecoderRetry retry = new DecoderRetry();
+    /** While false no decoder is created, so none can appear after a pause or stop. */
+    private volatile boolean enabled = true;
+    /** A fresh decoder skips input until the first parameter set (SPS/VPS/PPS). */
+    private boolean awaitingConfig;
     private final MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
 
     // Surface set by the owning activity
@@ -48,10 +53,18 @@ class MediaCodecManager {
         this.surface = s;
     }
 
+    /** Enable or disable decoding; disabling also releases the decoder. */
+    void setEnabled(boolean enabled) {
+        this.enabled = enabled;
+        if (!enabled) closeDecoder();
+    }
+
+    /** Release the decoder on purpose (codec switch, camera switch): no back-off. */
     void closeDecoder() {
         synchronized (decoderLock) {
+            retry.onSuccess();
             MediaCodec codec = decoder;
-            if (codec == null) { decoderFailed = false; return; }
+            if (codec == null) return;
             decoder = null;
             Log.i(TAG, "Close video decoder");
             try {
@@ -60,13 +73,16 @@ class MediaCodecManager {
             } catch (Exception e) {
                 Log.e(TAG, "Decoder close exception", e);
             }
-            decoderFailed = false;
         }
+    }
+
+    private static long nowMs() {
+        return System.nanoTime() / 1_000_000;
     }
 
     void createDecoder(boolean codecH265) {
         synchronized (decoderLock) {
-            if (decoder != null) return;
+            if (decoder != null || !enabled || !retry.mayCreate(nowMs())) return;
         }
 
         Surface s = surface;
@@ -93,21 +109,27 @@ class MediaCodecManager {
                 throw e;
             }
         } catch (Exception e) {
-            Log.e(TAG, "Cannot setup decoder: " + e.getMessage());
-            decoderFailed = true;
+            retry.onFailure(nowMs());
+            Log.e(TAG, "Cannot setup decoder (attempt " + retry.failures() + "): " + e.getMessage());
             return;
         }
 
         synchronized (decoderLock) {
-            if (decoder != null) {
+            // Disabled meanwhile (pause/stop) or another thread was faster
+            if (decoder != null || !enabled) {
+                try { local.stop(); } catch (Exception ignored) {}
                 local.release();
                 return;
             }
             decoder = local;
+            awaitingConfig = true;
         }
     }
 
-    /** Decode one NAL frame. Returns true if the decoder was successfully used. */
+    /**
+     * Decode one NAL frame. Returns true if there is no decoder and one may be created now:
+     * the caller then creates it and passes the same frame again.
+     */
     boolean decodeFrame(Frame buffer, boolean codecH265, long watchdogRef) {
         if (buffer.length() < 5) {
             Log.w(TAG, "NAL frame too short: " + buffer.length());
@@ -127,8 +149,12 @@ class MediaCodecManager {
         synchronized (decoderLock) {
             MediaCodec codec = decoder;
             if (codec == null) {
-                needCreate = !decoderFailed;
+                needCreate = enabled && retry.mayCreate(nowMs());
+            } else if (awaitingConfig && !isConfigNal) {
+                // P-frames without parameter sets only produce errors in a new decoder
+                return false;
             } else {
+                awaitingConfig = false;
                 try {
                     int inputBufferId = codec.dequeueInputBuffer(5_000);
                     if (inputBufferId >= 0) {
@@ -154,12 +180,14 @@ class MediaCodecManager {
                             }
                         } else {
                             codec.releaseOutputBuffer(outputBufferId, true);
+                            retry.onSuccess(); // a decoded frame: the decoder works
                         }
                     }
                 } catch (Exception e) {
-                    Log.e(TAG, "Codec exception: " + e.getMessage());
                     decoder = null;
-                    decoderFailed = true;
+                    retry.onFailure(nowMs());
+                    Log.e(TAG, "Codec exception, retry in "
+                            + DecoderRetry.delayMs(retry.failures()) + " ms: " + e.getMessage());
                     try { codec.stop(); } catch (Exception ignored) {}
                     try { codec.release(); } catch (Exception ignored) {}
                     if (listener != null) listener.onDecoderFailed();
