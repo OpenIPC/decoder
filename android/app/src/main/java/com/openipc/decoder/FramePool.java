@@ -30,11 +30,16 @@ class FramePool {
     }
 
     Frame obtain(int size) {
-        boolean isSmall = size <= SMALL_MAX;
-        Frame frame = (isSmall ? small : large).poll();
-        if (frame != null && frame.data().length >= size) {
-            frame.setLength(0);
-            return frame;
+        BlockingQueue<Frame> queue = size <= SMALL_MAX ? small : large;
+        // Look at each pooled frame at most once; undersized ones go back for later requests
+        for (int i = queue.size(); i > 0; i--) {
+            Frame frame = queue.poll();
+            if (frame == null) break;
+            if (frame.data().length >= size) {
+                frame.setLength(0);
+                return frame;
+            }
+            queue.offer(frame);
         }
         // Round the capacity up so that the frame can be reused for similar sizes
         return new Frame(new byte[capacityFor(size)], 0);

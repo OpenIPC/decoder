@@ -56,4 +56,16 @@ public class FramePoolTest {
         assertSame(f[1], pool.obtain(300_000));
         assertNotSame(f[2], pool.obtain(300_000)); // the third was dropped, not retained
     }
+
+    @Test
+    public void undersizedFramesAreKeptNotDiscarded() {
+        FramePool pool = new FramePool(8);
+        Frame small = pool.obtain(1000);   // 2 KiB
+        Frame bigger = pool.obtain(10_000); // 16 KiB
+        pool.recycle(small);
+        pool.recycle(bigger);
+        // A 10 KB request skips the 2 KiB frame without losing it
+        assertSame(bigger, pool.obtain(10_000));
+        assertSame(small, pool.obtain(1000));
+    }
 }
