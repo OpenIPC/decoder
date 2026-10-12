@@ -337,7 +337,8 @@ class MenuManager {
             public void onReceivedHttpAuthRequest(
                     WebView v, HttpAuthHandler handler, String h, String realm) {
                 String userInfo = finalUri.getUserInfo();
-                if (userInfo != null) {
+                // Only the camera itself gets its credentials, never a host reached by a redirect or link
+                if (userInfo != null && link.equalsIgnoreCase(h)) {
                     String[] parts = userInfo.split(":", 2);
                     if (parts.length == 2) {
                         handler.proceed(parts[0], parts[1]);

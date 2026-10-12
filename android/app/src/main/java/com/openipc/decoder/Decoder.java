@@ -391,9 +391,40 @@ public class Decoder extends Activity
 
     // ====================== Status overlay ======================
 
+    // Delayed overlay updates after "connected"; cancelled on every status change
+    private final Runnable statusDetails = this::showConnectedDetails;
+    private final Runnable statusHide = () -> {
+        if (statusText != null) statusText.setVisibility(View.GONE);
+    };
+
+    private void showConnectedDetails() {
+        if (statusText == null || statusText.getVisibility() != View.VISIBLE) return;
+        String videoCodec = codecH265 ? "H.265" : "H.264";
+        String aCodec;
+        switch (audioCodec) {
+            case AudioConfig.AAC:  aCodec = " • AAC"; break;
+            case AudioConfig.PCMU:
+            case AudioConfig.PCMA: aCodec = " • G.711"; break;
+            case AudioConfig.PCM:  aCodec = " • PCM"; break;
+            default:               aCodec = ""; break;
+        }
+        long elapsedNs = System.nanoTime() - statusBitrateNs;
+        String bps = "";
+        long bytes = rtspClient != null ? rtspClient.getStreamBytes() : 0;
+        if (elapsedNs > 500_000_000 && bytes > 0) {
+            double mbps = (bytes * 8.0 / 1_000_000)
+                    / (elapsedNs / 1_000_000_000.0);
+            bps = String.format(Locale.US, " • %.1f Mbps", mbps);
+        }
+        statusText.setText("Connected • " + videoCodec + aCodec + bps);
+    }
+
     private void updateStatus(String status) {
         runOnUiThread(() -> {
             if (statusText == null) return;
+            // A stale timer from an earlier "connected" must not overwrite or hide this status
+            statusText.removeCallbacks(statusDetails);
+            statusText.removeCallbacks(statusHide);
 
             switch (status) {
                 case "connecting":
@@ -405,34 +436,9 @@ public class Decoder extends Activity
                     statusText.setVisibility(View.VISIBLE);
                     statusStreamBytes = rtspClient != null ? rtspClient.getStreamBytes() : 0;
                     statusBitrateNs = rtspClient != null ? rtspClient.getBitrateMarkNs() : System.nanoTime();
-                    // After 1 second, refresh with codec + bitrate info
-                    statusText.postDelayed(() -> {
-                        if (statusText == null
-                                || statusText.getVisibility() != View.VISIBLE) return;
-                        String videoCodec = codecH265 ? "H.265" : "H.264";
-                        String aCodec;
-                        switch (audioCodec) {
-                            case AudioConfig.AAC:  aCodec = " • AAC"; break;
-                            case AudioConfig.PCMU:
-                            case AudioConfig.PCMA: aCodec = " • G.711"; break;
-                            case AudioConfig.PCM:  aCodec = " • PCM"; break;
-                            default:               aCodec = ""; break;
-                        }
-                        long elapsedNs = System.nanoTime() - statusBitrateNs;
-                        String bps = "";
-                        long bytes = rtspClient != null ? rtspClient.getStreamBytes() : 0;
-                        if (elapsedNs > 500_000_000 && bytes > 0) {
-                            double mbps = (bytes * 8.0 / 1_000_000)
-                                    / (elapsedNs / 1_000_000_000.0);
-                            bps = String.format(Locale.US, " • %.1f Mbps", mbps);
-                        }
-                        statusText.setText("Connected • " + videoCodec + aCodec + bps);
-                    }, 1000);
-                    statusText.postDelayed(() -> {
-                        if (statusText != null) {
-                            statusText.setVisibility(View.GONE);
-                        }
-                    }, 5000);
+                    // After 1 second, refresh with codec + bitrate info; hide after 5 seconds
+                    statusText.postDelayed(statusDetails, 1000);
+                    statusText.postDelayed(statusHide, 5000);
                     break;
                 case "disconnected":
                     statusText.setText(getString(R.string.status_disconnected));
