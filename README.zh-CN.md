@@ -29,13 +29,13 @@
 
 ## 功能
 
-- **视频：** RTSP 播放，通过 MediaCodec 进行 H.264/H.265 硬件解码
-- **音频：** AAC（RFC 3640 `mpeg4-generic`、ADTS、MP4A-LATM）、Opus、G.711 μ-law/A-law、L16 PCM（单声道/立体声）
-- **显示：** 单路画面，或 Quad 多画面（最多同时显示 8 路摄像机，2×2 或 3×3 网格）
+- **视频：** RTSP 播放，通过 MediaCodec 进行 H.264/H.265 硬件解码，解码器出错后自动恢复，画面适配任意屏幕比例
+- **音频：** AAC（RFC 3640 `mpeg4-generic`、ADTS、MP4A-LATM）、Opus、G.711 μ-law/A-law、L16 PCM（单声道/立体声）；多画面模式下播放所选画面的声音
+- **显示：** 单路画面，或多画面模式（Quad），以 2×2 或 3×3 网格最多同时显示 8 路摄像机
 - **操作：** 双指缩放、拖动平移、双击复位，支持 Android TV 遥控器（Leanback 启动器）
 - **网络：** 支持 Basic 和 Digest 认证、RTSP 保活，断线后自动重连（指数退避），连接质量指示
 - **WebUI：** 内置浏览器，可打开摄像机的网页管理界面
-- **其他：** 长按截图，8 个摄像机槽位，可接收其他应用分享的地址
+- **其他：** 8 个摄像机槽位，地址加密保存，长按截图，可接收其他应用分享的地址
 
 ## 系统要求
 
@@ -47,7 +47,7 @@
 
 1. 从 [latest 发布页](https://github.com/OpenIPC/decoder/releases/tag/latest)安装 APK 并启动应用。
 2. 点击屏幕或按遥控器上的 **OK** 键打开菜单。
-3. 选择摄像机编号（**1**–**4**），点击 **Settings** 并输入摄像机地址：
+3. 选择摄像机编号（**1**–**8**），点击 **Settings** 并输入摄像机地址：
    ```
    rtsp://username:password@ip_address:554/stream=0
    ```
@@ -59,7 +59,7 @@
 
 | 菜单项       | 功能                                                                                                                                          |
 |--------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
-| **Q**        | 开启或关闭 Quad 四分屏模式                                                                                                                    |
+| **Q**        | 开启或关闭多画面模式（Quad）                                                                                                                  |
 | **1**–**8**  | 切换摄像机槽位。当前槽位编号的颜色表示连接质量：绿色为抖动低于 100 毫秒，黄色为 100–300 毫秒，红色为高于 300 毫秒。灰色编号表示该槽位未配置。 |
 | **Settings** | 编辑当前槽位的 RTSP 地址（仅单路模式）                                                                                                        |
 | **WebUI**    | 打开摄像机网页界面，用户名和密码取自 RTSP 地址（仅单路模式）                                                                                  |
@@ -67,29 +67,29 @@
 
 ### 手势与按键
 
-| 输入                      | 功能                            |
-|---------------------------|---------------------------------|
-| 点击 / **OK** / **Enter** | 打开或关闭菜单                  |
-| **Back** / **Esc**        | 关闭菜单                        |
-| 双指捏合后拖动            | 缩放（最大 5 倍）并平移         |
-| 双击                      | 恢复原始大小                    |
-| 长按                      | 截图并保存到 `Pictures/OpenIPC` |
+| 输入                      | 功能                                                                |
+|---------------------------|---------------------------------------------------------------------|
+| 点击 / **OK** / **Enter** | 打开或关闭菜单                                                      |
+| **Back** / **Esc**        | 关闭菜单                                                            |
+| 双指捏合后拖动            | 缩放（最大 5 倍）并平移，仅单路画面                                 |
+| 双击                      | 恢复原始大小                                                        |
+| 长按                      | 单路画面：截图并保存到 `Pictures/OpenIPC`。多画面：播放该画面的声音 |
 
 ### 从其他应用打开摄像机
 
 应用可接收纯文本分享（`ACTION_SEND`，`text/plain`）。从其他应用（例如 OpenIPC Network）分享 `rtsp://` 地址后，该地址会写入当前槽位。
 
-### Quad 四分屏模式
+### 多画面模式（Quad）
 
 以 2×2 网格显示已配置的槽位；只要使用了第 5–8 个槽位中的任意一个，就改为 3×3 网格。每个画面都有独立的连接和解码器，因此能流畅播放多少路高分辨率码流取决于设备的视频解码器：五路及以上时建议使用摄像机的子码流。部分摄像机同一时间只允许一个 RTSP 客户端。长按某个画面即可播放其声音（再次长按则静音）；被选中的画面显示 AUDIO 标记，选择会被记住。点击任意画面即可打开菜单。
 
 ## 已知限制
 
 > [!IMPORTANT]
-> 以下是我们计划解决的已知不足，每一项都有对应的 issue。欢迎留言、提交测试结果和 pull request。
+> 每一项都有对应的 issue。欢迎留言、提交测试结果和 pull request。
 >
-> - **仅支持 RTSP over TCP**，不支持 UDP 和组播 — [#7](https://github.com/OpenIPC/decoder/issues/7)
-> - **不支持 G.726 音频** — [#14](https://github.com/OpenIPC/decoder/issues/14)
+> - **仅支持 RTSP over TCP**，暂不支持 UDP 和组播 — [#7](https://github.com/OpenIPC/decoder/issues/7)
+> - **不支持 G.726 音频，也不支持流内配置的 MP4A-LATM（`cpresent=1`）。** OpenIPC Majestic 不使用这些格式，支持 G.726 的摄像机通常也能输出 G.711 或 AAC — [#14](https://github.com/OpenIPC/decoder/issues/14)
 > - **用户名和密码以明文传输**（未加密的 RTSP/HTTP；摄像机未要求 Digest 时发送 Basic），不支持 RTSPS，也不计划支持 — [#16](https://github.com/OpenIPC/decoder/issues/16)
 >
 > 已知的程序错误另行收录在 [`bug` 标签](https://github.com/OpenIPC/decoder/issues?q=is%3Aissue+is%3Aopen+label%3Abug)下。
@@ -128,16 +128,20 @@ export KEY_PASS=your_key_password
 
 ## 架构
 
-| 类                            | 作用                                                     |
-|-------------------------------|----------------------------------------------------------|
-| `Decoder`                     | 主 Activity：界面、生命周期、设置、视频解码线程          |
-| `RtspClient`                  | RTSP 握手、RTP over TCP 接收循环、看门狗、SDP 解析       |
-| `NalAssembler`                | 将 RTP 分片重组为 H.264/H.265 NAL 单元                   |
-| `MediaCodecManager`           | 硬件视频解码器的生命周期管理                             |
-| `AudioManager`、`AudioConfig` | 音频处理：G.711/L16 转换、AAC 解码、通过 AudioTrack 播放 |
-| `QuadCell`                    | Quad 模式中单个画面的独立数据流（网络、看门狗、解码器）  |
-| `MenuManager`                 | 弹出菜单、地址编辑器、WebUI 浏览器                       |
-| `FramePool`                   | 缓冲区池，减轻垃圾回收压力                               |
+| 类                                  | 作用                                                            |
+|-------------------------------------|-----------------------------------------------------------------|
+| `Decoder`                           | 主 Activity：界面、生命周期、设置、单路视频解码、多画面网格     |
+| `RtspClient`                        | 单路数据流：RTSP 会话、NAL 重组、音频、连接质量                 |
+| `RtspSession`                       | 单个 RTSP over TCP 会话：握手、RTP 接收、保活、看门狗、退避重连 |
+| `RtspAuth`、`Sdp`                   | Basic 与 Digest 认证；解析摄像机的会话描述                      |
+| `NalAssembler`                      | 将 RTP 包重组为 H.264/H.265 NAL 单元，丢弃因丢包而损坏的单元    |
+| `MediaCodecManager`、`DecoderRetry` | 硬件视频解码器的生命周期管理与出错后的恢复                      |
+| `AudioManager`、`AudioConfig`       | 音频处理：G.711/L16 转换、AAC/Opus 解码、通过 AudioTrack 播放   |
+| `QuadCell`                          | 多画面中的单个画面：独立的会话、解码器和可选音频                |
+| `MenuManager`                       | 弹出菜单、地址编辑器、WebUI 浏览器                              |
+| `CredentialStore`、`KeystoreCipher` | 摄像机地址加密存储（Android Keystore）                          |
+| `FramePool`、`Frame`                | 缓冲区池，减轻垃圾回收压力                                      |
+| `App`、`Crash`                      | 未捕获异常处理与崩溃报告界面                                    |
 
 网络、视频解码和音频分别运行在独立线程中，解码器较慢时也不会阻塞网络读取。
 
@@ -153,38 +157,39 @@ export KEY_PASS=your_key_password
 
 ### 已验证设备
 
-以下设备的报告基于旧版 1.0x（`basic` 分支）。新报告请注明应用版本。
+以下大多数设备的报告基于旧版 1.0x（`basic` 分支）；“版本”一列为实际测试的版本。新报告请注明应用版本。
 
-| 类型     | 设备                                  | Android                            | 内核           | 版本 | 备注                                                                |
-|----------|---------------------------------------|------------------------------------|----------------|------|---------------------------------------------------------------------|
-| 手机     | Asus ZC553KL                          | 8.1                                | 3.18.71        | 1.0x |                                                                     |
-| 手机     | Blackview BV4900Pro                   | 12                                 | 4.19.191       | 1.0x |                                                                     |
-| 手机     | Oppo 5X                               | ColorOS 15.0                       | 5.15.149       | 1.0x |                                                                     |
-| 手机     | Oppo A17                              | ColorOS 12.1                       | 4.19.191       | 1.0x |                                                                     |
-| 手机     | Samsung Galaxy A51                    | 13                                 | 4.14.113       | 1.0x |                                                                     |
-| 手机     | Samsung Galaxy M21 (SM-M215F/DSN)     | 12                                 | 4.14.113       | 1.0x |                                                                     |
-| 手机     | Samsung Galaxy S25                    | 15                                 | 6.6.30         | 1.0x |                                                                     |
-| 手机     | Samsung A55 5G                        | 14                                 | 6.1.93         | 1.0x |                                                                     |
-| 手机     | Samsung Galaxy J7                     | 10                                 | 3.18.150       | 1.0x |                                                                     |
-| 手机     | Samsung S8                            | 9                                  | 4.4.153        | 1.0x |                                                                     |
-| 手机     | Samsung S23 Ultra                     | 15                                 | 5.15.153       | 1.0x |                                                                     |
-| 手机     | Xiaomi Redmi 7A                       | 10                                 | 4.9.261        | 1.0x |                                                                     |
-| 手机     | Xiaomi Redmi Note 7 (M1901F7G)        | 10                                 | 4.4.192        | 1.0x |                                                                     |
-| 手机     | Xiaomi Redmi Note 13 4G               | 13                                 | 5.15.94        | 1.0x |                                                                     |
-| 平板     | Lenovo TB-X304L                       | 8.1.0                              | 3.18.71        | 1.0x | 画面边缘被裁切，[#17](https://github.com/OpenIPC/decoder/issues/17) |
-| 平板     | Lenovo TB-X606F                       | 10                                 | —              | 1.0x | 画面边缘被裁切，[#17](https://github.com/OpenIPC/decoder/issues/17) |
-| 平板     | Lenovo Tab P11                        | 11                                 | 4.19.157-perf+ | 1.0x | 画面边缘被裁切，[#17](https://github.com/OpenIPC/decoder/issues/17) |
-| 平板     | Samsung Galaxy Tab A                  | 7.1.1                              | 3.10.49        | 1.0x |                                                                     |
-| 平板     | Samsung Galaxy Tab A                  | 11                                 | 4.9.227        | 1.0x |                                                                     |
-| 平板     | Samsung Tab A7 (SM-T505)              | 12                                 | 4.19.157-perf- | 1.0x |                                                                     |
-| 电视盒子 | A95X F3 AIR                           | 9（SlimBOXtv AOSP 9.14，无 GAPPS） | 4.9.113        | 1.0x |                                                                     |
-| 电视盒子 | IE X3 Air                             | 9（SlimBOXtv AOSP 9.14，无 GAPPS） | 4.9.113        | 1.0x |                                                                     |
-| 电视盒子 | SberBox SBDV-00001                    | 定制系统                           | 4.9.228        | 1.0x |                                                                     |
-| 电视盒子 | X96Q（全志 H313）                     | 10                                 | 4.9.170        | 1.0x |                                                                     |
-| 电视     | Haier Candy Android TV 2K             | 11                                 | 4.9.243+       | 1.0x | 应用列表中没有图标                                                  |
-| 电视     | Yandex TV Novex NVX-55U169TSY         | 7.1.1                              | 4.4.3          | 1.0x |                                                                     |
-| 车载     | 多媒体主机 JCAC10003（ac8227/ac8229） | 12                                 | 3.18.79+       | 1.0x |                                                                     |
-| 车载     | 后视镜 Z55                            | 8.1.0                              | 4.4.83         | 1.0x |                                                                     |
+| 类型     | 设备                                  | Android                            | 内核           | 版本    | 备注                                                                                    |
+|----------|---------------------------------------|------------------------------------|----------------|---------|-----------------------------------------------------------------------------------------|
+| 手机     | Asus ZC553KL                          | 8.1                                | 3.18.71        | 1.0x    |                                                                                         |
+| 手机     | Blackview BV4900Pro                   | 12                                 | 4.19.191       | 1.0x    |                                                                                         |
+| 手机     | Oppo 5X                               | ColorOS 15.0                       | 5.15.149       | 1.0x    |                                                                                         |
+| 手机     | Oppo A17                              | ColorOS 12.1                       | 4.19.191       | 1.0x    |                                                                                         |
+| 手机     | Samsung Galaxy A51                    | 13                                 | 4.14.113       | 1.0x    |                                                                                         |
+| 手机     | Samsung Galaxy M21 (SM-M215F/DSN)     | 12                                 | 4.14.113       | 1.0x    |                                                                                         |
+| 手机     | Samsung Galaxy S25                    | 15                                 | 6.6.30         | 1.0x    |                                                                                         |
+| 手机     | Samsung A55 5G                        | 14                                 | 6.1.93         | 1.0x    |                                                                                         |
+| 手机     | Samsung Galaxy J7                     | 10                                 | 3.18.150       | 1.0x    |                                                                                         |
+| 手机     | Samsung S8                            | 9                                  | 4.4.153        | 1.0x    |                                                                                         |
+| 手机     | Samsung S23 Ultra                     | 15                                 | 5.15.153       | 1.0x    |                                                                                         |
+| 手机     | Xiaomi Redmi 7A                       | 10                                 | 4.9.261        | 1.0x    |                                                                                         |
+| 手机     | Xiaomi Redmi Note 7 (M1901F7G)        | 10                                 | 4.4.192        | 1.0x    |                                                                                         |
+| 手机     | Xiaomi Redmi Note 13 4G               | 13                                 | 5.15.94        | 1.0x    |                                                                                         |
+| 平板     | Lenovo TB-X304L                       | 8.1.0                              | 3.18.71        | 1.0x    | 1.0x 中画面边缘被裁切，v2 已修复（[#17](https://github.com/OpenIPC/decoder/issues/17)） |
+| 平板     | Lenovo TB-X606F                       | 10                                 | —              | 1.0x    | 1.0x 中画面边缘被裁切，v2 已修复（[#17](https://github.com/OpenIPC/decoder/issues/17)） |
+| 平板     | Lenovo Tab P11                        | 11                                 | 4.19.157-perf+ | 1.0x    | 1.0x 中画面边缘被裁切，v2 已修复（[#17](https://github.com/OpenIPC/decoder/issues/17)） |
+| 平板     | Samsung Galaxy Tab A                  | 7.1.1                              | 3.10.49        | 1.0x    |                                                                                         |
+| 平板     | Samsung Galaxy Tab A                  | 11                                 | 4.9.227        | 1.0x    |                                                                                         |
+| 平板     | Samsung Tab A7 (SM-T505)              | 12                                 | 4.19.157-perf- | 1.0x    |                                                                                         |
+| 电视盒子 | A95X F3 AIR                           | 9（SlimBOXtv AOSP 9.14，无 GAPPS） | 4.9.113        | 1.0x    |                                                                                         |
+| 电视盒子 | IE X3 Air                             | 9（SlimBOXtv AOSP 9.14，无 GAPPS） | 4.9.113        | 1.0x    |                                                                                         |
+| 电视盒子 | AG-216                                | 10                                 | 4.9.170        | v2 1.28 | v2 测试设备：8 路多画面，H.264/H.265，Opus/AAC/L16                                      |
+| 电视盒子 | SberBox SBDV-00001                    | 定制系统                           | 4.9.228        | 1.0x    |                                                                                         |
+| 电视盒子 | X96Q（全志 H313）                     | 10                                 | 4.9.170        | 1.0x    |                                                                                         |
+| 电视     | Haier Candy Android TV 2K             | 11                                 | 4.9.243+       | 1.0x    | 应用列表中没有图标                                                                      |
+| 电视     | Yandex TV Novex NVX-55U169TSY         | 7.1.1                              | 4.4.3          | 1.0x    |                                                                                         |
+| 车载     | 多媒体主机 JCAC10003（ac8227/ac8229） | 12                                 | 3.18.79+       | 1.0x    |                                                                                         |
+| 车载     | 后视镜 Z55                            | 8.1.0                              | 4.4.83         | 1.0x    |                                                                                         |
 
 ### 无法使用
 
