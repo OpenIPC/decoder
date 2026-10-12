@@ -125,7 +125,11 @@ class QuadCell implements RtspSession.Callback {
         public void surfaceChanged(SurfaceHolder holder, int format, int w, int h) {}
         @Override
         public void surfaceDestroyed(SurfaceHolder holder) {
+            // Nothing may render into the surface once this returns, and a recreated surface
+            // needs a decoder configured for it: close the decoder, the decode thread creates
+            // a new one when the next surface is there
             surface = null;
+            decoder.closeDecoder();
         }
     };
 
