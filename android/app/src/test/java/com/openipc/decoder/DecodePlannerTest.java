@@ -157,6 +157,28 @@ public class DecodePlannerTest {
     }
 
     @Test
+    public void aSlightlyLowerEstimateOfAFailedLoadIsNotProbed() {
+        DecodePlanner p = new DecodePlanner(P1080_30, false);
+        List<DecodePlanner.Cell> cells = keyCells(2, P1080_30);
+        long t = 0;
+        apply(cells, p.step(cells, t));
+        DecodePlanner.Decision d = DecodePlanner.Decision.NONE;
+        for (t = 1000; d.action == DecodePlanner.Action.NONE && t < 40_000; t += 1000) d = p.step(cells, t);
+        apply(cells, d);
+        cells.get(0).lossy = true;
+        for (d = DecodePlanner.Decision.NONE; d.action != DecodePlanner.Action.DEMOTE; t += 1000) {
+            d = p.step(cells, t);
+            apply(cells, d);
+        }
+        cells.get(0).lossy = false;
+        // The estimate of the same configuration comes out 5 % lower: still not tried
+        cells.get(1).fullLoad = Math.round(P1080_30 * 0.95);
+        for (long end = t + 5 * DecodePlanner.PROBE_QUIET_MS; t < end; t += 1000) {
+            assertEquals(DecodePlanner.Action.NONE, p.step(cells, t).action);
+        }
+    }
+
+    @Test
     public void waitsForTheLoadOfAHigherPriorityCell() {
         DecodePlanner p = new DecodePlanner(BUDGET, false);
         List<DecodePlanner.Cell> cells = keyCells(2, P1080_30);

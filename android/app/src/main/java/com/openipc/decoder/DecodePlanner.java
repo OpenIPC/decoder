@@ -27,6 +27,10 @@ final class DecodePlanner {
     static final long SETTLE_MS = 3000;
     /** Quiet time after which a load counts as proven and a promotion beyond capacity is tried. */
     static final long PROBE_QUIET_MS = 30_000;
+    /** Longest wait between probes: it doubles after every failure. */
+    static final long PROBE_MAX_WAIT_MS = 10 * 60_000;
+    /** Probes stay this far below a load that failed: the load estimates are noisy. */
+    static final double FAILED_MARGIN = 0.9;
 
     static final class Cell {
         int index;
@@ -72,6 +76,8 @@ final class DecodePlanner {
     private long proven;
     /** Smallest load at which the decoder lost frames: probes stay below it. */
     private long failedLoad = Long.MAX_VALUE;
+    /** Quiet time before the next probe; grows after failures, resets after a success. */
+    private long probeWaitMs = PROBE_QUIET_MS;
     private int lossySamples;
     private long quietSinceMs = -1;
     private long lastChangeMs = -1;
@@ -112,6 +118,7 @@ final class DecodePlanner {
             // A load that played without losses long enough is within this device's means
             if (nowMs - quietSinceMs >= PROBE_QUIET_MS && load > proven) {
                 proven = load;
+                probeWaitMs = PROBE_QUIET_MS;
                 if (load > capacity) {
                     capacity = load;
                     learnt = true;
@@ -127,6 +134,7 @@ final class DecodePlanner {
                 if (c.full && !c.paused && c.playing && c.known) {
                     // Losses at this load: the capacity is below it, but not below a proven load
                     failedLoad = Math.min(failedLoad, load);
+                    probeWaitMs = Math.min(probeWaitMs * 2, PROBE_MAX_WAIT_MS);
                     // Never raised by a failure; not below a proven load
                     capacity = Math.max(proven, Math.min(capacity, Math.round(load * 0.9)));
                     learnt = true;
@@ -151,7 +159,8 @@ final class DecodePlanner {
             long after = load - c.keyLoad + c.fullLoad;
             boolean fits = after <= capacity;
             // Beyond the capacity only after a quiet period, and never up to a load that failed
-            boolean probe = nowMs - quietSinceMs >= PROBE_QUIET_MS && after < failedLoad;
+            boolean probe = nowMs - quietSinceMs >= probeWaitMs
+                    && after < failedLoad * FAILED_MARGIN;
             if (fits || probe) {
                 if (!fits) quietSinceMs = nowMs; // a probe starts a new quiet period
                 return change(nowMs, Action.PROMOTE, c.index);
