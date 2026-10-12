@@ -95,7 +95,7 @@
 > - **仅有 4 个摄像机槽位** — [#13](https://github.com/OpenIPC/decoder/issues/13)
 > - **不支持 G.726 音频** — [#14](https://github.com/OpenIPC/decoder/issues/14)
 > - **部分设备上可能依赖 Google 服务（GAPPS）**，仍在调查中，请谨慎禁用 GAPPS — [#15](https://github.com/OpenIPC/decoder/issues/15)
-> - **用户名和密码以明文传输**（未加密的 RTSP/HTTP；摄像机未要求 Digest 时发送 Basic），不支持 RTSPS — [#16](https://github.com/OpenIPC/decoder/issues/16)
+> - **用户名和密码以明文传输**（未加密的 RTSP/HTTP；摄像机未要求 Digest 时发送 Basic），不支持 RTSPS，也不计划支持 — [#16](https://github.com/OpenIPC/decoder/issues/16)
 >
 > 已知的程序错误另行收录在 [`bug` 标签](https://github.com/OpenIPC/decoder/issues?q=is%3Aissue+is%3Aopen+label%3Abug)下。
 
@@ -149,8 +149,8 @@ export KEY_PASS=your_key_password
 ## 安全说明
 
 - 用户名和密码从地址中提取，通过 `Authorization` 头发送：默认使用 Basic，摄像机要求时改用 Digest。不会出现在 RTSP 请求行中。
-- RTSP 和 HTTP 均未加密，请仅在可信网络中使用，参见 [#16](https://github.com/OpenIPC/decoder/issues/16)。
-- 摄像机地址（含密码）加密保存在应用私有存储中（AES-256-GCM，密钥保存在 Android Keystore，Android 6.0 及以上；Android 5.x 仍按原方式保存），并已禁用备份（`allowBackup="false"`）。
+- RTSP 和 HTTP 均未加密，不支持 RTSPS。若摄像机要求将用户名和密码写在地址路径或参数中（例如 `user=…_password=…`），它们会随每个请求发送。请仅在可信网络中使用，参见 [#16](https://github.com/OpenIPC/decoder/issues/16)。
+- 摄像机地址（含密码）加密保存在应用私有存储中（AES-256-GCM，密钥保存在 Android Keystore，Android 6.0 及以上），在 Android 5.x 或 Keystore 不可用时以明文保存，并已禁用备份（`allowBackup="false"`）。
 
 ## 设备兼容性
 
