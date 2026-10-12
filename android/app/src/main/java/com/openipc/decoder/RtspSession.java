@@ -1,7 +1,7 @@
 /*
  * Copyright (c) OpenIPC  https://openipc.org  Prosperity Public License 3.0.0
  *
- * RtspSession.java — one RTSP-over-TCP session with automatic reconnect
+ * RtspSession.java — one RTSP session with automatic reconnect
  *
  */
 
@@ -14,6 +14,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
@@ -22,11 +23,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Handshake (DESCRIBE, SETUP, PLAY), SDP parsing, the interleaved receive loop, a watchdog
- * and reconnection with capped back-off. Used by the single view (RtspClient) and by every
- * Quad cell. Packets are delivered on the network thread; channel 0 is video, channel 2 audio.
+ * Handshake (DESCRIBE, SETUP, PLAY), SDP parsing, the receive loop (RTP interleaved in the
+ * RTSP connection, or over UDP, #67), a watchdog and reconnection with capped back-off. Used
+ * by the single view (RtspClient) and by every Quad cell. Packets are delivered on the
+ * network thread; channel 0 is video, channel 2 audio.
  */
 class RtspSession {
     private static final String TAG = "OpenIPCDecoder";
@@ -42,6 +46,8 @@ class RtspSession {
     /** Lower bound for the keepalive interval (half the session timeout). */
     private static final int MIN_KEEPALIVE_MS = 250;
     static volatile int maxRetryMs = 30000;
+    /** Auto transport: how long to wait for the first UDP video packet before using TCP. */
+    static volatile long udpFirstPacketMs = 3000;
 
     interface Callback {
         /** "disconnected", "buffering" (after PLAY) or "connected" (first video packet). */
@@ -63,11 +69,22 @@ class RtspSession {
     private volatile String url;
     private volatile String userAgent = "";
     private volatile boolean withAudio;
+    private volatile Transport.Mode mode = Transport.Mode.TCP;
+    /**
+     * Auto transport: URLs whose UDP failed, with the time, kept for the process so that
+     * a resume or a rebuilt grid does not try UDP again at once (#67).
+     */
+    static final Map<String, Long> udpFailedAt = new ConcurrentHashMap<>();
+    static volatile long udpRetryMs = 10 * 60 * 1000;
 
     // Incremented by start()/stop(); threads and callbacks of an older generation do nothing
     private volatile int generation;
     private final Object lock = new Object();
     private Socket socket;
+    /** UDP receiver of the current connection, else null. */
+    private UdpReceiver udp;
+    /** The UDP receive loop is running: closing ends it, the network thread closes the rest. */
+    private boolean udpPlaying;
     private Thread networkThread;
     private Thread watchdogThread;
 
@@ -85,9 +102,26 @@ class RtspSession {
 
     /** @param userAgent full header line, e.g. "User-Agent: x\r\n" */
     void configure(String url, String userAgent, boolean withAudio) {
+        configure(url, userAgent, withAudio, Transport.Mode.TCP);
+    }
+
+    void configure(String url, String userAgent, boolean withAudio, Transport.Mode mode) {
         this.url = url;
         this.userAgent = userAgent != null ? userAgent : "";
         this.withAudio = withAudio;
+        this.mode = mode != null ? mode : Transport.Mode.TCP;
+    }
+
+    private static boolean udpFailed(String url) {
+        Long at = udpFailedAt.get(url);
+        if (at == null) return false;
+        if (System.nanoTime() / 1_000_000 - at < udpRetryMs) return true;
+        udpFailedAt.remove(url);
+        return false;
+    }
+
+    private void markUdpFailed() {
+        udpFailedAt.put(url, System.nanoTime() / 1_000_000);
     }
 
     boolean isActive() { return active; }
@@ -118,7 +152,15 @@ class RtspSession {
         }
     }
 
+    /**
+     * End the current connection. While playing over UDP only the receiver is closed: the
+     * network thread then sends TEARDOWN, so the server stops sending to our ports.
+     */
     private void closeSocketLocked() {
+        if (udp != null) {
+            udp.close();
+            if (udpPlaying) return;
+        }
         if (socket != null) {
             try {
                 socket.close();
@@ -210,6 +252,8 @@ class RtspSession {
             socket = s;
         }
         Conn c = null;
+        UdpReceiver rx = null;
+        String session = null;
         try {
             s.connect(new InetSocketAddress(u.host, u.port), CONNECT_TIMEOUT_MS);
             s.setTcpNoDelay(true);
@@ -232,27 +276,78 @@ class RtspSession {
                 throw new IOException("No H.264/H.265 video track in SDP");
             }
 
-            r = exchange(c, "SETUP", sdp.videoUrl,
-                    "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n");
+            Transport.Mode m = mode;
+            boolean auto = m == Transport.Mode.AUTO;
+            if (m == Transport.Mode.UDP || (auto && !udpFailed(url))) {
+                rx = new UdpReceiver(tag);
+                synchronized (lock) {
+                    if (gen != generation) return false;
+                    udp = rx;
+                }
+            }
+
+            int videoPort = rx != null ? rx.addTrack(CHANNEL_VIDEO) : -1;
+            String transport = rx != null
+                    ? Transport.udpRequest(videoPort)
+                    : Transport.tcpRequest(CHANNEL_VIDEO);
+            r = exchange(c, "SETUP", sdp.videoUrl, "Transport: " + transport + "\r\n");
+            if (rx != null && auto && !r.ok()) {
+                // 461 Unsupported Transport and the like: the server does not do UDP
+                Log.i(TAG, tag + ": UDP SETUP failed (" + r.code + "), using TCP");
+                markUdpFailed();
+                rx = dropUdp(rx);
+                r = exchange(c, "SETUP", sdp.videoUrl,
+                        "Transport: " + Transport.tcpRequest(CHANNEL_VIDEO) + "\r\n");
+            }
             r.require("SETUP video");
             String sessionHeader = r.header("session");
             if (sessionHeader == null) throw new IOException("No Session header in SETUP reply");
-            String session = sessionHeader.split(";")[0].trim();
+            session = sessionHeader.split(";")[0].trim();
             long keepaliveMs = keepaliveInterval(sessionHeader);
+            Transport reply = Transport.parse(r.header("transport"));
+            if (rx != null && reply.tcp) {
+                // Asked for UDP, answered with interleaved TCP: take what the server chose
+                Log.i(TAG, tag + ": server chose TCP instead of UDP");
+                rx = dropUdp(rx);
+            } else if (rx != null && !udpReplyUsable(reply, videoPort)) {
+                // Multicast (#69) or other ports than ours: nothing would reach the receiver
+                if (auto) markUdpFailed();
+                throw new IOException("Unusable UDP transport in SETUP reply: "
+                        + r.header("transport"));
+            }
+            InetAddress audioSource = null;
 
             boolean audio = withAudio && sdp.audioUrl != null
                     && !AudioConfig.NONE.equals(sdp.audio.codec);
             if (audio) {
+                int audioPort = rx != null ? rx.addTrack(CHANNEL_AUDIO) : -1;
+                transport = rx != null
+                        ? Transport.udpRequest(audioPort)
+                        : Transport.tcpRequest(CHANNEL_AUDIO);
                 r = exchange(c, "SETUP", sdp.audioUrl,
-                        "Transport: RTP/AVP/TCP;unicast;interleaved=2-3\r\n" +
+                        "Transport: " + transport + "\r\n" +
                         "Session: " + session + "\r\n");
+                Transport audioReply = Transport.parse(r.header("transport"));
                 if (!r.ok()) {
                     // Not fatal: play video without audio
                     Log.w(TAG, tag + ": audio SETUP failed (" + r.code + "), no audio");
                     audio = false;
+                } else if (rx != null && (audioReply.tcp
+                        || !udpReplyUsable(audioReply, audioPort))) {
+                    // Video over UDP, audio elsewhere: the UDP loop cannot play it
+                    Log.w(TAG, tag + ": audio not over UDP like video, no audio");
+                    audio = false;
+                } else if (rx != null) {
+                    audioSource = sourceAddress(audioReply.source);
                 }
             }
             if (!audio) sdp.audio = new AudioConfig();
+
+            if (rx != null) {
+                // Only the camera may send to our ports; "source" may be its own view of
+                // its address (NAT), so the address we connected to is accepted as well
+                rx.setSources(s.getInetAddress(), sourceAddress(reply.source), audioSource);
+            }
 
             if (gen != generation) return false;
             callback.onSdp(sdp);
@@ -268,20 +363,70 @@ class RtspSession {
                 bitrateMarkNs = System.nanoTime();
                 active = true;
                 keepalive = new Keepalive(c, u.requestUrl, session, keepaliveMs);
+                udpPlaying = rx != null;
             }
+            Log.i(TAG, tag + ": playing over " + (rx != null ? "UDP" : "TCP"));
             status(gen, "buffering");
             s.setSoTimeout(0); // the watchdog handles silence
-            receive(gen, c);
+            if (rx != null) {
+                receiveUdp(gen, c, rx, auto);
+            } else {
+                receive(gen, c);
+            }
             return true;
         } finally {
             synchronized (lock) {
                 if (socket == s) socket = null;
+                // A newer connection may own these by now
+                if (udp == rx) {
+                    udp = null;
+                    udpPlaying = false;
+                }
                 Keepalive k = keepalive;
                 if (k != null && k.conn == c) keepalive = null;
+            }
+            if (rx != null) {
+                rx.close();
+                if (session != null && !s.isClosed()) {
+                    // Over UDP the server keeps sending until told to stop or until the
+                    // session times out; cameras that allow one client need it gone (#67)
+                    try {
+                        send(c, "TEARDOWN", u.requestUrl, "Session: " + session + "\r\n");
+                    } catch (IOException ignored) {}
+                }
             }
             try {
                 s.close();
             } catch (IOException ignored) {}
+        }
+    }
+
+    /**
+     * A UDP reply we can receive: unicast, and the client ports, when given, are ours.
+     * A missing Transport header is taken as agreement.
+     */
+    static boolean udpReplyUsable(Transport reply, int rtpPort) {
+        if (reply.multicast) return false;
+        return reply.clientPort == null || reply.clientPort[0] == rtpPort;
+    }
+
+    private UdpReceiver dropUdp(UdpReceiver rx) {
+        rx.close();
+        synchronized (lock) {
+            if (udp == rx) udp = null;
+        }
+        return null;
+    }
+
+    /** The "source" of a Transport reply as an address; null unless it is a literal IP. */
+    static InetAddress sourceAddress(String source) {
+        if (source == null || !source.matches("[0-9.]+|[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*")) {
+            return null; // never resolve a host name here
+        }
+        try {
+            return InetAddress.getByName(source);
+        } catch (IOException e) {
+            return null;
         }
     }
 
@@ -291,19 +436,7 @@ class RtspSession {
         boolean first = true;
         while (active && gen == generation) {
             if (isResponseNext(c.in)) {
-                Response r = readResponse(c.in);
-                Keepalive k = keepalive;
-                if (r.code == 401) {
-                    if (!c.auth.onUnauthorized(r.authenticate)) {
-                        throw new IOException("Keepalive rejected: authentication failed");
-                    }
-                    if (k != null) k.lastSentMs = 0; // repeat it now with the new nonce
-                } else if (r.code == 454) {
-                    throw new IOException("Session expired on the server");
-                } else if (!r.ok() && k != null && "GET_PARAMETER".equals(k.pending)) {
-                    Log.i(TAG, tag + ": GET_PARAMETER rejected (" + r.code + "), using OPTIONS");
-                    k.useOptions = true;
-                }
+                handleReply(c, readResponse(c.in));
                 continue;
             }
 
@@ -321,6 +454,73 @@ class RtspSession {
                     status(gen, "connected");
                 }
             }
+        }
+    }
+
+    /**
+     * Receive over UDP on this thread while a second thread reads the RTSP replies
+     * (keepalives). With {@code auto}, no video within udpFirstPacketMs switches the
+     * URL to TCP for the next connection.
+     */
+    private void receiveUdp(int gen, Conn c, UdpReceiver rx, boolean auto) throws IOException {
+        AtomicReference<IOException> controlError = new AtomicReference<>();
+        Thread control = new Thread(() -> {
+            try {
+                while (gen == generation) {
+                    Response r = readResponse(c.in);
+                    handleReply(c, r);
+                }
+            } catch (IOException e) {
+                controlError.set(e);
+            }
+            // Ends the receive loop; harmless when it already ended
+            rx.close();
+        }, tag + "-ctl");
+        control.setDaemon(true);
+        control.start();
+
+        final boolean[] first = {true};
+        long playMs = System.nanoTime() / 1_000_000;
+        rx.run(() -> {
+            if (!active || gen != generation) return false;
+            if (auto && first[0]
+                    && System.nanoTime() / 1_000_000 - playMs > udpFirstPacketMs) {
+                Log.w(TAG, tag + ": no video over UDP, using TCP");
+                markUdpFailed();
+                return false;
+            }
+            return true;
+        }, (channel, buf, offset, length) -> {
+            if (gen != generation) return;
+            streamBytes += length;
+            boolean usable = callback.onPacket(channel, buf, offset, length);
+            if (channel == CHANNEL_VIDEO && usable) {
+                lastPacketMs = System.nanoTime() / 1_000_000;
+                if (first[0]) {
+                    first[0] = false;
+                    status(gen, "connected");
+                }
+            }
+        });
+        IOException e = controlError.get();
+        if (e != null && gen == generation && active) {
+            throw new IOException("RTSP connection lost: " + e.getMessage(), e);
+        }
+    }
+
+    /** A reply that arrived while playing: keepalive answers and session errors. */
+    private void handleReply(Conn c, Response r) throws IOException {
+        Keepalive k = keepalive;
+        if (r.code == 401) {
+            if (!c.auth.onUnauthorized(r.authenticate)) {
+                throw new IOException("Keepalive rejected: authentication failed");
+            }
+            if (k != null) k.lastSentMs = 0; // repeat it now with the new nonce
+        } else if (r.code == 454) {
+            throw new IOException("Session expired on the server");
+        } else if (!r.ok() && k != null && "GET_PARAMETER".equals(k.pending)) {
+            Log.i(TAG, tag + ": GET_PARAMETER rejected (" + r.code + "), using OPTIONS");
+            k.useOptions = true;
         }
     }
 

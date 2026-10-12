@@ -100,6 +100,8 @@ public class Decoder extends Activity
     static final int CAM_COUNT = 8;
     private static final String DEFAULT_URL = "rtsp://root:12345@192.168.1.10:554/stream=0";
     private final String[] mHosts = new String[CAM_COUNT];
+    /** RTP transport per slot (#67): TCP, UDP or Auto (UDP with fallback to TCP). */
+    private final Transport.Mode[] mTransports = new Transport.Mode[CAM_COUNT];
     private int mActive;
     private volatile String mHost;
     private String mVersion;
@@ -299,7 +301,7 @@ public class Decoder extends Activity
             stopQuad();
             boolean configured = mHost != null && !mHost.isEmpty() && !mHost.equals(DEFAULT_URL);
             if (configured) {
-                rtspClient.configure(mHost, mUserAgent);
+                rtspClient.configure(mHost, mUserAgent, mTransports[mActive]);
                 startListener();
                 rtspClient.start();
             }
@@ -350,7 +352,7 @@ public class Decoder extends Activity
     public void onExit() { finishAndRemoveTask(); }
 
     @Override
-    public void onShowSettings() { menuManager.showUrlEditor(mActive, mHosts); }
+    public void onShowSettings() { menuManager.showUrlEditor(mActive, mHosts, mTransports); }
 
     @Override
     public void onWebUI() { menuManager.startBrowser(mHost); }
@@ -395,6 +397,7 @@ public class Decoder extends Activity
             String url = credentials.open(stored);
             mHosts[i] = url != null ? url : DEFAULT_URL;
             mUnreadable[i] = url == null && stored != null ? stored : null;
+            mTransports[i] = Transport.Mode.parse(pref.getString("transport_" + i, null));
             // Plain URLs from older versions are re-saved encrypted right away
             if (credentials.needsMigration(stored)) {
                 if (migrate == null) migrate = pref.edit();
@@ -408,6 +411,9 @@ public class Decoder extends Activity
         if (link != null) {
             Log.d(TAG, "Link: " + Uri.parse(link).getHost());
             mHosts[mActive] = sanitizeUrl(link);
+            // Optional, e.g. --es transport udp; a link without it keeps the slot's setting
+            String transport = intent.getStringExtra("transport");
+            if (transport != null) mTransports[mActive] = Transport.Mode.parse(transport);
             // A shared link is meant to be watched: single view, and saved so that it is
             // still there after the next pause/resume
             quadEnabled = false;
@@ -415,6 +421,7 @@ public class Decoder extends Activity
                     .putString("host_" + mActive, credentials.sealForSlot(
                             mHosts[mActive], mUnreadable[mActive], DEFAULT_URL))
                     .putBoolean("quad_enabled", false)
+                    .putString("transport_" + mActive, mTransports[mActive].name())
                     .apply();
             intent.removeExtra(Intent.EXTRA_TEXT);
         }
@@ -446,6 +453,7 @@ public class Decoder extends Activity
         for (int i = 0; i < CAM_COUNT; i++) {
             edit.putString("host_" + i,
                     credentials.sealForSlot(mHosts[i], mUnreadable[i], DEFAULT_URL));
+            edit.putString("transport_" + i, mTransports[i].name());
         }
         edit.apply();
 
@@ -466,7 +474,7 @@ public class Decoder extends Activity
             return;
         }
 
-        rtspClient.configure(mHost, mUserAgent);
+        rtspClient.configure(mHost, mUserAgent, mTransports[mActive]);
         startListener();
         rtspClient.start();
     }
@@ -709,7 +717,7 @@ public class Decoder extends Activity
             if (quadViews[i] == null) continue;
             String url = mHosts[i];
             if (url == null || url.isEmpty() || url.equals(DEFAULT_URL)) continue;
-            quadCells[i] = new QuadCell(i, url, quadViews[i], framePool, mUserAgent,
+            quadCells[i] = new QuadCell(i, url, mTransports[i], quadViews[i], framePool, mUserAgent,
                     index -> runOnUiThread(() -> removeQuadOverlay(index)));
             quadCells[i].start();
         }
@@ -1140,7 +1148,7 @@ public class Decoder extends Activity
             mSurface.setVisibility(View.VISIBLE);
             boolean configured = mHost != null && !mHost.isEmpty() && !mHost.equals(DEFAULT_URL);
             if (configured) {
-                rtspClient.configure(mHost, mUserAgent);
+                rtspClient.configure(mHost, mUserAgent, mTransports[mActive]);
                 startListener();
                 rtspClient.start();
             }
