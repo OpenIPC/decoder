@@ -18,7 +18,8 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:usesCleartextTraffic="true">
-        <activity android:name="Crash" android:exported="false" />
+        <!-- Separate process: it survives the crashed main process being killed -->
+        <activity android:name="Crash" android:exported="false" android:process=":crash" />
         <activity
             android:name="Decoder"
             android:configChanges="orientation|screenSize|keyboardHidden"
