@@ -39,7 +39,8 @@ class NalAssembler {
     /** Skipping the rest of a fragmented NAL unit whose start was not seen (counted once). */
     private boolean orphan;
     private int lastSeq = -1;
-    private boolean lastCodec;
+    /** -1 until the first packet, then 0 for H.264 and 1 for H.265. */
+    private int lastCodec = -1;
     private int dropped;
 
     NalAssembler(int bufferSize, Runnable onCodecSwitch, FramePool framePool) {
@@ -70,10 +71,13 @@ class NalAssembler {
         int start = offset + header;
         end += offset;
 
-        if (lastCodec != codecH265) {
-            lastCodec = codecH265;
+        int codec = codecH265 ? 1 : 0;
+        if (lastCodec != codec) {
+            // The first packet only sets the codec; a real switch releases the decoder
+            boolean switched = lastCodec >= 0;
+            lastCodec = codec;
             reset();
-            onCodecSwitch.run();
+            if (switched) onCodecSwitch.run();
         }
 
         int seq = ((buf[offset + 2] & 0xFF) << 8) | (buf[offset + 3] & 0xFF);

@@ -67,6 +67,15 @@ class AudioManager {
     private final BlockingQueue<byte[]> aacQueue = new ArrayBlockingQueue<>(32);
 
     private volatile AudioConfig config = new AudioConfig();
+    /** While false no AudioTrack or AAC decoder is created (paused activity). */
+    private volatile boolean enabled = true;
+    private final Object trackLock = new Object();
+
+    /** Disabling also closes audio; a worker still running cannot start playback again. */
+    void setEnabled(boolean enabled) {
+        this.enabled = enabled;
+        if (!enabled) closeAudio();
+    }
     private String lastUnsupported;
 
     void shutdown() {
@@ -126,7 +135,10 @@ class AudioManager {
         aacRunning = false;
         aacQueue.clear();
         pcmQueue.clear();
-        AudioTrack track = audioTrackRef.getAndSet(null);
+        AudioTrack track;
+        synchronized (trackLock) {
+            track = audioTrackRef.getAndSet(null);
+        }
         if (track != null) {
             Log.i(TAG, "Close audio decoder");
             try {
@@ -229,6 +241,7 @@ class AudioManager {
     }
 
     private AudioTrack createPcmAudio(int sample, int channels) {
+        if (!enabled) return null;
         int mask = channels == 2 ? AudioFormat.CHANNEL_OUT_STEREO : AudioFormat.CHANNEL_OUT_MONO;
 
         Log.d(TAG, "Create PCM audio (" + sample + "hz, " + channels + "ch)");
@@ -268,7 +281,16 @@ class AudioManager {
             return null;
         }
 
-        AudioTrack old = audioTrackRef.getAndSet(track);
+        AudioTrack old;
+        synchronized (trackLock) {
+            // Paused while the track was being created: do not publish it
+            if (!enabled) {
+                try { track.stop(); } catch (Exception ignored) {}
+                track.release();
+                return null;
+            }
+            old = audioTrackRef.getAndSet(track);
+        }
         if (old != null) {
             try { old.stop(); } catch (Exception ignored) {}
             old.release();
@@ -386,9 +408,9 @@ class AudioManager {
     }
 
     private void ensureAacDecoder(AudioConfig c, boolean adts) {
-        if (aacDecoder != null || audioFailed) return;
+        if (aacDecoder != null || audioFailed || !enabled) return;
         synchronized (aacDecoderLock) {
-            if (aacDecoder != null || audioFailed) return;
+            if (aacDecoder != null || audioFailed || !enabled) return;
 
             Log.d(TAG, "Creating AAC decoder (" + c.sampleRate + "hz, " + c.channels + "ch, "
                     + (adts ? "ADTS" : "raw") + ")");

@@ -231,7 +231,12 @@ public class Decoder extends Activity
                 quadViews[idx].setOnClickListener(cv ->
                         menuManager.showMenu(menuAnchor, quadEnabled, mActive, mVersion,
                                 BuildConfig.GIT_HASH, mHosts));
-                lr.addView(quadViews[idx], new LinearLayout.LayoutParams(
+                // Each cell is a FrameLayout so overlays can be stacked on the video
+                FrameLayout cell = new FrameLayout(this);
+                cell.addView(quadViews[idx], new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT));
+                lr.addView(cell, new LinearLayout.LayoutParams(
                         0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
             }
         }
@@ -326,21 +331,32 @@ public class Decoder extends Activity
             edit.apply();
         }
 
-        mActive = 0;
-        quadEnabled = false;
+        // Restore the last camera and mode (#22); both are saved but were never read back
+        mActive = clampSlot(pref.getInt("active", 0));
+        quadEnabled = pref.getBoolean("quad_enabled", false);
         for (int i = 0; i < CAM_COUNT; i++) {
             mHosts[i] = pref.getString("host_" + i, DEFAULT_URL);
         }
-        applyActiveCamera();
 
         Intent intent = getIntent();
         String link = intent.getStringExtra(Intent.EXTRA_TEXT);
         if (link != null) {
             Log.d(TAG, "Link: " + Uri.parse(link).getHost());
             mHosts[mActive] = sanitizeUrl(link);
-            mHost = mHosts[mActive];
+            // A shared link is meant to be watched: single view, and saved so that it is
+            // still there after the next pause/resume
+            quadEnabled = false;
+            pref.edit()
+                    .putString("host_" + mActive, mHosts[mActive])
+                    .putBoolean("quad_enabled", false)
+                    .apply();
             intent.removeExtra(Intent.EXTRA_TEXT);
         }
+        applyActiveCamera();
+    }
+
+    static int clampSlot(int slot) {
+        return slot >= 0 && slot < CAM_COUNT ? slot : 0;
     }
 
     static String sanitizeUrl(String url) {
@@ -464,13 +480,11 @@ public class Decoder extends Activity
         closeDecoder();
         closeAudio();
         nalQueue.clear();
-        if (executor != null) {
-            executor.shutdownNow();
-            executor = null;
-        }
+        stopExecutor();
 
         mSurface.setVisibility(View.GONE);
         quadContainer.setVisibility(View.VISIBLE);
+        ensureQuadLaidOut();
         removeClearOverlay();
 
         quadCells = new QuadCell[4];
@@ -502,6 +516,26 @@ public class Decoder extends Activity
         mSurface.setVisibility(View.VISIBLE);
     }
 
+    /**
+     * Seen on an Android 10 TV box: after the window briefly lost visibility (a task brought
+     * to the front by another start), the Quad container stayed at 0x0 with no layout pass
+     * scheduled, so the cells never got a surface. Check once it should have been laid out
+     * and force a pass if not.
+     */
+    private void ensureQuadLaidOut() {
+        quadContainer.postDelayed(() -> {
+            if (!quadEnabled || quadContainer.getWidth() > 0) return;
+            Log.w(TAG, "Quad layout did not happen, forcing a layout pass");
+            View decor = getWindow().getDecorView();
+            for (View v = quadContainer; v != null && v != decor;
+                 v = v.getParent() instanceof View ? (View) v.getParent() : null) {
+                v.forceLayout();
+            }
+            decor.requestLayout();
+            decor.invalidate();
+        }, 500);
+    }
+
     /** Clear the video view so no stale frame lingers. */
     private void clearVideo() {
         if (mSurface == null) return;
@@ -528,7 +562,8 @@ public class Decoder extends Activity
         for (int i = 0; i < 4; i++) {
             TextureView t = quadViews[i];
             if (t == null) continue;
-            View overlay = t.findViewWithTag("quad_overlay_" + i);
+            FrameLayout cell = (FrameLayout) t.getParent();
+            View overlay = cell.findViewWithTag("quad_overlay_" + i);
             if (overlay == null) {
                 overlay = new View(this);
                 overlay.setTag("quad_overlay_" + i);
@@ -536,7 +571,7 @@ public class Decoder extends Activity
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT));
                 overlay.setBackgroundColor(Color.BLACK);
-                ((FrameLayout) t.getParent()).addView(overlay);
+                cell.addView(overlay);
             }
             overlay.setVisibility(View.VISIBLE);
             overlay.bringToFront();
@@ -546,7 +581,7 @@ public class Decoder extends Activity
     private void removeQuadOverlay(int index) {
         if (index < 0 || index >= quadViews.length || quadViews[index] == null) return;
         TextureView t = quadViews[index];
-        View overlay = t.findViewWithTag("quad_overlay_" + index);
+        View overlay = ((View) t.getParent()).findViewWithTag("quad_overlay_" + index);
         if (overlay != null) {
             overlay.setVisibility(View.GONE);
         }
@@ -673,9 +708,10 @@ public class Decoder extends Activity
     // ====================== Video decode thread ======================
 
     private void startListener() {
-        listenerGen++;
+        // Stop the previous pool first (#23): stopExecutor() bumps listenerGen itself, so the
+        // generation for the new threads must be taken after it
+        stopExecutor();
         final int gen = listenerGen;
-
         executor = Executors.newFixedThreadPool(2);
 
         // Video decode thread
@@ -685,9 +721,12 @@ public class Decoder extends Activity
                 try {
                     Frame buffer = nalQueue.poll(5, TimeUnit.MILLISECONDS);
                     if (buffer != null) {
-                        boolean needCreate = videoDecoder.decodeFrame(buffer, codecH265, 0);
+                        if (videoDecoder.decodeFrame(buffer, codecH265, 0)) {
+                            createDecoder();
+                            // The frame that triggered creation (often the SPS) goes in too
+                            videoDecoder.decodeFrame(buffer, codecH265, 0);
+                        }
                         framePool.recycle(buffer);
-                        if (needCreate) createDecoder();
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -701,7 +740,7 @@ public class Decoder extends Activity
         // Audio playback thread
         executor.execute(() -> {
             Thread.currentThread().setName("rtsp-audio");
-            while (gen == listenerGen) {
+            while (gen == listenerGen && !Thread.currentThread().isInterrupted()) {
                 audioManager.playPcmFrame();
             }
         });
@@ -712,8 +751,12 @@ public class Decoder extends Activity
     @Override
     protected void onPause() {
         super.onPause();
+        mResumed = false;
         menuManager.onPauseDismissBrowser();
+        stopStreams();
+    }
 
+    private void stopStreams() {
         if (quadCells != null) {
             for (QuadCell cell : quadCells) {
                 if (cell != null) cell.stop();
@@ -725,21 +768,23 @@ public class Decoder extends Activity
         if (rtspClient != null) {
             rtspClient.stop();
         }
+        // Disabled first: the decode thread can no longer create a decoder after this
+        videoDecoder.setEnabled(false);
+        // Same for audio: a worker still running cannot start playback again. Nothing to wait
+        // for on the UI thread (#32: this used to block it for seconds)
+        audioManager.setEnabled(false);
+        stopExecutor();
+        nalQueue.clear();
+    }
+
+    private void stopExecutor() {
+        // Invalidate the loops first: shutdownNow() alone left the audio loop spinning on
+        // InterruptedException at 100% CPU (seen on the device after entering Quad)
+        listenerGen++;
         if (executor != null) {
             executor.shutdownNow();
-            try {
-                if (!executor.awaitTermination(2, TimeUnit.SECONDS)) {
-                    executor.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                executor.shutdownNow();
-                Thread.currentThread().interrupt();
-            }
             executor = null;
         }
-        closeDecoder();
-        closeAudio();
-        nalQueue.clear();
     }
 
     @Override
@@ -748,14 +793,36 @@ public class Decoder extends Activity
         audioManager.shutdown();
     }
 
+    /** A link shared while the app is open arrives here; onResume() then applies it. */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        // Android 10+ may deliver it to the resumed activity without onPause()/onResume():
+        // apply the shared link now
+        if (mResumed) {
+            stopStreams();
+            startStreams();
+        }
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
+        mResumed = true;
+        startStreams();
+    }
 
+    private boolean mResumed;
+
+    private void startStreams() {
         loadSettings();
+        videoDecoder.setEnabled(true);
+        audioManager.setEnabled(true);
         if (quadEnabled) {
             mSurface.setVisibility(View.GONE);
             quadContainer.setVisibility(View.VISIBLE);
+            ensureQuadLaidOut();
             if (quadCells != null) {
                 for (QuadCell cell : quadCells) {
                     if (cell != null) cell.stop();
@@ -773,6 +840,9 @@ public class Decoder extends Activity
             getSharedPreferences("settings", MODE_PRIVATE).edit()
                     .putBoolean("quad_enabled", true).apply();
         } else {
+            // The views may still be in Quad layout from before the pause
+            quadContainer.setVisibility(View.GONE);
+            mSurface.setVisibility(View.VISIBLE);
             boolean configured = mHost != null && !mHost.isEmpty() && !mHost.equals(DEFAULT_URL);
             if (configured) {
                 rtspClient.configure(mHost, mUserAgent);

@@ -59,4 +59,16 @@ public class RtspUrlTest {
                 () -> RtspSession.Url.parse("rtsp://admin%0D%0AX-Injected:%201:pw@cam/s"));
         assertThrows(IOException.class, () -> RtspSession.Url.parse("rtsp://admin:p%0Aw@cam/s"));
     }
+
+    @Test
+    public void credentialsAreRedactedForLogs() {
+        // #55
+        assertEquals("Content-Base: rtsp://172.17.32.53/user=admin_password=***_channel=1_stream=0.sdp/",
+                RtspSession.redact("Content-Base: rtsp://172.17.32.53/user=admin_password=s3cr3t"
+                        + "_channel=1_stream=0.sdp/"));
+        assertEquals("rtsp://***@cam:554/stream=0",
+                RtspSession.redact("rtsp://root:12345@cam:554/stream=0"));
+        assertEquals("http://***@cam/?pwd=***&x=1", RtspSession.redact("http://a:b@cam/?pwd=zz&x=1"));
+        assertEquals("RTSP/1.0 200 OK", RtspSession.redact("RTSP/1.0 200 OK"));
+    }
 }

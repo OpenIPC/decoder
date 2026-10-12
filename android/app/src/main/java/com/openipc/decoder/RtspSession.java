@@ -138,6 +138,8 @@ class RtspSession {
             try {
                 played = connect(gen);
             } catch (Exception e) {
+                // stop() closes the socket on purpose: not a connection failure
+                if (gen != generation) break;
                 failures++;
                 if (failures <= 3 || failures % 10 == 0) {
                     Log.w(TAG, tag + ": RTSP connection failed (" + failures + "): "
@@ -444,7 +446,7 @@ class RtspSession {
 
         String status = readLine(in);
         if (status == null) throw new IOException("Server closed connection during handshake");
-        Log.i(TAG, status);
+        Log.i(TAG, redact(status));
         String[] parts = status.split(" ", 3);
         if (parts.length < 2 || !parts[0].startsWith("RTSP/")) {
             throw new IOException("Malformed RTSP response: " + status);
@@ -458,7 +460,7 @@ class RtspSession {
 
         String line;
         while ((line = readLine(in)) != null && !line.isEmpty()) {
-            Log.d(TAG, line);
+            Log.d(TAG, redact(line));
             int colon = line.indexOf(':');
             if (colon > 0) {
                 String name = line.substring(0, colon).trim().toLowerCase(Locale.ROOT);
@@ -487,6 +489,21 @@ class RtspSession {
             r.body = body.toString("UTF-8");
         }
         return r;
+    }
+
+    private static final java.util.regex.Pattern USERINFO =
+            java.util.regex.Pattern.compile("(?i)(rtsps?|https?)://[^/@\\s]*@");
+    private static final java.util.regex.Pattern PASSWORD_PARAM =
+            java.util.regex.Pattern.compile("(?i)(pass(?:word)?|pwd)=[^_&;/?\\s]*");
+
+    /**
+     * Text safe for logs: "user:password@" and password parameters (some cameras put
+     * them in the URL path, e.g. user=admin_password=...) are replaced (#55).
+     */
+    static String redact(String s) {
+        if (s == null) return null;
+        s = USERINFO.matcher(s).replaceAll("$1://***@");
+        return PASSWORD_PARAM.matcher(s).replaceAll("$1=***");
     }
 
     /** Read a body of unknown length: everything until 300 ms of silence, at most 64 KiB. */
@@ -606,7 +623,7 @@ class RtspSession {
             if (url == null) throw new IOException("Camera slot not configured");
             url = url.trim();
             int schemeEnd = url.indexOf("://");
-            if (schemeEnd <= 0) throw new IOException("Invalid RTSP URL: " + url);
+            if (schemeEnd <= 0) throw new IOException("Invalid RTSP URL: " + redact(url));
             String scheme = url.substring(0, schemeEnd).toLowerCase(Locale.ROOT);
             int authStart = schemeEnd + 3;
             int pathStart = authStart;
@@ -634,7 +651,7 @@ class RtspSession {
             String hostPort = authority;
             if (hostPort.startsWith("[")) {
                 int close = hostPort.indexOf(']');
-                if (close < 0) throw new IOException("Invalid IPv6 host: " + url);
+                if (close < 0) throw new IOException("Invalid IPv6 host: " + redact(url));
                 u.host = hostPort.substring(1, close);
                 hostPort = hostPort.substring(close + 1);
                 if (hostPort.startsWith(":")) u.port = parsePort(hostPort.substring(1), url);
@@ -657,7 +674,7 @@ class RtspSession {
                 int p = Integer.parseInt(s);
                 if (p > 0 && p < 65536) return p;
             } catch (NumberFormatException ignored) {}
-            throw new IOException("Invalid port in URL: " + url);
+            throw new IOException("Invalid port in URL: " + redact(url));
         }
 
         private static String percentDecode(String s) {
