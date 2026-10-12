@@ -30,7 +30,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * Handshake (DESCRIBE, SETUP, PLAY), SDP parsing, the receive loop (RTP interleaved in the
  * RTSP connection, or over UDP, #67), a watchdog and reconnection with capped back-off. Used
  * by the single view (RtspClient) and by every Quad cell. Packets are delivered on the
- * network thread; channel 0 is video, channel 2 audio.
+ * network thread; channel 0 is video, channel 2 audio. A udp:// or rtp:// URL is not RTSP:
+ * the camera pushes plain RTP to us (Majestic "outgoing", #68), see {@link RtpListener}.
  */
 class RtspSession {
     private static final String TAG = "OpenIPCDecoder";
@@ -85,6 +86,10 @@ class RtspSession {
     private UdpReceiver udp;
     /** The UDP receive loop is running: closing ends it, the network thread closes the rest. */
     private boolean udpPlaying;
+    /** Listener of a udp:// slot, else null. */
+    private RtpListener listener;
+    /** A udp:// slot is listening: silence is reported, never "fixed" by a rebind. */
+    private volatile boolean listening;
     private Thread networkThread;
     private Thread watchdogThread;
 
@@ -144,6 +149,7 @@ class RtspSession {
         synchronized (lock) {
             generation++;
             active = false;
+            keepalive = null;
             closeSocketLocked();
             if (networkThread != null) networkThread.interrupt();
             if (watchdogThread != null) watchdogThread.interrupt();
@@ -157,6 +163,7 @@ class RtspSession {
      * network thread then sends TEARDOWN, so the server stops sending to our ports.
      */
     private void closeSocketLocked() {
+        if (listener != null) listener.close();
         if (udp != null) {
             udp.close();
             if (udpPlaying) return;
@@ -228,7 +235,8 @@ class RtspSession {
                     }
                 }
             }
-            if (active && System.nanoTime() / 1_000_000 - lastPacketMs > watchdogMs) {
+            if (active && !listening
+                    && System.nanoTime() / 1_000_000 - lastPacketMs > watchdogMs) {
                 Log.w(TAG, tag + ": stream is inactive, reconnecting");
                 active = false;
                 synchronized (lock) {
@@ -245,6 +253,7 @@ class RtspSession {
 
     /** One session from connect to disconnect. Returns true if PLAY succeeded. */
     private boolean connect(int gen) throws IOException {
+        if (RtpListener.Url.matches(url)) return listen(gen, RtpListener.Url.parse(url));
         Url u = Url.parse(url);
         Socket s = new Socket();
         synchronized (lock) {
@@ -398,6 +407,80 @@ class RtspSession {
             try {
                 s.close();
             } catch (IOException ignored) {}
+        }
+    }
+
+    /**
+     * Receive RTP pushed to us (#68). The codec follows the payload type unless the URL
+     * forces one: 96 is H.264 and 97 H.265, and a switch between them on the camera is
+     * followed. Returns true once listening, like a PLAY that succeeded.
+     */
+    private boolean listen(int gen, RtpListener.Url u) throws IOException {
+        RtpListener l = new RtpListener(tag, u);
+        synchronized (lock) {
+            if (gen != generation) {
+                l.close();
+                return false;
+            }
+            listener = l;
+            listening = true;
+            // No RTSP here: nothing of an older connection may be sent by the watchdog
+            keepalive = null;
+            lastPacketMs = System.nanoTime() / 1_000_000;
+            streamBytes = 0;
+            bitrateMarkNs = System.nanoTime();
+            active = true;
+        }
+        try {
+            Log.i(TAG, tag + ": listening for RTP on UDP port " + u.port
+                    + (u.multicast() ? ", group " + u.address.getHostAddress() : ""));
+            status(gen, "buffering");
+            final Sdp[] current = new Sdp[1];
+            final boolean[] first = {true};
+            l.run(() -> {
+                if (!active || gen != generation) return false;
+                // The sender went quiet: say so, keep listening (a rebind would only lose
+                // packets), and report "connected" again with the next usable one
+                if (!first[0] && System.nanoTime() / 1_000_000 - lastPacketMs > watchdogMs) {
+                    first[0] = true;
+                    status(gen, "disconnected");
+                }
+                return true;
+            }, (buf, offset, length) -> {
+                if (gen != generation || length < 12) return;
+                streamBytes += length;
+                int pt = buf[offset + 1] & 0x7F;
+                Sdp sdp = current[0];
+                // Video is the forced type, or 96/97; anything else (audio) is ignored
+                boolean video = u.pt >= 0 ? pt == u.pt : pt == Sdp.PT_H264 || pt == Sdp.PT_H265;
+                if (video && (sdp == null || sdp.videoPt != pt)) {
+                    sdp = new Sdp();
+                    sdp.videoPt = pt;
+                    sdp.videoH265 = u.h265(pt);
+                    current[0] = sdp;
+                    Log.i(TAG, tag + ": RTP payload type " + pt
+                            + (sdp.videoH265 ? ", H.265" : ", H.264"));
+                    callback.onSdp(sdp);
+                }
+                if (sdp == null || pt != sdp.videoPt) return; // not video, or none yet
+                boolean usable = callback.onPacket(CHANNEL_VIDEO, buf, offset, length);
+                if (usable) {
+                    lastPacketMs = System.nanoTime() / 1_000_000;
+                    if (first[0]) {
+                        first[0] = false;
+                        status(gen, "connected");
+                    }
+                }
+            });
+            return true;
+        } finally {
+            synchronized (lock) {
+                if (listener == l) {
+                    listener = null;
+                    listening = false;
+                }
+            }
+            l.close();
         }
     }
 

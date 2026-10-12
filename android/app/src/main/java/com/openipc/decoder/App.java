@@ -9,14 +9,19 @@
 package com.openipc.decoder;
 
 import android.app.Application;
+import android.content.Context;
 import android.content.Intent;
 import android.os.Process;
 import android.util.Log;
 
 public class App extends Application {
+    /** Application context for code without one (the Wi-Fi multicast lock, #68). */
+    static volatile Context context;
+
     @Override
     public void onCreate() {
         super.onCreate();
+        context = getApplicationContext();
 
         Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
             Log.e("OpenIPCDecoder", "Uncaught exception", throwable);

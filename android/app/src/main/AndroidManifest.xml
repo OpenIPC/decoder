@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Multicast RTP over Wi-Fi (#68): without a multicast lock the driver drops it -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
@@ -9,6 +11,8 @@
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <!-- TVs and set-top boxes have no touchscreen; without this Google Play hides the app there -->
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <!-- The multicast permission must not hide the app on Ethernet-only boxes (#68) -->
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
 
     <!-- For Android 10+ -->
     <application
