@@ -984,6 +984,7 @@ public class Decoder extends Activity
                 c.knowsLoad(), c.knowsLoad() ? c.fullLoad() : 0, lossy);
         pc.paused = c.isPaused();
         pc.playing = c.isPlaying();
+        if (c.knowsLoad()) pc.keyLoad = c.keyLoad();
         return pc;
     }
 

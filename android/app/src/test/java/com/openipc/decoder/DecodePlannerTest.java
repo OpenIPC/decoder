@@ -133,6 +133,30 @@ public class DecodePlannerTest {
     }
 
     @Test
+    public void keyFrameCellsCountInTheLoad() {
+        DecodePlanner p = new DecodePlanner(BUDGET, false);
+        List<DecodePlanner.Cell> cells = keyCells(3, P1080_30);
+        // Each key-frame cell costs a quarter of a 1080p30 stream: two full ones no longer fit
+        for (DecodePlanner.Cell c : cells) c.keyLoad = P1080_30 / 4;
+        long t = 0;
+        for (int i = 0; i < 10; i++, t += 1000) apply(cells, p.step(cells, t));
+        assertEquals(1, full(cells));
+    }
+
+    @Test
+    public void aFailureNeverRaisesTheCapacity() {
+        DecodePlanner p = new DecodePlanner(P1080_30, false);
+        List<DecodePlanner.Cell> cells = keyCells(1, P1080_30);
+        long t = 0;
+        apply(cells, p.step(cells, t));
+        // Losses at a load estimated higher than the capacity: capacity stays
+        cells.get(0).fullLoad = 3 * P1080_30;
+        cells.get(0).lossy = true;
+        for (int i = 0; i < 6; i++, t += 1000) apply(cells, p.step(cells, t));
+        assertTrue(p.capacity() <= P1080_30);
+    }
+
+    @Test
     public void waitsForTheLoadOfAHigherPriorityCell() {
         DecodePlanner p = new DecodePlanner(BUDGET, false);
         List<DecodePlanner.Cell> cells = keyCells(2, P1080_30);

@@ -67,6 +67,9 @@ class QuadCell implements RtspSession.Callback {
     private float outFps;
     /** Frames per second lost because the decoder did not keep up (queue full, no input buffer). */
     private float lostFps;
+    /** Smoothed rates (about 3 s): the per-second ones jump too much to plan with (#85). */
+    private float inAvg;
+    private float outAvg;
     /** Decode only key frames and parameter sets (#85): a fraction of the load. */
     private volatile boolean keyFramesOnly = true;
     /** Just promoted to full rate: skip until the next key frame, the references are missing. */
@@ -268,6 +271,8 @@ class QuadCell implements RtspSession.Callback {
             inFps = Math.max(0, in - lastIn) / sec;
             outFps = Math.max(0, out - lastOut) / sec;
             lostFps = Math.max(0, lost - lastLost) / sec;
+            inAvg = inAvg == 0 ? inFps : 0.7f * inAvg + 0.3f * inFps;
+            outAvg = outAvg == 0 ? outFps : 0.7f * outAvg + 0.3f * outFps;
         }
         lastIn = in;
         lastOut = out;
@@ -287,8 +292,8 @@ class QuadCell implements RtspSession.Callback {
         String size = w > 0 ? w + "×" + h + " " : "";
         String codec = codecH265 ? "H.265" : "H.264";
         if (keyFramesOnly) {
-            String rate = outFps < 10 ? String.format(java.util.Locale.ROOT, "%.1f", outFps)
-                    : String.valueOf(Math.round(outFps));
+            String rate = outAvg < 10 ? String.format(java.util.Locale.ROOT, "%.1f", outAvg)
+                    : String.valueOf(Math.round(outAvg));
             return size + codec + " key frames · " + rate + " fps";
         }
         return size + codec + " " + Math.round(outFps) + "/" + Math.round(inFps) + " fps";
@@ -305,12 +310,17 @@ class QuadCell implements RtspSession.Callback {
 
     /** Resolution and frame rate are known, so the full-rate load can be estimated. */
     boolean knowsLoad() {
-        return decoder.outWidth() > 0 && inFps > 0;
+        return decoder.outWidth() > 0 && inAvg > 0;
     }
 
     /** Macroblocks per second at full rate (#85). */
     long fullLoad() {
-        return DecodePlanner.fullLoad(decoder.outWidth(), decoder.outHeight(), inFps);
+        return DecodePlanner.fullLoad(decoder.outWidth(), decoder.outHeight(), inAvg);
+    }
+
+    /** Macroblocks per second it costs now on key frames only (#85). */
+    long keyLoad() {
+        return DecodePlanner.fullLoad(decoder.outWidth(), decoder.outHeight(), outAvg);
     }
 
     /** A parameter set or a key frame (H.264 IDR; H.265 IRAP). */

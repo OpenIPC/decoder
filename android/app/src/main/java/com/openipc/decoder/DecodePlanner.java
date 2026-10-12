@@ -36,6 +36,8 @@ final class DecodePlanner {
         boolean known;
         /** Macroblocks per second when decoding every frame. */
         long fullLoad;
+        /** Macroblocks per second it costs on key frames only (counts in the load too). */
+        long keyLoad;
         /** The decoder lost frames of this cell in the last sample. */
         boolean lossy;
         /** Connected and decoding: only such cells are demoted or paused (Qodo on #84). */
@@ -99,6 +101,7 @@ final class DecodePlanner {
         for (Cell c : cells) {
             if (c.paused) continue;
             if (c.full && c.known) load += c.fullLoad;
+            else if (!c.full) load += c.keyLoad;
             anyLossy |= c.lossy;
         }
         if (anyLossy) {
@@ -124,7 +127,8 @@ final class DecodePlanner {
                 if (c.full && !c.paused && c.playing && c.known) {
                     // Losses at this load: the capacity is below it, but not below a proven load
                     failedLoad = Math.min(failedLoad, load);
-                    capacity = Math.max(proven, Math.round(load * 0.9));
+                    // Never raised by a failure; not below a proven load
+                    capacity = Math.max(proven, Math.min(capacity, Math.round(load * 0.9)));
                     learnt = true;
                     return change(nowMs, Action.DEMOTE, c.index);
                 }
@@ -144,10 +148,10 @@ final class DecodePlanner {
         for (Cell c : cells) {
             if (c.full || c.paused) continue;
             if (!c.known) return Decision.NONE; // keep the priority order: wait for it
-            boolean fits = load + c.fullLoad <= capacity;
+            long after = load - c.keyLoad + c.fullLoad;
+            boolean fits = after <= capacity;
             // Beyond the capacity only after a quiet period, and never up to a load that failed
-            boolean probe = nowMs - quietSinceMs >= PROBE_QUIET_MS
-                    && load + c.fullLoad < failedLoad;
+            boolean probe = nowMs - quietSinceMs >= PROBE_QUIET_MS && after < failedLoad;
             if (fits || probe) {
                 if (!fits) quietSinceMs = nowMs; // a probe starts a new quiet period
                 return change(nowMs, Action.PROMOTE, c.index);
