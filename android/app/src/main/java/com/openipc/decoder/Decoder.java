@@ -66,7 +66,7 @@ public class Decoder extends Activity
     // --- Shared state ---
     final BlockingQueue<Frame> nalQueue = new ArrayBlockingQueue<>(32);
     final FramePool framePool = new FramePool(50);
-    final NalAssembler nalAssembler = new NalAssembler(1024 * 1024, () -> {
+    final NalAssembler nalAssembler = new NalAssembler(MediaCodecManager.MAX_NAL_SIZE, () -> {
         closeDecoder();
         nalQueue.clear();
     }, framePool);
@@ -704,17 +704,44 @@ public class Decoder extends Activity
 
     // ====================== Screen / zoom ======================
 
+    private static final int REQUEST_STORAGE_FOR_SCREENSHOT = 1;
+
     private void takeScreenshot() {
         if (isTakingScreenshot) return;
-        isTakingScreenshot = true;
+
+        // Android 6-9 save through the shared Pictures folder: needs the runtime permission (#28)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                && Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                && checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] {android.Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                    REQUEST_STORAGE_FOR_SCREENSHOT);
+            return;
+        }
 
         Bitmap bitmap = mSurface.getBitmap();
         if (bitmap == null) {
             Toast.makeText(this, "No video frame available", Toast.LENGTH_SHORT).show();
-            isTakingScreenshot = false;
             return;
         }
+        isTakingScreenshot = true;
+        // Encoding a full-resolution PNG takes long: do it off the UI thread (#35)
+        new Thread(() -> saveScreenshot(bitmap), "screenshot").start();
+    }
 
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode != REQUEST_STORAGE_FOR_SCREENSHOT) return;
+        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
+            takeScreenshot();
+        } else {
+            Toast.makeText(this, "Storage permission is needed to save screenshots",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void saveScreenshot(Bitmap bitmap) {
         String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
         String fileName = "Screenshot_" + timeStamp + ".png";
 
@@ -766,7 +793,7 @@ public class Decoder extends Activity
             }
         }
         bitmap.recycle();
-        isTakingScreenshot = false;
+        runOnUiThread(() -> isTakingScreenshot = false);
     }
 
     private void updateResolution(int width, int height) {
@@ -1004,12 +1031,16 @@ public class Decoder extends Activity
                             mVersion, BuildConfig.GIT_HASH, mHosts);
                 }
                 return true;
-            case KeyEvent.KEYCODE_BACK:
+            // Back is not intercepted here (#30): the menu is a focusable PopupWindow and the
+            // dialogs are Dialogs, which handle back themselves, also as predictive back
+            // gestures (OnBackInvokedDispatcher, Android 13+). Without a popup, back keeps its
+            // default action.
             case KeyEvent.KEYCODE_ESCAPE:
                 if (menuManager.isPopupShowing()) {
                     menuManager.dismissPopup();
                     return true;
                 }
+                return super.onKeyDown(keyCode, event);
             default:
                 return super.onKeyDown(keyCode, event);
         }

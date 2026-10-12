@@ -24,6 +24,9 @@ class MediaCodecManager {
     static final int H264_NAL_SPS = 7;
     static final int H264_NAL_PPS = 8;
 
+    /** Largest NAL unit (single view); 4K key frames at high bitrate can exceed 1 MiB. */
+    static final int MAX_NAL_SIZE = 2 * 1024 * 1024;
+
     private volatile MediaCodec decoder;
     private final Object decoderLock = new Object();
     /** Back-off after failures, instead of giving up for good (#21). */
@@ -125,7 +128,8 @@ class MediaCodecManager {
         String type = codecH265 ? "video/hevc" : "video/avc";
 
         MediaFormat format = MediaFormat.createVideoFormat(type, 1280, 720);
-        format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 1024 * 1024);
+        // Must hold the largest NAL unit the assembler can deliver
+        format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, MAX_NAL_SIZE);
 
         MediaCodec local;
         try {
