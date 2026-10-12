@@ -12,7 +12,7 @@
 A small Android app for watching RTSP streams from IP cameras, with hardware H.264/H.265 decoding. It is built for cameras running [OpenIPC](https://openipc.org) firmware and works on phones, tablets, TVs, set-top boxes and car devices.
 
 <p align="center">
-  <img src="screenshots/photo_menu.jpg" alt="Application screenshot" width="640">
+  <img src="screenshots/quad_menu.jpg" alt="Quad view with three cameras and the menu" width="640">
 </p>
 
 ## Download
