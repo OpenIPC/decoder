@@ -117,8 +117,14 @@ public class DecodePlannerTest {
         assertEquals(2, full(cells));
         // The probe makes the decoder lose frames: the second camera goes back to key frames
         cells.get(0).lossy = true;
-        for (int i = 0; i < DecodePlanner.LOSS_SAMPLES + 3; i++, t += 1000) apply(cells, p.step(cells, t));
+        d = DecodePlanner.Decision.NONE;
+        for (; d.action != DecodePlanner.Action.DEMOTE && t < 60_000; t += 1000) {
+            d = p.step(cells, t);
+            apply(cells, d);
+        }
+        assertEquals(1, d.index);
         assertEquals(1, full(cells));
+        // Demoting it was enough: the losses stop
         cells.get(0).lossy = false;
         // A long quiet period later the same load is not tried again
         for (long end = t + 5 * DecodePlanner.PROBE_QUIET_MS; t < end; t += 1000) {
