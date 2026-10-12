@@ -76,8 +76,12 @@ class AudioManager {
         }
     }
 
+    /** Called on every RTSP (re)connect, before PLAY. */
     void configure(AudioConfig audio) {
         config = audio;
+        // Parameters may differ after a reconnect: the AAC decoder is recreated on the next packet
+        releaseAacDecoder();
+        aacQueue.clear();
         if (!AudioConfig.AAC.equals(audio.codec)) {
             pcmSampleRate = audio.sampleRate;
             pcmChannels = audio.channels;
@@ -129,14 +133,7 @@ class AudioManager {
                 Log.e(TAG, "Audio close exception", e);
             }
         }
-        synchronized (aacDecoderLock) {
-            MediaCodec aac = aacDecoder;
-            if (aac != null) {
-                aacDecoder = null;
-                try { aac.stop(); } catch (Exception ignored) {}
-                try { aac.release(); } catch (Exception ignored) {}
-            }
-        }
+        releaseAacDecoder();
         lastUnsupported = null;
         audioFailed = false;
     }
@@ -280,6 +277,17 @@ class AudioManager {
 
     // ====================== AAC ======================
 
+    private void releaseAacDecoder() {
+        synchronized (aacDecoderLock) {
+            MediaCodec aac = aacDecoder;
+            if (aac != null) {
+                aacDecoder = null;
+                try { aac.stop(); } catch (Exception ignored) {}
+                try { aac.release(); } catch (Exception ignored) {}
+            }
+        }
+    }
+
     private void processAac(AudioConfig c, byte[] data, int start, int end) {
         if (c.sizeLength > 0) {
             // RFC 3640 mpeg4-generic: AU-headers-length (bits), AU headers, then AU data
@@ -291,9 +299,11 @@ class AudioManager {
             if (pos > end) return;
             ensureAacDecoder(c, false);
             boolean first = true;
-            while (bitPos + c.sizeLength <= bitEnd) {
+            while (true) {
+                int headerLen = c.sizeLength + (first ? c.indexLength : c.indexDeltaLength);
+                if (bitPos + headerLen > bitEnd) break;
                 int size = readBits(data, bitPos, c.sizeLength);
-                bitPos += c.sizeLength + (first ? c.indexLength : c.indexDeltaLength);
+                bitPos += headerLen;
                 first = false;
                 // AUs fragmented across packets are not supported
                 if (size <= 0 || pos + size > end) break;
@@ -399,56 +409,63 @@ class AudioManager {
 
     private void aacLoop(MediaCodec codec) {
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+        byte[] pending = null;
         while (aacRunning && !Thread.currentThread().isInterrupted()) {
-            byte[] au;
-            try {
-                au = aacQueue.poll(100, TimeUnit.MILLISECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-            if (au == null) {
-                if (aacDecoder != codec) break;
-                continue;
+            if (pending == null) {
+                try {
+                    pending = aacQueue.poll(20, TimeUnit.MILLISECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
             }
 
             synchronized (aacDecoderLock) {
                 if (aacDecoder != codec) break;
                 try {
-                    int inputId = codec.dequeueInputBuffer(10_000);
-                    if (inputId >= 0) {
-                        ByteBuffer inBuf = codec.getInputBuffer(inputId);
-                        if (inBuf != null) {
-                            inBuf.clear();
-                            inBuf.put(au);
-                            codec.queueInputBuffer(inputId, 0, au.length,
-                                    System.nanoTime() / 1000, 0);
+                    if (pending != null) {
+                        int inputId = codec.dequeueInputBuffer(10_000);
+                        // No free input buffer: keep the access unit and retry after draining
+                        if (inputId >= 0) {
+                            ByteBuffer inBuf = codec.getInputBuffer(inputId);
+                            int len = 0;
+                            if (inBuf != null) {
+                                inBuf.clear();
+                                inBuf.put(pending);
+                                len = pending.length;
+                            }
+                            codec.queueInputBuffer(inputId, 0, len, System.nanoTime() / 1000, 0);
+                            pending = null;
                         }
                     }
-
-                    int outId;
-                    while ((outId = codec.dequeueOutputBuffer(info, 0))
-                            != MediaCodec.INFO_TRY_AGAIN_LATER) {
-                        if (outId == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                            MediaFormat f = codec.getOutputFormat();
-                            pcmSampleRate = f.getInteger(MediaFormat.KEY_SAMPLE_RATE);
-                            pcmChannels = f.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
-                            continue;
-                        }
-                        if (outId < 0) continue;
-                        ByteBuffer outBuf = codec.getOutputBuffer(outId);
-                        if (outBuf != null && info.size > 0) {
-                            byte[] pcm = new byte[info.size];
-                            outBuf.position(info.offset);
-                            outBuf.get(pcm);
-                            offerPcm(pcm);
-                        }
-                        codec.releaseOutputBuffer(outId, false);
-                    }
+                    // Drain on idle iterations too, so the last decoded frame is not held back
+                    drainAacOutput(codec, info);
                 } catch (Exception e) {
                     Log.e(TAG, "AAC decode error", e);
+                    pending = null;
                 }
             }
+        }
+    }
+
+    private void drainAacOutput(MediaCodec codec, MediaCodec.BufferInfo info) {
+        int outId;
+        while ((outId = codec.dequeueOutputBuffer(info, 0)) != MediaCodec.INFO_TRY_AGAIN_LATER) {
+            if (outId == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                MediaFormat f = codec.getOutputFormat();
+                pcmSampleRate = f.getInteger(MediaFormat.KEY_SAMPLE_RATE);
+                pcmChannels = f.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+                continue;
+            }
+            if (outId < 0) continue;
+            ByteBuffer outBuf = codec.getOutputBuffer(outId);
+            if (outBuf != null && info.size > 0) {
+                byte[] pcm = new byte[info.size];
+                outBuf.position(info.offset);
+                outBuf.get(pcm);
+                offerPcm(pcm);
+            }
+            codec.releaseOutputBuffer(outId, false);
         }
     }
 }

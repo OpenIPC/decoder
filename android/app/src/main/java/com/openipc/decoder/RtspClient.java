@@ -518,6 +518,7 @@ class RtspClient {
                 audio.applyFmtp(line.substring(("a=fmtp:" + audio.pt + " ").length()));
             }
         }
+        audio.finish();
         if (controls[0] == null) controls[0] = base + "/trackID=0";
         if (controls[1] == null) controls[1] = base + "/trackID=1";
 

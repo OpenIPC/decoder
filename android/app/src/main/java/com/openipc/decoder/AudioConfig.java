@@ -44,7 +44,6 @@ class AudioConfig {
         String name = parts[0].toUpperCase(java.util.Locale.ROOT);
 
         bigEndian = false;
-        sizeLength = 0;
         if (name.equals("MPEG4-GENERIC") || name.equals("AAC") || name.equals("MP4A")) {
             codec = AAC;
         } else if (name.equals("PCMU")) {
@@ -91,7 +90,18 @@ class AudioConfig {
                 }
             } catch (NumberFormatException ignored) {}
         }
-        if (sizeLength < 0 || sizeLength > 16) sizeLength = 0;
+    }
+
+    /**
+     * Validate after all SDP attributes are applied (rtpmap and fmtp may come in any order).
+     * AAC with an impossible AU-header layout is disabled rather than misparsed.
+     */
+    void finish() {
+        if (AAC.equals(codec) && (sizeLength < 0 || sizeLength > 16
+                || indexLength < 0 || indexLength > 16
+                || indexDeltaLength < 0 || indexDeltaLength > 16)) {
+            codec = NONE;
+        }
     }
 
     private static byte[] parseHex(String hex) {
