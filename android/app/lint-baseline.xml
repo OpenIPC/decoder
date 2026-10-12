@@ -2,28 +2,6 @@
 <issues format="6" by="lint 8.13.1" type="baseline" client="gradle" dependencies="false" name="AGP (8.13.1)" variant="all" version="8.13.1">
 
     <issue
-        id="GestureBackNavigation"
-        message="If intercepting back events, this should be handled through the registration of callbacks; see https://developer.android.com/guide/navigation/custom-back/predictive-back-gesture"
-        errorLine1="            case KeyEvent.KEYCODE_BACK:"
-        errorLine2="                 ~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/openipc/decoder/Decoder.java"
-            line="799"
-            column="18"/>
-    </issue>
-
-    <issue
-        id="UnusedAttribute"
-        message="Attribute `usesCleartextTraffic` is only used in API level 23 and higher (current min is 21)"
-        errorLine1="        android:usesCleartextTraffic=&quot;true&quot;>"
-        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/AndroidManifest.xml"
-            line="20"
-            column="9"/>
-    </issue>
-
-    <issue
         id="DefaultUncaughtExceptionDelegation"
         message="Must call `getDefaultUncaughtExceptionHandler()` to get the existing handler, and call `existingHandler.uncaughtException(thread, throwable)` from your new handler"
         errorLine1="        Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {"
@@ -63,7 +41,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/AndroidManifest.xml"
-            line="27"
+            line="30"
             column="13"/>
     </issue>
 
@@ -96,7 +74,7 @@
         errorLine2="                             ~~~~~">
         <location
             file="src/main/AndroidManifest.xml"
-            line="15"
+            line="16"
             column="30"/>
     </issue>
 
