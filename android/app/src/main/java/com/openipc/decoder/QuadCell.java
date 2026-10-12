@@ -43,6 +43,7 @@ class QuadCell implements RtspSession.Callback {
     private final BlockingQueue<Frame> nalQueue = new ArrayBlockingQueue<>(30);
     private final NalAssembler nalAssembler;
     private final NalAssembler.Sink nalSink;
+    private int queueFullDrops;
     private int lastUnknownPayload = -1;
 
     private ExecutorService executor;
@@ -64,7 +65,10 @@ class QuadCell implements RtspSession.Callback {
         this.session = new RtspSession(tag, this);
         this.nalSink = nal -> {
             if (!nalQueue.offer(nal)) {
-                Log.w(TAG, tag + " queue full, dropping frame");
+                // Rate-limited: one aggregation packet can carry many NAL units
+                if (queueFullDrops++ % 100 == 0) {
+                    Log.w(TAG, tag + " queue full, NAL dropped (" + queueFullDrops + ")");
+                }
                 pool.recycle(nal);
             }
         };
@@ -136,7 +140,14 @@ class QuadCell implements RtspSession.Callback {
             while (running) {
                 try {
                     Frame f = nalQueue.poll(5, TimeUnit.MILLISECONDS);
-                    if (f != null) decode(f);
+                    if (f != null) {
+                        try {
+                            decode(f);
+                        } finally {
+                            // The decoder copied the data: give the buffer back to the pool
+                            cellFramePool.recycle(f);
+                        }
+                    }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;

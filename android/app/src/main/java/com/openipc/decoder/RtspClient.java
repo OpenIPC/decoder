@@ -49,7 +49,10 @@ class RtspClient implements RtspSession.Callback {
         this.nalQueue = nalQueue;
         this.nalSink = nal -> {
             if (!nalQueue.offer(nal)) {
-                Log.w(TAG, "Video queue full, frame dropped");
+                // Rate-limited: one aggregation packet can carry many NAL units
+                if (queueFullDrops++ % 100 == 0) {
+                    Log.w(TAG, "Video queue full, NAL dropped (" + queueFullDrops + ")");
+                }
                 framePool.recycle(nal);
             }
         };
@@ -100,6 +103,7 @@ class RtspClient implements RtspSession.Callback {
     }
 
     private final NalAssembler.Sink nalSink;
+    private int queueFullDrops;
 
     @Override
     public boolean onPacket(int channel, byte[] buf, int offset, int length) {

@@ -139,10 +139,25 @@ public class NalAssemblerTest {
     }
 
     @Test
-    public void continuationWithoutStartIsIgnored() {
+    public void continuationWithoutStartIsIgnoredAndCountedOnce() {
         feed(rtp(0x7C, 0x05, 0xB1), false);
+        feed(rtp(0x7C, 0x05, 0xB2), false);
         feed(rtp(0x7C, 0x45, 0xC1), false);
         assertEquals(0, out.size());
+        assertEquals("one lost unit, not one per piece", 1, nal.droppedCount());
+        // The next orphan unit is a new loss
+        feed(rtp(0x7C, 0x05, 0xD1), false);
+        assertEquals(2, nal.droppedCount());
+    }
+
+    @Test
+    public void otherPacketInterruptsAFragment() {
+        feed(rtp(0x7C, 0x85, 0xA1), false);       // FU start
+        feed(rtp(0x41, 0x01), false);             // single NAL in between
+        feed(rtp(0x7C, 0x45, 0xA2), false);       // continuation must not reuse stale bytes
+        assertEquals(1, out.size());
+        assertArrayEquals(b(0, 0, 0, 1, 0x41, 0x01), out.get(0));
+        assertEquals(1, nal.droppedCount());      // the interrupted unit, counted once
     }
 
     @Test

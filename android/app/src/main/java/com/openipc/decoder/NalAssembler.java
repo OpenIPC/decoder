@@ -36,6 +36,8 @@ class NalAssembler {
     private int nalSize;
     /** A fragmented NAL unit is being collected in nalBuffer. */
     private boolean inFragment;
+    /** Skipping the rest of a fragmented NAL unit whose start was not seen (counted once). */
+    private boolean orphan;
     private int lastSeq = -1;
     private boolean lastCodec;
     private int dropped;
@@ -49,6 +51,7 @@ class NalAssembler {
     void reset() {
         nalSize = 0;
         inFragment = false;
+        orphan = false;
         lastSeq = -1;
     }
 
@@ -78,6 +81,7 @@ class NalAssembler {
         lastSeq = seq;
         if (gap && inFragment) {
             drop("packet loss inside a fragmented NAL unit");
+            orphan = true; // its remaining pieces belong to the unit just counted
         }
 
         int nalHeader = codecH265 ? 2 : 1;
@@ -86,7 +90,17 @@ class NalAssembler {
 
         if (codecH265 ? type == H265_FU : type == H264_FU_A) {
             fragmentUnit(buf, start, end, codecH265, sink);
-        } else if (codecH265 ? type == H265_AP : type == H264_STAP_A) {
+            return true;
+        }
+        // Any other packet ends a fragmented NAL unit that did not finish; its remaining
+        // pieces, if any arrive, belong to the unit counted here
+        if (inFragment) {
+            drop("fragmented NAL unit interrupted by another packet");
+            orphan = true;
+        } else {
+            orphan = false;
+        }
+        if (codecH265 ? type == H265_AP : type == H264_STAP_A) {
             aggregation(buf, start + nalHeader, end, sink);
         } else if (codecH265 ? type == H265_PACI : (type >= 25 && type <= 29)) {
             // PACI, STAP-B, MTAP and FU-B are not used by cameras in non-interleaved mode
@@ -107,6 +121,7 @@ class NalAssembler {
 
         if (first) {
             if (inFragment) drop("fragmented NAL unit without its end");
+            orphan = false;
             nalSize = 0;
             inFragment = true;
             nalBuffer[nalSize++] = 0;
@@ -121,7 +136,14 @@ class NalAssembler {
                 nalBuffer[nalSize++] = (byte) ((buf[start] & 0xE0) | (fu & 0x1F));
             }
         } else if (!inFragment) {
-            // The start was lost (or we joined mid-unit): nothing to attach this piece to
+            // The start was lost (or we joined mid-unit): nothing to attach this piece to.
+            // Count the lost unit once, not once per remaining piece.
+            if (!orphan) {
+                orphan = true;
+                dropped++;
+                logDrop("fragmented NAL unit without its start");
+            }
+            if (last) orphan = false;
             return;
         }
 
@@ -170,6 +192,10 @@ class NalAssembler {
         nalSize = 0;
         inFragment = false;
         dropped++;
+        logDrop(reason);
+    }
+
+    private void logDrop(String reason) {
         if (dropped <= 3 || dropped % 100 == 0) {
             Log.w(TAG, "NAL unit dropped (" + dropped + "): " + reason);
         }
