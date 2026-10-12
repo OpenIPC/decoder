@@ -156,7 +156,7 @@ public class Decoder extends Activity
             public void onCodecChanged(boolean h265, AudioConfig audio) {
                 codecH265 = h265;
                 audioCodec = audio.codec;
-                audioManager.configure(audio);
+                // RtspClient configures the AudioManager itself, on its own audio route
             }
             @Override public void onJitterSample(int avg) {
                 menuManager.updateQuality(avg);
@@ -560,15 +560,7 @@ public class Decoder extends Activity
             String url = mHosts[i];
             if (url == null || url.isEmpty() || url.equals(DEFAULT_URL)) continue;
             quadCells[i] = new QuadCell(i, url, quadViews[i], framePool, mUserAgent,
-                    new QuadCell.Listener() {
-                        @Override public void onRemoveOverlay(int index) {
-                            runOnUiThread(() -> removeQuadOverlay(index));
-                        }
-                        @Override public void onAudioConfig(int index, AudioConfig audio) {
-                            // A (re)connect of the audible cell brings its audio parameters
-                            if (index == quadAudio) audioManager.configure(audio);
-                        }
-                    });
+                    index -> runOnUiThread(() -> removeQuadOverlay(index)));
             quadCells[i].start();
         }
         quadAudio = getSharedPreferences("settings", MODE_PRIVATE).getInt("quad_audio", -1);
@@ -588,13 +580,14 @@ public class Decoder extends Activity
 
     /** Route audio of the selected cell to the AudioManager and update the badges. */
     private void applyQuadAudio() {
-        audioManager.closeAudio();
+        // A new route: audio of a previously selected cell can no longer reach playback
+        int route = audioManager.newRoute();
         QuadCell[] cells = quadCells;
         for (int i = 0; i < 4; i++) {
             QuadCell cell = cells != null ? cells[i] : null;
             boolean on = i == quadAudio && cell != null;
-            if (cell != null) cell.setAudioSink(on ? audioManager : null);
-            if (on) audioManager.configure(cell.getAudioConfig());
+            if (cell != null) cell.setAudioSink(on ? audioManager : null, route);
+            if (on) audioManager.configure(cell.getAudioConfig(), route);
             if (quadAudioBadges[i] != null) {
                 quadAudioBadges[i].setVisibility(on ? View.VISIBLE : View.GONE);
             }
@@ -621,10 +614,11 @@ public class Decoder extends Activity
         QuadCell[] cells = quadCells;
         if (cells != null) {
             for (QuadCell cell : cells) {
-                if (cell != null) cell.setAudioSink(null);
+                if (cell != null) cell.setAudioSink(null, 0);
             }
         }
-        audioManager.closeAudio();
+        // Invalidates in-flight Quad frames and track creation, clears the queues
+        audioManager.newRoute();
         for (TextView badge : quadAudioBadges) {
             if (badge != null) badge.setVisibility(View.GONE);
         }
@@ -806,6 +800,8 @@ public class Decoder extends Activity
         // generation for the new threads must be taken after it
         stopExecutor();
         final int gen = listenerGen;
+        // The single-view stream gets its own audio route (nothing from Quad leaks in)
+        rtspClient.setAudioRoute(audioManager.newRoute());
         executor = Executors.newFixedThreadPool(2);
 
         // Video decode thread

@@ -48,17 +48,18 @@ class QuadCell implements RtspSession.Callback {
 
     interface Listener {
         void onRemoveOverlay(int index);
-
-        /** Audio parameters of this cell's stream (network thread). */
-        default void onAudioConfig(int index, AudioConfig audio) {}
     }
 
     // Audio (#12): every cell sets up its audio track, only the selected one plays it
     private volatile AudioManager audioSink;
+    private volatile int audioRoute;
     private volatile AudioConfig audioConfig = new AudioConfig();
 
-    /** Route this cell's audio to {@code sink}, or mute it with null. */
-    void setAudioSink(AudioManager sink) { this.audioSink = sink; }
+    /** Route this cell's audio to {@code sink} on route {@code route}, or mute it with null. */
+    void setAudioSink(AudioManager sink, int route) {
+        this.audioRoute = route;
+        this.audioSink = sink;
+    }
 
     AudioConfig getAudioConfig() { return audioConfig; }
 
@@ -207,7 +208,9 @@ class QuadCell implements RtspSession.Callback {
         videoPt = sdp.videoPt;
         codecH265 = sdp.videoH265;
         audioConfig = sdp.audio;
-        if (listener != null) listener.onAudioConfig(index, sdp.audio);
+        // A stopped or deselected cell holds an old route: the AudioManager ignores it
+        AudioManager sink = audioSink;
+        if (sink != null) sink.configure(sdp.audio, audioRoute);
     }
 
     @Override
@@ -219,7 +222,7 @@ class QuadCell implements RtspSession.Callback {
                 Frame frame = cellFramePool.obtain(length);
                 System.arraycopy(buf, offset, frame.data(), 0, length);
                 frame.setLength(length);
-                sink.onAudioFrame(frame);
+                sink.onAudioFrame(frame, audioRoute);
                 cellFramePool.recycle(frame);
             }
             return false;

@@ -33,6 +33,8 @@ class RtspClient implements RtspSession.Callback {
     private int lastUnknownPayload = -1;
 
     private AudioManager audioManager;
+    /** Audio route of the current stream (see AudioManager.newRoute()). */
+    private volatile int audioRoute;
 
     interface Listener {
         void onStatusChanged(String status);
@@ -60,6 +62,7 @@ class RtspClient implements RtspSession.Callback {
 
     void setListener(Listener cb) { this.listenerCb = cb; }
     void setAudioManager(AudioManager am) { this.audioManager = am; }
+    void setAudioRoute(int route) { this.audioRoute = route; }
 
     void configure(String host, String userAgent) {
         session.configure(host, userAgent, true);
@@ -98,6 +101,7 @@ class RtspClient implements RtspSession.Callback {
         codecH265 = sdp.videoH265;
         Log.i(TAG, "Video pt " + sdp.videoPt + (sdp.videoH265 ? " H.265" : " H.264")
                 + ", audio " + sdp.audio.codec);
+        if (audioManager != null) audioManager.configure(sdp.audio, audioRoute);
         Listener l = listenerCb;
         if (l != null) l.onCodecChanged(codecH265, sdp.audio);
     }
@@ -115,7 +119,7 @@ class RtspClient implements RtspSession.Callback {
             Frame frame = framePool.obtain(length);
             System.arraycopy(buf, offset, frame.data(), 0, length);
             frame.setLength(length);
-            audioManager.onAudioFrame(frame);
+            audioManager.onAudioFrame(frame, audioRoute);
             framePool.recycle(frame);
         }
         return false;
