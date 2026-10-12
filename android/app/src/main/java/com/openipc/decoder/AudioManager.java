@@ -491,6 +491,8 @@ class AudioManager {
      * a loss (then the rest of that element is skipped).
      */
     static final class LatmAssembler {
+        /** Far above any AAC frame: without markers the buffer would otherwise grow forever. */
+        static final int MAX_ELEMENT = 64 * 1024;
         private final java.io.ByteArrayOutputStream pending = new java.io.ByteArrayOutputStream();
         private int lastSeq = -1;
         private boolean broken;
@@ -502,11 +504,21 @@ class AudioManager {
         }
 
         byte[] push(byte[] data, int start, int end, boolean marker, int seq) {
-            if (lastSeq >= 0 && seq != ((lastSeq + 1) & 0xFFFF) && pending.size() > 0) {
-                broken = true; // a piece of the current element is missing
+            if (lastSeq >= 0 && seq != ((lastSeq + 1) & 0xFFFF)) {
+                // A piece is missing: possibly the start of this element, even when nothing is
+                // pending yet, so skip everything up to the next marker
+                broken = true;
             }
             lastSeq = seq;
-            if (!broken) pending.write(data, start, end - start);
+            if (!broken && pending.size() + (end - start) > MAX_ELEMENT) {
+                Log.w(TAG, "LATM element larger than " + MAX_ELEMENT + " bytes, dropped");
+                broken = true;
+            }
+            if (broken) {
+                pending.reset();
+            } else {
+                pending.write(data, start, end - start);
+            }
             if (!marker) return null;
             byte[] element = broken ? null : pending.toByteArray();
             pending.reset();

@@ -160,8 +160,9 @@ class AudioConfig {
         if (freqIndex >= AAC_RATES.length) return null;         // reserved / explicit rate
         if (channelConfig < 1 || channelConfig > 2) return null; // playback is mono/stereo
         // GASpecificConfig
-        r.bits(1);                                              // frameLengthFlag
-        if (r.bits(1) == 1) r.bits(14);                         // dependsOnCoreCoder
+        // The 2-byte ASC built below carries neither setting, so streams using them are refused
+        if (r.bits(1) != 0) return null;                        // frameLengthFlag: 960 samples
+        if (r.bits(1) != 0) return null;                        // dependsOnCoreCoder
         if (r.bits(1) != 0) return null;                        // extensionFlag
         // Back in StreamMuxConfig
         if (r.bits(3) != 0) return null;  // frameLengthType 0: PayloadLengthInfo in bytes

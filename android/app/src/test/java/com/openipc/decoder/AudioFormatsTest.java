@@ -199,9 +199,30 @@ public class AudioFormatsTest {
     }
 
     @Test
+    public void latmLostFirstPieceDropsTheElement() {
+        AudioManager.LatmAssembler a = new AudioManager.LatmAssembler();
+        assertArrayEquals(new byte[] {1, 7}, a.push(new byte[] {1, 7}, 0, 2, true, 10));
+        // 11 (the start of the next element) is lost: its continuation is not a new element
+        assertNull(a.push(new byte[] {9, 9}, 0, 2, true, 12));
+        assertArrayEquals(new byte[] {1, 8}, a.push(new byte[] {1, 8}, 0, 2, true, 13));
+    }
+
+    @Test
+    public void latmWithoutMarkersStaysBounded() {
+        AudioManager.LatmAssembler a = new AudioManager.LatmAssembler();
+        byte[] chunk = new byte[1000];
+        int seq = 0;
+        for (int i = 0; i < 100; i++) assertNull(a.push(chunk, 0, chunk.length, false, seq++));
+        // The oversized element is dropped; the next one assembles normally
+        assertNull(a.push(chunk, 0, 10, true, seq++));
+        assertArrayEquals(new byte[] {1, 5}, a.push(new byte[] {1, 5}, 0, 2, true, seq));
+    }
+
+    @Test
     public void latmRejectsLayoutsTheRtpPathCannotHandle() {
         // bit offsets in SMC_16K_MONO: 1 sameTimeFraming, 2..7 numSubFrames,
-        // 15..19 objectType, 20..23 freqIndex, 24..27 channels, 31..33 frameLengthType,
+        // 15..19 objectType, 20..23 freqIndex, 24..27 channels, 28 frameLengthFlag,
+        // 29 dependsOnCoreCoder, 31..33 frameLengthType,
         // 42 otherDataPresent, 43 crcCheckPresent
         assertNotNull(AudioConfig.latmToAsc(bits(SMC_16K_MONO)));
         assertNull("not same time framing", AudioConfig.latmToAsc(bits(smcWith(1, "0"))));
@@ -209,6 +230,8 @@ public class AudioFormatsTest {
         assertNull("AAC Main", AudioConfig.latmToAsc(bits(smcWith(15, "00001"))));
         assertNull("reserved rate", AudioConfig.latmToAsc(bits(smcWith(20, "1101"))));
         assertNull("5.1", AudioConfig.latmToAsc(bits(smcWith(24, "0110"))));
+        assertNull("960-sample frames", AudioConfig.latmToAsc(bits(smcWith(28, "1"))));
+        assertNull("depends on core coder", AudioConfig.latmToAsc(bits(smcWith(29, "1"))));
         assertNull("frameLengthType 1", AudioConfig.latmToAsc(bits(smcWith(31, "001"))));
         assertNull("other data", AudioConfig.latmToAsc(bits(smcWith(42, "1"))));
         assertNull("CRC", AudioConfig.latmToAsc(bits(smcWith(43, "1"))));
