@@ -129,6 +129,7 @@ class AudioManager {
         // Parameters may differ after a reconnect: the AAC decoder is recreated on the next packet
         releaseAacDecoder();
         aacQueue.clear();
+        auAssembler.reset();
         if (!AudioConfig.AAC.equals(audio.codec)) {
             pcmSampleRate = audio.sampleRate;
             pcmChannels = audio.channels;
@@ -147,7 +148,18 @@ class AudioManager {
         AudioConfig c = config;
         switch (c.codec) {
             case AudioConfig.AAC:
-                processAac(c, data, start, end, r);
+                processAac(c, data, start, end, (data[1] & 0x80) != 0, r);
+                break;
+            case AudioConfig.LATM:
+                ensureAacDecoder(c, false);
+                for (int[] u : splitLatm(data, start, end)) {
+                    offerAac(Arrays.copyOfRange(data, u[0], u[0] + u[1]), r);
+                }
+                break;
+            case AudioConfig.OPUS:
+                // RFC 7587: one Opus packet per RTP packet
+                ensureAacDecoder(c, false);
+                offerAac(Arrays.copyOfRange(data, start, end), r);
                 break;
             case AudioConfig.PCMU:
                 offerPcm(decodeG711(data, start, end, ULAW_TABLE), r);
@@ -357,12 +369,15 @@ class AudioManager {
         }
     }
 
-    private void processAac(AudioConfig c, byte[] data, int start, int end, int r) {
+    private final AuAssembler auAssembler = new AuAssembler();
+
+    private void processAac(AudioConfig c, byte[] data, int start, int end, boolean marker,
+                            int r) {
         List<int[]> units;
         if (c.sizeLength > 0) {
             ensureAacDecoder(c, false);
-            units = splitAuHeaders(data, start, end,
-                    c.sizeLength, c.indexLength, c.indexDeltaLength);
+            for (byte[] au : auAssembler.push(data, start, end, c, marker)) offerAac(au, r);
+            return;
         } else if (end - start >= 7 && isAdtsSync(data, start)) {
             ensureAacDecoder(c, true);
             units = splitAdts(data, start, end);
@@ -404,6 +419,79 @@ class AudioManager {
         return units;
     }
 
+    /**
+     * RFC 3640 with AUs that may span several RTP packets: complete AUs are returned as
+     * soon as they are whole. A fragment whose pieces do not add up is dropped.
+     */
+    static final class AuAssembler {
+        private byte[] fragment;
+        private int have;
+
+        void reset() { fragment = null; }
+
+        List<byte[]> push(byte[] data, int start, int end, AudioConfig c, boolean marker) {
+            List<byte[]> out = new ArrayList<>();
+            if (end - start < 2) return out;
+            int headerBits = ((data[start] & 0xFF) << 8) | (data[start + 1] & 0xFF);
+            int pos = start + 2 + (headerBits + 7) / 8;
+            if (pos > end || headerBits < c.sizeLength + c.indexLength) return out;
+            int size = readBits(data, (start + 2) * 8, c.sizeLength);
+
+            if (fragment != null) {
+                // Continuation: one AU header with the full AU size, then the next piece
+                int len = end - pos;
+                if (size != fragment.length || have + len > fragment.length) {
+                    fragment = null; // does not belong to the AU being collected
+                } else {
+                    System.arraycopy(data, pos, fragment, have, len);
+                    have += len;
+                    if (have == fragment.length) {
+                        out.add(fragment);
+                        fragment = null;
+                    } else if (marker) {
+                        fragment = null; // last packet of the AU, but pieces are missing
+                    }
+                    return out;
+                }
+            }
+
+            if (size > end - pos && !marker) {
+                // First piece of an AU larger than this packet
+                fragment = new byte[size];
+                have = end - pos;
+                System.arraycopy(data, pos, fragment, 0, have);
+                return out;
+            }
+            for (int[] u : splitAuHeaders(data, start, end,
+                    c.sizeLength, c.indexLength, c.indexDeltaLength)) {
+                out.add(Arrays.copyOfRange(data, u[0], u[0] + u[1]));
+            }
+            return out;
+        }
+    }
+
+    /**
+     * RFC 6416 MP4A-LATM with out-of-band config: each AudioMuxElement is a
+     * PayloadLengthInfo (bytes of 255 plus a final byte, summed) and the AU.
+     */
+    static List<int[]> splitLatm(byte[] data, int start, int end) {
+        List<int[]> units = new ArrayList<>();
+        int pos = start;
+        while (pos < end) {
+            int len = 0;
+            int b;
+            do {
+                if (pos >= end) return units;
+                b = data[pos++] & 0xFF;
+                len += b;
+            } while (b == 0xFF);
+            if (len == 0 || pos + len > end) break;
+            units.add(new int[] {pos, len});
+            pos += len;
+        }
+        return units;
+    }
+
     /** ADTS frames: {offset, length} of each complete frame, stopping at bad sync or length. */
     static List<int[]> splitAdts(byte[] data, int start, int end) {
         List<int[]> frames = new ArrayList<>();
@@ -441,6 +529,26 @@ class AudioManager {
         }
     }
 
+    /** Opus identification header (RFC 7845) used as csd-0. */
+    static byte[] opusHead(int channels) {
+        ByteBuffer b = ByteBuffer.allocate(19).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        b.put("OpusHead".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        b.put((byte) 1);               // version
+        b.put((byte) channels);
+        b.putShort((short) 0);         // pre-skip
+        b.putInt(48000);               // input sample rate
+        b.putShort((short) 0);         // output gain
+        b.put((byte) 0);               // mapping family 0: mono or stereo
+        return b.array();
+    }
+
+    private static ByteBuffer nanos(long ns) {
+        ByteBuffer b = ByteBuffer.allocate(8).order(java.nio.ByteOrder.nativeOrder());
+        b.putLong(ns);
+        b.flip();
+        return b;
+    }
+
     /** AAC-LC AudioSpecificConfig built from the sample rate and channel count. */
     static byte[] buildAacConfig(int sampleRate, int channels) {
         int index = 4; // 44100
@@ -459,11 +567,17 @@ class AudioManager {
         synchronized (aacDecoderLock) {
             if (aacDecoder != null || audioFailed || !enabled) return;
 
-            Log.d(TAG, "Creating AAC decoder (" + c.sampleRate + "hz, " + c.channels + "ch, "
-                    + (adts ? "ADTS" : "raw") + ")");
-            MediaFormat fmt = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC,
-                    c.sampleRate, c.channels);
-            if (adts) {
+            boolean opus = AudioConfig.OPUS.equals(c.codec);
+            String mime = opus ? MediaFormat.MIMETYPE_AUDIO_OPUS : MediaFormat.MIMETYPE_AUDIO_AAC;
+            Log.d(TAG, "Creating " + c.codec + " decoder (" + c.sampleRate + "hz, " + c.channels
+                    + "ch" + (opus ? "" : adts ? ", ADTS" : ", raw") + ")");
+            MediaFormat fmt = MediaFormat.createAudioFormat(mime, c.sampleRate, c.channels);
+            if (opus) {
+                fmt.setByteBuffer("csd-0", ByteBuffer.wrap(opusHead(c.channels)));
+                // Codec delay and seek pre-roll in ns; RTP does not carry the pre-skip
+                fmt.setByteBuffer("csd-1", nanos(0));
+                fmt.setByteBuffer("csd-2", nanos(80_000_000L));
+            } else if (adts) {
                 fmt.setInteger(MediaFormat.KEY_IS_ADTS, 1);
             } else {
                 byte[] asc = c.aacConfig != null ? c.aacConfig
@@ -475,7 +589,7 @@ class AudioManager {
 
             MediaCodec codec;
             try {
-                codec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_AUDIO_AAC);
+                codec = MediaCodec.createDecoderByType(mime);
                 try {
                     codec.configure(fmt, null, null, 0);
                     codec.start();
@@ -484,7 +598,7 @@ class AudioManager {
                     throw e;
                 }
             } catch (Exception e) {
-                Log.e(TAG, "Cannot create AAC decoder, audio disabled", e);
+                Log.e(TAG, "Cannot create " + c.codec + " decoder, audio disabled", e);
                 audioFailed = true;
                 return;
             }

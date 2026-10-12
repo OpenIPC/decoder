@@ -95,7 +95,7 @@ public class SdpParserTest {
 
     @Test
     public void unsupportedAndMissingAudio() {
-        AudioConfig a = parse("m=audio 0 RTP/AVP 111\r\na=rtpmap:111 opus/48000/2\r\n", "rtsp://x").audio;
+        AudioConfig a = parse("m=audio 0 RTP/AVP 111\r\na=rtpmap:111 G726-32/8000\r\n", "rtsp://x").audio;
         assertEquals(AudioConfig.NONE, a.codec);
 
         AudioConfig b = parse("m=video 0 RTP/AVP 96\r\n", "rtsp://x").audio;

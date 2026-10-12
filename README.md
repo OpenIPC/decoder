@@ -34,7 +34,7 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 ## Features
 
 - **Video:** RTSP playback, hardware H.264/H.265 decoding via MediaCodec
-- **Audio:** AAC (RFC 3640 `mpeg4-generic`, ADTS), G.711 μ-law/A-law, L16 PCM (mono/stereo)
+- **Audio:** AAC (RFC 3640 `mpeg4-generic`, ADTS, MP4A-LATM), Opus, G.711 μ-law/A-law, L16 PCM (mono/stereo)
 - **Display:** single camera, or Quad mode with 4 cameras at once
 - **Controls:** pinch-to-zoom, pan, double-tap to reset, Android TV remote (Leanback launcher)
 - **Network:** Basic and Digest authentication, RTSP keepalive, automatic reconnection with exponential back-off, connection-quality indicator
@@ -93,7 +93,7 @@ Shows all configured slots in a 2×2 grid. Each cell has its own connection and 
 >
 > - **RTSP over TCP only.** No UDP or multicast — [#7](https://github.com/OpenIPC/decoder/issues/7)
 > - **Only 4 camera slots** — [#13](https://github.com/OpenIPC/decoder/issues/13)
-> - **Audio formats not supported:** MP4A-LATM, Opus, G.726, and AAC frames split across RTP packets — [#14](https://github.com/OpenIPC/decoder/issues/14)
+> - **G.726 audio is not supported** — [#14](https://github.com/OpenIPC/decoder/issues/14)
 > - **Possible dependency on Google services (GAPPS)** on some devices; under investigation, so disable GAPPS with care — [#15](https://github.com/OpenIPC/decoder/issues/15)
 > - **Credentials are stored and sent in clear text** (plain RTSP/HTTP; Basic auth is sent unless the camera asks for Digest) — [#16](https://github.com/OpenIPC/decoder/issues/16)
 >

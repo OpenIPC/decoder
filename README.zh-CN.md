@@ -34,7 +34,7 @@
 ## 功能
 
 - **视频：** RTSP 播放，通过 MediaCodec 进行 H.264/H.265 硬件解码
-- **音频：** AAC（RFC 3640 `mpeg4-generic`、ADTS）、G.711 μ-law/A-law、L16 PCM（单声道/立体声）
+- **音频：** AAC（RFC 3640 `mpeg4-generic`、ADTS、MP4A-LATM）、Opus、G.711 μ-law/A-law、L16 PCM（单声道/立体声）
 - **显示：** 单路画面，或 Quad 四分屏（同时显示 4 路摄像机）
 - **操作：** 双指缩放、拖动平移、双击复位，支持 Android TV 遥控器（Leanback 启动器）
 - **网络：** 支持 Basic 和 Digest 认证、RTSP 保活，断线后自动重连（指数退避），连接质量指示
@@ -93,7 +93,7 @@
 >
 > - **仅支持 RTSP over TCP**，不支持 UDP 和组播 — [#7](https://github.com/OpenIPC/decoder/issues/7)
 > - **仅有 4 个摄像机槽位** — [#13](https://github.com/OpenIPC/decoder/issues/13)
-> - **不支持的音频格式：** MP4A-LATM、Opus、G.726，以及跨多个 RTP 包分片的 AAC 帧 — [#14](https://github.com/OpenIPC/decoder/issues/14)
+> - **不支持 G.726 音频** — [#14](https://github.com/OpenIPC/decoder/issues/14)
 > - **部分设备上可能依赖 Google 服务（GAPPS）**，仍在调查中，请谨慎禁用 GAPPS — [#15](https://github.com/OpenIPC/decoder/issues/15)
 > - **用户名和密码以明文存储和传输**（未加密的 RTSP/HTTP；摄像机未要求 Digest 时发送 Basic） — [#16](https://github.com/OpenIPC/decoder/issues/16)
 >
