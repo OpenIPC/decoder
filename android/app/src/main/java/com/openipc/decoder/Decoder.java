@@ -601,7 +601,9 @@ public class Decoder extends Activity
         final int gen = ++quadAudioGen;
         quadAudioExecutor = Executors.newSingleThreadExecutor(r -> new Thread(r, "quad-audio"));
         quadAudioExecutor.execute(() -> {
-            while (gen == quadAudioGen) audioManager.playPcmFrame();
+            while (gen == quadAudioGen && !Thread.currentThread().isInterrupted()) {
+                audioManager.playPcmFrame();
+            }
         });
     }
 
