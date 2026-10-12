@@ -47,6 +47,12 @@ class RtspClient implements RtspSession.Callback {
         this.framePool = framePool;
         this.nalAssembler = nalAssembler;
         this.nalQueue = nalQueue;
+        this.nalSink = nal -> {
+            if (!nalQueue.offer(nal)) {
+                Log.w(TAG, "Video queue full, frame dropped");
+                framePool.recycle(nal);
+            }
+        };
     }
 
     void setListener(Listener cb) { this.listenerCb = cb; }
@@ -93,30 +99,27 @@ class RtspClient implements RtspSession.Callback {
         if (l != null) l.onCodecChanged(codecH265, sdp.audio);
     }
 
+    private final NalAssembler.Sink nalSink;
+
     @Override
     public boolean onPacket(int channel, byte[] buf, int offset, int length) {
         if (length < 12) return false;
-        Frame frame = framePool.obtain(length);
-        System.arraycopy(buf, offset, frame.data(), 0, length);
-        frame.setLength(length);
-
-        boolean usable = false;
         if (channel == RtspSession.CHANNEL_VIDEO) {
-            usable = processVideo(frame);
-        } else if (channel == RtspSession.CHANNEL_AUDIO && audioManager != null) {
-            audioManager.onAudioFrame(frame);
+            return processVideo(buf, offset, length);
         }
-        framePool.recycle(frame);
-        return usable;
+        if (channel == RtspSession.CHANNEL_AUDIO && audioManager != null) {
+            Frame frame = framePool.obtain(length);
+            System.arraycopy(buf, offset, frame.data(), 0, length);
+            frame.setLength(length);
+            audioManager.onAudioFrame(frame);
+            framePool.recycle(frame);
+        }
+        return false;
     }
 
-    /** Returns false for packets of the wrong payload type or with unsupported headers. */
-    private boolean processVideo(Frame frame) {
-        byte[] data = frame.data();
-        // CSRC and header extensions are not supported for video yet (#10)
-        if ((data[0] & 0x0F) != 0 || (data[0] & 0x10) != 0) return false;
-
-        int payload = data[1] & 0x7F;
+    /** Returns false for packets of the wrong payload type or with a malformed header. */
+    private boolean processVideo(byte[] data, int offset, int length) {
+        int payload = data[offset + 1] & 0x7F;
         if (payload != videoPt) {
             if (payload != lastUnknownPayload) {
                 lastUnknownPayload = payload;
@@ -125,17 +128,12 @@ class RtspClient implements RtspSession.Callback {
             return false;
         }
 
-        updateJitter(data);
-
-        Frame output = nalAssembler.assemble(frame, codecH265);
-        if (output != null && !nalQueue.offer(output)) {
-            Log.w(TAG, "Video queue full, frame dropped");
-            framePool.recycle(output);
-        }
+        if (!nalAssembler.assemble(data, offset, length, codecH265, nalSink)) return false;
+        updateJitter(data, offset);
         return true;
     }
 
-    private void updateJitter(byte[] data) {
+    private void updateJitter(byte[] data, int offset) {
         long now = SystemClock.elapsedRealtime();
         if (now - lastQualityUpdateTime > 1000) {
             lastQualityUpdateTime = now;
@@ -146,10 +144,10 @@ class RtspClient implements RtspSession.Callback {
             jitterAccumulator = 0;
             jitterSampleCount = 0;
         }
-        long rtpTs = Integer.toUnsignedLong(((data[4] & 0xFF) << 24)
-                | ((data[5] & 0xFF) << 16)
-                | ((data[6] & 0xFF) << 8)
-                | (data[7] & 0xFF));
+        long rtpTs = Integer.toUnsignedLong(((data[offset + 4] & 0xFF) << 24)
+                | ((data[offset + 5] & 0xFF) << 16)
+                | ((data[offset + 6] & 0xFF) << 8)
+                | (data[offset + 7] & 0xFF));
         long arrivalNs = System.nanoTime();
         if (lastRtpTimestamp >= 0 && lastRtpArrivalNs >= 0) {
             long rtpDeltaMs = (rtpTs - lastRtpTimestamp) / 90L;
