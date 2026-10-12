@@ -47,6 +47,9 @@ class MenuManager {
     private LinearLayout mMenuLayout;
     private TextView[] mCachedCamButtons;
     private TextView mCachedQuadBtn;
+    private TextView mCachedUdpBtn;
+    /** The UDP RTP view is shown: neither a slot nor multi-view is active. */
+    private boolean udpShown;
     private boolean mMenuIsCached;
     private TextView mSettingsBtn;
     private TextView mWebUiBtn;
@@ -57,6 +60,8 @@ class MenuManager {
     interface Listener {
         void onSwitchCamera(int slot);
         void onToggleQuad();
+        /** U: the reserved UDP RTP cell full-screen (#68). */
+        void onShowUdp();
         void onExit();
         void onShowSettings();
         void onSaveSettings();
@@ -85,8 +90,10 @@ class MenuManager {
         }
     }
 
+    void setUdpShown(boolean shown) { udpShown = shown; }
+
     void applyQualityToActive(boolean quadEnabled, int mActive) {
-        if (camButtons != null && !quadEnabled) {
+        if (camButtons != null && !quadEnabled && !udpShown) {
             camButtons[mActive].setTextColor(mActiveQualityColor);
         }
     }
@@ -102,6 +109,7 @@ class MenuManager {
 
     void showMenu(View anchor, boolean quadEnabled, int mActive, String version,
                   String gitHash, String[] mHosts) {
+        boolean single = !quadEnabled && !udpShown;
         if (mMenuIsCached) {
             updateCachedMenu(quadEnabled, mActive, mHosts);
             if (mMenuPopup != null) return;
@@ -153,7 +161,7 @@ class MenuManager {
 
         mSettingsBtn = createItem("Settings");
         layout.addView(mSettingsBtn);
-        mSettingsBtn.setVisibility(quadEnabled ? View.GONE : View.VISIBLE);
+        mSettingsBtn.setVisibility(single ? View.VISIBLE : View.GONE);
 
         final TextView quadBtn = createItem("Q");
         quadBtn.setGravity(Gravity.CENTER);
@@ -161,7 +169,7 @@ class MenuManager {
 
         mWebUiBtn = createItem("WebUI");
         layout.addView(mWebUiBtn);
-        mWebUiBtn.setVisibility(quadEnabled ? View.GONE : View.VISIBLE);
+        mWebUiBtn.setVisibility(single ? View.VISIBLE : View.GONE);
 
         camButtons = new TextView[CAM_COUNT];
         mCachedCamButtons = new TextView[CAM_COUNT];
@@ -175,11 +183,11 @@ class MenuManager {
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT));
 
-            if (i == mActive && !quadEnabled) {
+            if (i == mActive && single) {
                 highlightItem(camButtons[i]);
-                applyQualityColor(camButtons[i], i, quadEnabled, mActive, mHosts);
+                applyQualityColor(camButtons[i], i, !single, mActive, mHosts);
             } else {
-                applyQualityColor(camButtons[i], i, quadEnabled, mActive, mHosts);
+                applyQualityColor(camButtons[i], i, !single, mActive, mHosts);
             }
 
             camButtons[i].setOnClickListener(v -> {
@@ -198,6 +206,21 @@ class MenuManager {
             PopupWindow p = mMenuPopup;
             if (p != null) p.dismiss();
             if (listener != null) listener.onToggleQuad();
+        });
+
+        // U after the slots: the reserved UDP RTP cell of the 3x3 grid, full-screen (#68)
+        final TextView udpBtn = createItem("U");
+        udpBtn.setGravity(Gravity.CENTER);
+        udpBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
+        camRow.addView(udpBtn, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        if (udpShown) highlightItem(udpBtn);
+        mCachedUdpBtn = udpBtn;
+        udpBtn.setOnClickListener(v -> {
+            PopupWindow p = mMenuPopup;
+            if (p != null) p.dismiss();
+            if (listener != null) listener.onShowUdp();
         });
 
         String code = "Exit [v" + version + ", " + gitHash + "]";
@@ -234,25 +257,30 @@ class MenuManager {
     }
 
     private void updateCachedMenu(boolean quadEnabled, int mActive, String[] mHosts) {
+        boolean single = !quadEnabled && !udpShown;
         if (mSettingsBtn != null) {
-            mSettingsBtn.setVisibility(quadEnabled ? View.GONE : View.VISIBLE);
+            mSettingsBtn.setVisibility(single ? View.VISIBLE : View.GONE);
         }
         if (mWebUiBtn != null) {
-            mWebUiBtn.setVisibility(quadEnabled ? View.GONE : View.VISIBLE);
+            mWebUiBtn.setVisibility(single ? View.VISIBLE : View.GONE);
         }
         if (mCachedQuadBtn != null) {
             if (quadEnabled) highlightItem(mCachedQuadBtn);
             else resetItem(mCachedQuadBtn);
         }
+        if (mCachedUdpBtn != null) {
+            if (udpShown) highlightItem(mCachedUdpBtn);
+            else resetItem(mCachedUdpBtn);
+        }
         if (mCachedCamButtons != null && camButtons != null) {
             for (int i = 0; i < CAM_COUNT; i++) {
                 if (mCachedCamButtons[i] == null || camButtons[i] == null) continue;
-                if (i == mActive && !quadEnabled) {
+                if (i == mActive && single) {
                     highlightItem(camButtons[i]);
-                    applyQualityColor(camButtons[i], i, quadEnabled, mActive, mHosts);
+                    applyQualityColor(camButtons[i], i, !single, mActive, mHosts);
                 } else {
                     resetItem(camButtons[i]);
-                    applyQualityColor(camButtons[i], i, quadEnabled, mActive, mHosts);
+                    applyQualityColor(camButtons[i], i, !single, mActive, mHosts);
                 }
             }
         }

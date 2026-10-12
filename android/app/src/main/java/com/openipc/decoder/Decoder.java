@@ -270,6 +270,12 @@ public class Decoder extends Activity
 
     @Override
     public void onSwitchCamera(int slot) {
+        if (leaveUdpView()) {
+            // From the UDP view back to a slot: (re)start it even if it was the active one
+            mActive = slot;
+            saveSettings();
+            return;
+        }
         if (slot == mActive && !quadEnabled) return;
         if (quadEnabled) {
             // Exit quad mode and switch to selected camera
@@ -284,6 +290,10 @@ public class Decoder extends Activity
 
     @Override
     public void onToggleQuad() {
+        if (leaveUdpView()) {
+            startQuad();
+            return;
+        }
         boolean newState = !quadEnabled;
         if (newState) startQuad(); else {
             stopQuad();
@@ -294,6 +304,46 @@ public class Decoder extends Activity
                 rtspClient.start();
             }
         }
+    }
+
+    @Override
+    public void onShowUdp() {
+        if (udpViewShown) return;
+        if (quadEnabled) {
+            stopQuad();
+        } else {
+            if (rtspClient != null) rtspClient.stop();
+            stopExecutor();
+            audioManager.closeAudio();
+            closeDecoder();
+            nalQueue.clear();
+        }
+        mSurface.setVisibility(View.GONE);
+        if (udpFullView == null) {
+            udpFullView = udpHintCell();
+            udpFullView.setTextSize(20);
+            // The video view that normally opens the menu on a tap is hidden here
+            udpFullView.setOnClickListener(v -> menuManager.showMenu(findViewById(R.id.decoder),
+                    quadEnabled, mActive, mVersion, BuildConfig.GIT_HASH, mHosts));
+            ((FrameLayout) findViewById(R.id.decoder)).addView(udpFullView,
+                    new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+                            FrameLayout.LayoutParams.MATCH_PARENT));
+        } else {
+            udpFullView.setText(udpHintText(localIpv4(), UDP_RTP_PORT));
+        }
+        udpFullView.setVisibility(View.VISIBLE);
+        udpViewShown = true;
+        menuManager.setUdpShown(true);
+    }
+
+    /** Hide the UDP view; true if it was shown. The caller starts what comes next. */
+    private boolean leaveUdpView() {
+        if (!udpViewShown) return false;
+        udpViewShown = false;
+        menuManager.setUdpShown(false);
+        if (udpFullView != null) udpFullView.setVisibility(View.GONE);
+        mSurface.setVisibility(View.VISIBLE);
+        return true;
     }
 
     @Override
@@ -572,7 +622,7 @@ public class Decoder extends Activity
                 int idx = row * size + col;
                 if (idx >= CAM_COUNT) {
                     // The ninth cell of a 3x3 grid is reserved for a pushed UDP RTP stream
-                    // (#7); until the receiver exists it explains what will appear there
+                    // (#68); until the receiver exists it explains what will appear there
                     lr.addView(udpHintCell(), new LinearLayout.LayoutParams(
                             0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
                     continue;
@@ -610,10 +660,13 @@ public class Decoder extends Activity
         }
     }
 
-    /** Port of the reserved UDP RTP cell (#7); 5600 is the usual default for pushed RTP. */
+    /** Port of the reserved UDP RTP cell (#68); 5600 is the usual default for pushed RTP. */
     static final int UDP_RTP_PORT = 5600;
+    /** The UDP cell full-screen (menu button U); there is no receiver yet (#68). */
+    private TextView udpFullView;
+    private boolean udpViewShown;
 
-    private View udpHintCell() {
+    private TextView udpHintCell() {
         TextView hint = new TextView(this);
         hint.setText(udpHintText(localIpv4(), UDP_RTP_PORT));
         hint.setTextColor(Color.GRAY);
@@ -992,6 +1045,8 @@ public class Decoder extends Activity
         super.onPause();
         mResumed = false;
         menuManager.onPauseDismissBrowser();
+        // The UDP view is not a saved mode: after a resume the slot or grid comes back
+        leaveUdpView();
         stopStreams();
     }
 
@@ -1041,6 +1096,7 @@ public class Decoder extends Activity
         // Android 10+ may deliver it to the resumed activity without onPause()/onResume():
         // apply the shared link now
         if (mResumed) {
+            leaveUdpView();
             stopStreams();
             startStreams();
         }
