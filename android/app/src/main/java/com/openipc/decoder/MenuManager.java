@@ -29,6 +29,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.TextView;
@@ -139,7 +140,14 @@ class MenuManager {
 
         LinearLayout camRow = new LinearLayout(activity);
         camRow.setOrientation(LinearLayout.HORIZONTAL);
-        layout.addView(camRow, new LinearLayout.LayoutParams(
+        // Q + 8 slots (#13) may not fit a narrow screen or a large font: the row scrolls,
+        // and follows the focus when moving with a remote
+        HorizontalScrollView camScroll = new HorizontalScrollView(activity);
+        camScroll.setHorizontalScrollBarEnabled(false);
+        camScroll.addView(camRow, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT));
+        layout.addView(camScroll, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
