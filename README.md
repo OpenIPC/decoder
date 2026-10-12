@@ -1,8 +1,4 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://openipc.org/assets/openipc-logo-white.svg">
-  <source media="(prefers-color-scheme: light)" srcset="https://openipc.org/assets/openipc-logo-black.svg">
-  <img alt="OpenIPC logo" src="https://openipc.org/assets/openipc-logo-black.svg">
-</picture>
+![OpenIPC logo][logo]
 
 # OpenIPC Decoder
 
@@ -95,7 +91,7 @@ Shows all configured slots in a 2×2 grid. Each cell has its own connection and 
 > - **Only 4 camera slots** — [#13](https://github.com/OpenIPC/decoder/issues/13)
 > - **G.726 audio is not supported** — [#14](https://github.com/OpenIPC/decoder/issues/14)
 > - **Possible dependency on Google services (GAPPS)** on some devices; under investigation, so disable GAPPS with care — [#15](https://github.com/OpenIPC/decoder/issues/15)
-> - **Credentials are sent in clear text** over plain RTSP/HTTP (Basic auth unless the camera asks for Digest); RTSPS is not supported — [#16](https://github.com/OpenIPC/decoder/issues/16)
+> - **Credentials are sent in clear text** over plain RTSP/HTTP (Basic auth unless the camera asks for Digest); RTSPS is not supported and not planned — [#16](https://github.com/OpenIPC/decoder/issues/16)
 >
 > Known bugs are tracked separately under the [`bug` label](https://github.com/OpenIPC/decoder/issues?q=is%3Aissue+is%3Aopen+label%3Abug).
 
@@ -149,8 +145,8 @@ Network, video decoding and audio run on separate threads, so a slow decoder nev
 ## Security notes
 
 - Credentials are taken from the URL and sent in the `Authorization` header: Basic first, Digest when the camera asks for it. They are not included in the RTSP request line.
-- Plain RTSP and HTTP are not encrypted. Use the app only on trusted networks, see [#16](https://github.com/OpenIPC/decoder/issues/16).
-- Camera URLs, including passwords, are stored encrypted (AES-256-GCM with a key kept in the Android Keystore, Android 6.0+; on Android 5.x they are stored as before) in the app's private storage. Backup is disabled (`allowBackup="false"`).
+- RTSP and HTTP are not encrypted, and RTSPS is not supported. Credentials that a camera expects inside the URL path or query (for example `user=…_password=…`) are sent with every request. Use the app only on trusted networks, see [#16](https://github.com/OpenIPC/decoder/issues/16).
+- Camera URLs, including passwords, are stored encrypted (AES-256-GCM with a key kept in the Android Keystore, Android 6.0+) in the app's private storage. On Android 5.x, or if the Keystore is unavailable, they are stored in plain text. Backup is disabled (`allowBackup="false"`).
 
 ## Device compatibility
 
@@ -211,3 +207,5 @@ Changes are listed on the [releases page](https://github.com/OpenIPC/decoder/rel
 - Documentation: [openipc.org](https://openipc.org)
 
 [![Telegram](https://openipc.org/images/telegram_button.svg)](https://openipc.org/our-channels)
+
+[logo]: https://raw.githubusercontent.com/OpenIPC/.github/refs/heads/main/assets/openipc-logo-black.svg

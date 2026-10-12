@@ -1,8 +1,4 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://openipc.org/assets/openipc-logo-white.svg">
-  <source media="(prefers-color-scheme: light)" srcset="https://openipc.org/assets/openipc-logo-black.svg">
-  <img alt="OpenIPC logo" src="https://openipc.org/assets/openipc-logo-black.svg">
-</picture>
+![OpenIPC logo][logo]
 
 # OpenIPC Decoder
 
@@ -95,7 +91,7 @@
 > - **Только 4 слота для камер** — [#13](https://github.com/OpenIPC/decoder/issues/13)
 > - **Не поддерживается звук G.726** — [#14](https://github.com/OpenIPC/decoder/issues/14)
 > - **Возможная зависимость от сервисов Google (GAPPS)** на некоторых устройствах; изучается, поэтому отключайте GAPPS осознанно — [#15](https://github.com/OpenIPC/decoder/issues/15)
-> - **Логин и пароль передаются в открытом виде** по RTSP/HTTP без шифрования (Basic, если камера не запросила Digest); RTSPS не поддерживается — [#16](https://github.com/OpenIPC/decoder/issues/16)
+> - **Логин и пароль передаются в открытом виде** по RTSP/HTTP без шифрования (Basic, если камера не запросила Digest); RTSPS не поддерживается и не планируется — [#16](https://github.com/OpenIPC/decoder/issues/16)
 >
 > Известные ошибки собраны отдельно, под [меткой `bug`](https://github.com/OpenIPC/decoder/issues?q=is%3Aissue+is%3Aopen+label%3Abug).
 
@@ -149,8 +145,8 @@ export KEY_PASS=your_key_password
 ## Безопасность
 
 - Логин и пароль берутся из адреса и передаются в заголовке `Authorization`: сначала Basic, Digest — если камера его запросит. В строку RTSP-запроса они не попадают.
-- RTSP и HTTP без шифрования. Используйте приложение только в доверенных сетях, см. [#16](https://github.com/OpenIPC/decoder/issues/16).
-- Адреса камер вместе с паролями хранятся в закрытом хранилище приложения в зашифрованном виде (AES-256-GCM, ключ в Android Keystore, Android 6.0+; на Android 5.x — как раньше). Резервное копирование отключено (`allowBackup="false"`).
+- RTSP и HTTP без шифрования, RTSPS не поддерживается. Если камера ждёт логин и пароль прямо в пути или параметрах адреса (например, `user=…_password=…`), они уходят с каждым запросом. Используйте приложение только в доверенных сетях, см. [#16](https://github.com/OpenIPC/decoder/issues/16).
+- Адреса камер вместе с паролями хранятся в закрытом хранилище приложения в зашифрованном виде (AES-256-GCM, ключ в Android Keystore, Android 6.0+). На Android 5.x или если Keystore недоступен — в открытом виде. Резервное копирование отключено (`allowBackup="false"`).
 
 ## Совместимость с устройствами
 
@@ -211,3 +207,5 @@ export KEY_PASS=your_key_password
 - Документация: [openipc.org](https://openipc.org)
 
 [![Telegram](https://openipc.org/images/telegram_button.svg)](https://openipc.org/our-channels)
+
+[logo]: https://raw.githubusercontent.com/OpenIPC/.github/refs/heads/main/assets/openipc-logo-black.svg
