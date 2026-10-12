@@ -213,10 +213,15 @@ public class RtspSessionTest {
 
         List<String> methods() {
             List<String> m = new ArrayList<>();
-            synchronized (requests) {
-                for (String r : requests) m.add(r.substring(0, r.indexOf('\n')));
-            }
+            for (String r : snapshot()) m.add(r.substring(0, r.indexOf('\n')));
             return m;
+        }
+
+        /** Copy of the requests: the server thread keeps adding while a test reads. */
+        List<String> snapshot() {
+            synchronized (requests) {
+                return new ArrayList<>(requests);
+            }
         }
 
         @Override
@@ -294,10 +299,10 @@ public class RtspSessionTest {
         assertEquals("SETUP " + base + "/trackID=1 RTSP/1.0", m.get(2));
         assertEquals("PLAY " + base + " RTSP/1.0", m.get(3));
 
-        String describe = server.requests.get(0);
+        String describe = server.snapshot().get(0);
         assertTrue(describe.contains("Authorization: Basic"));
         assertTrue(describe.contains("User-Agent: test"));
-        assertTrue(server.requests.get(3).contains("Session: ABC123"));
+        assertTrue(server.snapshot().get(3).contains("Session: ABC123"));
 
         assertTrue(rec.sdp.videoH265);
         assertEquals(AudioConfig.PCM, rec.sdp.audio.codec);
@@ -451,7 +456,7 @@ public class RtspSessionTest {
         assertTrue("keepalives sent: " + keepalives, keepalives >= 2);
         assertTrue(session.isActive());
         assertEquals(1, server.connections.get());
-        String ka = server.requests.stream().filter(x -> x.startsWith("GET_PARAMETER"))
+        String ka = server.snapshot().stream().filter(x -> x.startsWith("GET_PARAMETER"))
                 .findFirst().get();
         assertTrue(ka.contains("Session: ABC123"));
     }
@@ -503,7 +508,7 @@ public class RtspSessionTest {
         while (server.connections.get() < 2 && System.nanoTime() < deadline) Thread.sleep(20);
         assertTrue("reconnected after the keepalive was rejected", server.connections.get() >= 2);
         // Bounded: Basic, then one Digest retry per connection, no endless repetition
-        long perFirstConnection = server.requests.stream()
+        long perFirstConnection = server.snapshot().stream()
                 .filter(x -> x.startsWith("GET_PARAMETER")).count();
         assertTrue(perFirstConnection <= 2 * server.connections.get());
     }
