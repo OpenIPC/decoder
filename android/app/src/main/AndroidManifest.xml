@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-feature android:name="android.software.leanback" android:required="false" />
+    <!-- TVs and set-top boxes have no touchscreen; without this Google Play hides the app there -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
     <!-- For Android 10+ -->
     <application
