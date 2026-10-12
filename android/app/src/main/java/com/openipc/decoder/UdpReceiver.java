@@ -121,11 +121,11 @@ class UdpReceiver implements Closeable {
         throw new IOException("No free UDP port pair");
     }
 
-    /** Joining a group from a DatagramChannel needs API 24 (Android 7). Tests override it. */
+    /** Joining a group from a DatagramChannel needs API 26 (Android 8). Tests override it. */
     static volatile int sdkInt = Build.VERSION.SDK_INT;
 
     static boolean multicastSupported() {
-        return sdkInt >= 24;
+        return sdkInt >= 26;
     }
 
     /**
@@ -133,7 +133,7 @@ class UdpReceiver implements Closeable {
      * {@code local} (the local address of the RTSP connection, #69). Only when
      * {@link #multicastSupported()}.
      */
-    @TargetApi(24)
+    @TargetApi(26)
     synchronized void addMulticastTrack(int channel, InetAddress group, int port,
                                         InetAddress local) throws IOException {
         if (closed) throw new IOException("Receiver closed");

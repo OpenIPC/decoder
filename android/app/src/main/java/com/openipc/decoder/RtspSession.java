@@ -291,7 +291,7 @@ class RtspSession {
             boolean auto = m == Transport.Mode.AUTO;
             boolean mc = m == Transport.Mode.MULTICAST && !udpFailed(m, url);
             if (mc && !UdpReceiver.multicastSupported()) {
-                Log.i(TAG, tag + ": multicast needs Android 7, using TCP");
+                Log.i(TAG, tag + ": multicast needs Android 8, using TCP");
                 mc = false;
             }
             // Auto and Multicast fall back to TCP; UDP does not

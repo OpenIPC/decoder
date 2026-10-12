@@ -785,8 +785,8 @@ public class RtspSessionTest {
     }
 
     @Test
-    public void multicastNeedsAndroid7() throws Exception {
-        UdpReceiver.sdkInt = 23;
+    public void multicastNeedsAndroid8() throws Exception {
+        UdpReceiver.sdkInt = 25;
         runUdp(Transport.Mode.MULTICAST, false);
         assertTrue("video over TCP", rec.videoLatch.await(5, TimeUnit.SECONDS));
         assertTrue(setups().get(0).contains("interleaved=0-1"));
@@ -796,8 +796,9 @@ public class RtspSessionTest {
     public void multicastGroupIsJoinedAndReceived() throws Exception {
         String group = "239.255.42.17";
         int port = freeUdpPort();
-        org.junit.Assume.assumeTrue("loopback multicast works here",
-                loopbackMulticastWorks(group, port));
+        boolean works = loopbackMulticastWorks(group, port);
+        System.out.println("loopback multicast " + (works ? "works" : "does not work"));
+        org.junit.Assume.assumeTrue("loopback multicast works here", works);
         server.multicastReply = "RTP/AVP;multicast;destination=" + group + ";port="
                 + port + "-" + (port + 1) + ";ttl=1";
         runUdp(Transport.Mode.MULTICAST, false);
