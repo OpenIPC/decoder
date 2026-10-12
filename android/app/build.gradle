@@ -57,4 +57,18 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    testOptions {
+        // android.jar stubs (Log, ...) return defaults instead of throwing in JVM unit tests
+        unitTests.returnDefaultValues = true
+    }
+
+    lint {
+        // Known issues are recorded in the baseline; only new ones fail the build
+        baseline = file("lint-baseline.xml")
+    }
+}
+
+dependencies {
+    testImplementation libs.junit
 }
