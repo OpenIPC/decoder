@@ -111,7 +111,7 @@ public class Decoder extends Activity
 
     // Codec/bitrate state for status overlay (pulled from RtspClient)
     private volatile boolean codecH265;
-    private volatile String audioCodec = "PCM";
+    private volatile String audioCodec = AudioConfig.NONE;
 
     // Bitrate tracking (polled from RtspClient on "connected")
     private long statusStreamBytes;
@@ -148,10 +148,10 @@ public class Decoder extends Activity
         rtspClient.setListener(new RtspClient.Listener() {
             @Override public void onStatusChanged(String s) { updateStatus(s); }
             @Override
-            public void onCodecChanged(boolean h265, String aCodec, int sr, boolean be, int pt) {
+            public void onCodecChanged(boolean h265, AudioConfig audio) {
                 codecH265 = h265;
-                audioCodec = aCodec;
-                audioManager.configure(sr, pt, be, aCodec);
+                audioCodec = audio.codec;
+                audioManager.configure(audio);
             }
             @Override public void onJitterSample(int avg) {
                 menuManager.updateQuality(avg);
@@ -410,8 +410,14 @@ public class Decoder extends Activity
                         if (statusText == null
                                 || statusText.getVisibility() != View.VISIBLE) return;
                         String videoCodec = codecH265 ? "H.265" : "H.264";
-                        String aCodec = "AAC".equals(audioCodec) ? "AAC"
-                                : "G711".equals(audioCodec) ? "G.711" : "PCM";
+                        String aCodec;
+                        switch (audioCodec) {
+                            case AudioConfig.AAC:  aCodec = " • AAC"; break;
+                            case AudioConfig.PCMU:
+                            case AudioConfig.PCMA: aCodec = " • G.711"; break;
+                            case AudioConfig.PCM:  aCodec = " • PCM"; break;
+                            default:               aCodec = ""; break;
+                        }
                         long elapsedNs = System.nanoTime() - statusBitrateNs;
                         String bps = "";
                         long bytes = rtspClient != null ? rtspClient.getStreamBytes() : 0;
@@ -420,7 +426,7 @@ public class Decoder extends Activity
                                     / (elapsedNs / 1_000_000_000.0);
                             bps = String.format(Locale.US, " • %.1f Mbps", mbps);
                         }
-                        statusText.setText("Connected • " + videoCodec + " • " + aCodec + bps);
+                        statusText.setText("Connected • " + videoCodec + aCodec + bps);
                     }, 1000);
                     statusText.postDelayed(() -> {
                         if (statusText != null) {
@@ -731,6 +737,12 @@ public class Decoder extends Activity
         closeDecoder();
         closeAudio();
         nalQueue.clear();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        audioManager.shutdown();
     }
 
     @Override
