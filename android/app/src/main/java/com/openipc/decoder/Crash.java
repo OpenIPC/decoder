@@ -1,6 +1,6 @@
 /*
  *
- * Copyright (c) OpenIPC  https://openipc.org  MIT License
+ * Copyright (c) OpenIPC  https://openipc.org  Prosperity Public License 3.0.0
  *
  * Crash.java — crash report activity displaying error details
  *

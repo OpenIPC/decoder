@@ -1,5 +1,5 @@
 #
-# Copyright (c) OpenIPC  https://openipc.org  MIT License
+# Copyright (c) OpenIPC  https://openipc.org  Prosperity Public License 3.0.0
 #
 # proguard-rules.pro — R8/ProGuard keep rules for the Decoder application
 #

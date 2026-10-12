@@ -1,5 +1,5 @@
 /*
- * Copyright (c) OpenIPC  https://openipc.org  MIT License
+ * Copyright (c) OpenIPC  https://openipc.org  Prosperity Public License 3.0.0
  *
  * AudioConfig.java — audio track parameters parsed from the SDP
  *

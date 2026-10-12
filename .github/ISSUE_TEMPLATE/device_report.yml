@@ -1,0 +1,101 @@
+name: Device report
+description: Report how OpenIPC Decoder works on your phone, tablet, TV, set-top box or car device
+title: "[Device]: "
+labels: ["device-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing! Reports are collected into the **Verified devices** table in the README.
+        The app version and build hash are shown in the menu next to **Exit**, for example `v1.28, a9ac8df`.
+
+  - type: dropdown
+    id: device_type
+    attributes:
+      label: Device type
+      options:
+        - Phone
+        - Tablet
+        - TV
+        - Set-top box
+        - Car device / mirror
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Manufacturer and model
+      placeholder: "Samsung Galaxy A51 (SM-A515F)"
+    validations:
+      required: true
+
+  - type: input
+    id: android
+    attributes:
+      label: Android version / firmware
+      description: Android version, plus the vendor firmware if it is not stock (ColorOS, SlimBOXtv, ...)
+      placeholder: "Android 13 / One UI 5.1"
+    validations:
+      required: true
+
+  - type: input
+    id: soc
+    attributes:
+      label: SoC and kernel version
+      description: Settings → About → Kernel version. SoC if known (Amlogic S905X3, Allwinner H313, ...)
+      placeholder: "Exynos 9611, kernel 4.14.113"
+
+  - type: input
+    id: app_version
+    attributes:
+      label: App version
+      description: Shown in the menu next to Exit
+      placeholder: "v1.28, a9ac8df"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: result
+    attributes:
+      label: Overall result
+      options:
+        - Works
+        - Works with issues
+        - Does not work
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: works
+    attributes:
+      label: What works
+      options:
+        - label: H.264 video
+        - label: H.265 video
+        - label: Audio
+        - label: Quad mode
+        - label: Remote control / D-pad
+        - label: WebUI
+        - label: Screenshot (long press)
+
+  - type: textarea
+    id: stream
+    attributes:
+      label: Camera and stream
+      description: Camera firmware (OpenIPC or other), resolution, FPS, bitrate, audio codec
+      placeholder: "OpenIPC on gk7205v300, H.265 1920x1080@25, 2 Mbps, AAC 16 kHz"
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Problems and notes
+      description: What did not work or looked wrong (cropped picture, no sound, delay, crash, ...)
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log (optional)
+      description: "With USB/network debugging enabled: `adb logcat -d -s OpenIPCDecoder`"
+      render: text
