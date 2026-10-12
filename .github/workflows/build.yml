@@ -91,8 +91,7 @@ jobs:
           KEY_PASS:      ${{ secrets.KEY_PASS }}
         run: |
           echo "${{ secrets.KEY }}" | base64 -d > key.jks
-          ./gradlew bundleRelease
-          mv app/build/outputs/bundle/release/app-release.aab ../${{ steps.vars.outputs.name }}.aab
+          # APK only while in development; the .aab (bundleRelease) is for store uploads
           ./gradlew assembleRelease
           mv app/build/outputs/apk/release/app-release.apk ../${{ steps.vars.outputs.name }}.apk
 
@@ -102,9 +101,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.vars.outputs.name }}
-          path: |
-            ${{ steps.vars.outputs.name }}.aab
-            ${{ steps.vars.outputs.name }}.apk
+          path: ${{ steps.vars.outputs.name }}.apk
 
       # Release branches: publish to the "latest" release and Telegram
       - name: Upload
@@ -112,9 +109,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          files: |
-            ${{ steps.vars.outputs.name }}.aab
-            ${{ steps.vars.outputs.name }}.apk
+          files: ${{ steps.vars.outputs.name }}.apk
 
       - name: Telegram
         if: github.ref_name == 'basic' || github.ref_name == 'v2'

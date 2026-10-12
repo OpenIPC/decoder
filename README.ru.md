@@ -23,7 +23,6 @@
 |------------------|----------------------------------------------------|
 | `decoder-v2.apk` | **Текущая версия**, рекомендуется                  |
 | `decoder.apk`    | Старая версия из ветки `basic`                     |
-| `*.aab`          | Пакеты для Google Play; вручную не устанавливаются |
 
 Есть бета-канал в [Google Play](https://play.google.com/apps/internaltest/4701231141824898735). Чтобы попасть в него, пришлите свой e-mail через [Telegram-каналы OpenIPC](https://openipc.org/our-channels).
 
