@@ -44,8 +44,12 @@ import android.widget.Toast;
 import java.io.IOException;
 import java.io.OutputStream;
 
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
 import java.util.Locale;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -567,8 +571,9 @@ public class Decoder extends Activity
             for (int col = 0; col < size; col++) {
                 int idx = row * size + col;
                 if (idx >= CAM_COUNT) {
-                    // The last cell of a 3x3 grid: no slot, stays black
-                    lr.addView(new View(this), new LinearLayout.LayoutParams(
+                    // The ninth cell of a 3x3 grid is reserved for a pushed UDP RTP stream
+                    // (#7); until the receiver exists it explains what will appear there
+                    lr.addView(udpHintCell(), new LinearLayout.LayoutParams(
                             0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
                     continue;
                 }
@@ -603,6 +608,43 @@ public class Decoder extends Activity
                         0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
             }
         }
+    }
+
+    /** Port of the reserved UDP RTP cell (#7); 5600 is the usual default for pushed RTP. */
+    static final int UDP_RTP_PORT = 5600;
+
+    private View udpHintCell() {
+        TextView hint = new TextView(this);
+        hint.setText(udpHintText(localIpv4(), UDP_RTP_PORT));
+        hint.setTextColor(Color.GRAY);
+        hint.setTextSize(13);
+        hint.setGravity(Gravity.CENTER);
+        hint.setPadding(dp(12), dp(12), dp(12), dp(12));
+        hint.setBackgroundColor(Color.BLACK);
+        return hint;
+    }
+
+    static String udpHintText(String ip, int port) {
+        String target = (ip != null ? ip : "this device") + ":" + port;
+        return "UDP RTP \u00b7 port " + port + "\nWaiting for a stream\u2026\n\n"
+                + "Send the camera's RTP/UDP output to\n" + target;
+    }
+
+    /** First site-local IPv4 address of this device, or null. */
+    static String localIpv4() {
+        try {
+            for (NetworkInterface nif : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                if (!nif.isUp() || nif.isLoopback()) continue;
+                for (InetAddress a : Collections.list(nif.getInetAddresses())) {
+                    if (a instanceof Inet4Address && a.isSiteLocalAddress()) {
+                        return a.getHostAddress();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "No local address: " + e.getMessage());
+        }
+        return null;
     }
 
     private void createQuadCells() {

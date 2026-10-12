@@ -81,7 +81,7 @@ The app accepts plain-text shares (`ACTION_SEND`, `text/plain`). Sharing an `rts
 
 ### Multi-view (Quad)
 
-Shows the configured slots in a 2×2 grid, or in a 3×3 grid once any of slots 5–8 is used. Each cell has its own connection and decoder, so the device's video decoder limits how many high-resolution streams play smoothly: with five or more cameras, their substreams are a good choice. Some cameras accept only one RTSP client at a time. Long-press a cell to play its audio (long-press it again to mute); the selected cell shows an AUDIO badge and is remembered. Tap any cell to open the menu.
+Shows the configured slots in a 2×2 grid, or in a 3×3 grid once any of slots 5–8 is used. The ninth cell of the 3×3 grid is reserved for a camera that pushes RTP over UDP (planned, [#7](https://github.com/OpenIPC/decoder/issues/7)); for now it shows the address and port to send to. Each cell has its own connection and decoder, so the device's video decoder limits how many high-resolution streams play smoothly: with five or more cameras, their substreams are a good choice. Some cameras accept only one RTSP client at a time. Long-press a cell to play its audio (long-press it again to mute); the selected cell shows an AUDIO badge and is remembered. Tap any cell to open the menu.
 
 ## Known limitations
 
