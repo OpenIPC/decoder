@@ -84,7 +84,7 @@ The app accepts plain-text shares (`ACTION_SEND`, `text/plain`). Sharing an `rts
 
 ### Quad mode
 
-Shows all configured slots in a 2×2 grid. Each cell has its own connection and decoder. Audio is off in this mode. Tap any cell to open the menu.
+Shows all configured slots in a 2×2 grid. Each cell has its own connection and decoder. Long-press a cell to play its audio (long-press it again to mute); the selected cell shows an AUDIO badge and is remembered. Tap any cell to open the menu.
 
 ## Known limitations
 
@@ -92,7 +92,6 @@ Shows all configured slots in a 2×2 grid. Each cell has its own connection and 
 > These are known gaps that we plan to address. Each one has an issue — comments, test results and pull requests are welcome.
 >
 > - **RTSP over TCP only.** No UDP or multicast — [#7](https://github.com/OpenIPC/decoder/issues/7)
-> - **No audio in Quad mode** — [#12](https://github.com/OpenIPC/decoder/issues/12)
 > - **Only 4 camera slots** — [#13](https://github.com/OpenIPC/decoder/issues/13)
 > - **Audio formats not supported:** MP4A-LATM, Opus, G.726, and AAC frames split across RTP packets — [#14](https://github.com/OpenIPC/decoder/issues/14)
 > - **Possible dependency on Google services (GAPPS)** on some devices; under investigation, so disable GAPPS with care — [#15](https://github.com/OpenIPC/decoder/issues/15)

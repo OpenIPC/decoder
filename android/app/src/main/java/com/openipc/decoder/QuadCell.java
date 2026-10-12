@@ -48,7 +48,19 @@ class QuadCell implements RtspSession.Callback {
 
     interface Listener {
         void onRemoveOverlay(int index);
+
+        /** Audio parameters of this cell's stream (network thread). */
+        default void onAudioConfig(int index, AudioConfig audio) {}
     }
+
+    // Audio (#12): every cell sets up its audio track, only the selected one plays it
+    private volatile AudioManager audioSink;
+    private volatile AudioConfig audioConfig = new AudioConfig();
+
+    /** Route this cell's audio to {@code sink}, or mute it with null. */
+    void setAudioSink(AudioManager sink) { this.audioSink = sink; }
+
+    AudioConfig getAudioConfig() { return audioConfig; }
 
     private final Listener listener;
 
@@ -160,8 +172,8 @@ class QuadCell implements RtspSession.Callback {
         });
 
         Log.i(TAG, tag + ": surface ready, starting session");
-        // Video only: Quad mode has no audio (#12)
-        session.configure(host, userAgent, false);
+        // Audio is set up too, so switching the audible cell needs no reconnect (#12)
+        session.configure(host, userAgent, true);
         session.start();
     }
 
@@ -169,6 +181,7 @@ class QuadCell implements RtspSession.Callback {
         started = false;
         threadsStarted = false;
         running = false;
+        audioSink = null;
         session.stop();
         nalAssembler.reset();
         // Disabling releases the decoder and stops the decode thread from creating another,
@@ -193,11 +206,25 @@ class QuadCell implements RtspSession.Callback {
         lastUnknownPayload = -1;
         videoPt = sdp.videoPt;
         codecH265 = sdp.videoH265;
+        audioConfig = sdp.audio;
+        if (listener != null) listener.onAudioConfig(index, sdp.audio);
     }
 
     @Override
     public boolean onPacket(int channel, byte[] buf, int offset, int length) {
-        if (channel != RtspSession.CHANNEL_VIDEO || length < 12) return false;
+        if (length < 12) return false;
+        if (channel == RtspSession.CHANNEL_AUDIO) {
+            AudioManager sink = audioSink;
+            if (sink != null) {
+                Frame frame = cellFramePool.obtain(length);
+                System.arraycopy(buf, offset, frame.data(), 0, length);
+                frame.setLength(length);
+                sink.onAudioFrame(frame);
+                cellFramePool.recycle(frame);
+            }
+            return false;
+        }
+        if (channel != RtspSession.CHANNEL_VIDEO) return false;
         int pt = buf[offset + 1] & 0x7F;
         if (pt != videoPt) {
             if (pt != lastUnknownPayload) {

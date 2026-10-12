@@ -84,7 +84,7 @@
 
 ### Quad 四分屏模式
 
-以 2×2 网格显示所有已配置的槽位。每个画面都有独立的连接和解码器。此模式下没有声音。点击任意画面即可打开菜单。
+以 2×2 网格显示所有已配置的槽位。每个画面都有独立的连接和解码器。长按某个画面即可播放其声音（再次长按则静音）；被选中的画面显示 AUDIO 标记，选择会被记住。点击任意画面即可打开菜单。
 
 ## 已知限制
 
@@ -92,7 +92,6 @@
 > 以下是我们计划解决的已知不足，每一项都有对应的 issue。欢迎留言、提交测试结果和 pull request。
 >
 > - **仅支持 RTSP over TCP**，不支持 UDP 和组播 — [#7](https://github.com/OpenIPC/decoder/issues/7)
-> - **Quad 模式下没有声音** — [#12](https://github.com/OpenIPC/decoder/issues/12)
 > - **仅有 4 个摄像机槽位** — [#13](https://github.com/OpenIPC/decoder/issues/13)
 > - **不支持的音频格式：** MP4A-LATM、Opus、G.726，以及跨多个 RTP 包分片的 AAC 帧 — [#14](https://github.com/OpenIPC/decoder/issues/14)
 > - **部分设备上可能依赖 Google 服务（GAPPS）**，仍在调查中，请谨慎禁用 GAPPS — [#15](https://github.com/OpenIPC/decoder/issues/15)
