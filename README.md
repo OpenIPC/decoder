@@ -1,8 +1,4 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://openipc.org/assets/openipc-logo-white.svg">
-  <source media="(prefers-color-scheme: light)" srcset="https://openipc.org/assets/openipc-logo-black.svg">
-  <img alt="OpenIPC logo" src="https://openipc.org/assets/openipc-logo-black.svg">
-</picture>
+![OpenIPC logo][logo]
 
 ## Decoder
 **Miniature and universal H.264 and H.265 decoder for Android devices**
@@ -116,3 +112,5 @@ It has been noticed that the Decoder application may sometimes use some GAPPS co
 [telegram]: https://openipc.org/our-channels
 [website]: https://openipc.org
 [wiki]: https://github.com/openipc/wiki
+
+[logo]: https://raw.githubusercontent.com/OpenIPC/.github/refs/heads/main/assets/openipc-logo-black.svg
