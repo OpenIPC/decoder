@@ -37,7 +37,7 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 - **Audio:** AAC (RFC 3640 `mpeg4-generic`, ADTS), G.711 μ-law/A-law, L16 PCM (mono/stereo)
 - **Display:** single camera, or Quad mode with 4 cameras at once
 - **Controls:** pinch-to-zoom, pan, double-tap to reset, Android TV remote (Leanback launcher)
-- **Network:** automatic reconnection with exponential back-off, connection-quality indicator
+- **Network:** Basic and Digest authentication, RTSP keepalive, automatic reconnection with exponential back-off, connection-quality indicator
 - **WebUI:** built-in browser for the camera's web interface
 - **More:** long-press screenshot, 4 camera slots, URLs can be shared from other apps
 
@@ -92,15 +92,12 @@ Shows all configured slots in a 2×2 grid. Each cell has its own connection and 
 > These are known gaps that we plan to address. Each one has an issue — comments, test results and pull requests are welcome.
 >
 > - **RTSP over TCP only.** No UDP or multicast — [#7](https://github.com/OpenIPC/decoder/issues/7)
-> - **Basic authentication only.** Cameras that require Digest auth will not connect — [#8](https://github.com/OpenIPC/decoder/issues/8)
-> - **Video codec is detected by payload type number** (96 = H.264, 97 = H.265), not from the SDP. H.265 sent on PT 96 will not play — [#9](https://github.com/OpenIPC/decoder/issues/9)
 > - **Simplified RTP handling for video:** no STAP-A/AP aggregation, packets with CSRC or header extensions are dropped, no packet-loss recovery — [#10](https://github.com/OpenIPC/decoder/issues/10)
-> - **No RTSP keepalive.** Servers that enforce a session timeout may drop the stream periodically — [#11](https://github.com/OpenIPC/decoder/issues/11)
 > - **No audio in Quad mode** — [#12](https://github.com/OpenIPC/decoder/issues/12)
 > - **Only 4 camera slots** — [#13](https://github.com/OpenIPC/decoder/issues/13)
 > - **Audio formats not supported:** MP4A-LATM, Opus, G.726, and AAC frames split across RTP packets — [#14](https://github.com/OpenIPC/decoder/issues/14)
 > - **Possible dependency on Google services (GAPPS)** on some devices; under investigation, so disable GAPPS with care — [#15](https://github.com/OpenIPC/decoder/issues/15)
-> - **Credentials are stored and sent in clear text** (plain RTSP/HTTP with Basic auth) — [#16](https://github.com/OpenIPC/decoder/issues/16)
+> - **Credentials are stored and sent in clear text** (plain RTSP/HTTP; Basic auth is sent unless the camera asks for Digest) — [#16](https://github.com/OpenIPC/decoder/issues/16)
 >
 > Known bugs are tracked separately under the [`bug` label](https://github.com/OpenIPC/decoder/issues?q=is%3Aissue+is%3Aopen+label%3Abug).
 
@@ -153,7 +150,7 @@ Network, video decoding and audio run on separate threads, so a slow decoder nev
 
 ## Security notes
 
-- Credentials are taken from the URL and sent as an HTTP/RTSP `Authorization: Basic` header. They are not included in the RTSP request line.
+- Credentials are taken from the URL and sent in the `Authorization` header: Basic first, Digest when the camera asks for it. They are not included in the RTSP request line.
 - Plain RTSP and HTTP are not encrypted. Use the app only on trusted networks, see [#16](https://github.com/OpenIPC/decoder/issues/16).
 - Camera URLs, including passwords, are kept in the app's private storage. Backup is disabled (`allowBackup="false"`).
 

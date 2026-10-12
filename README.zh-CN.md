@@ -37,7 +37,7 @@
 - **音频：** AAC（RFC 3640 `mpeg4-generic`、ADTS）、G.711 μ-law/A-law、L16 PCM（单声道/立体声）
 - **显示：** 单路画面，或 Quad 四分屏（同时显示 4 路摄像机）
 - **操作：** 双指缩放、拖动平移、双击复位，支持 Android TV 遥控器（Leanback 启动器）
-- **网络：** 断线后自动重连（指数退避），连接质量指示
+- **网络：** 支持 Basic 和 Digest 认证、RTSP 保活，断线后自动重连（指数退避），连接质量指示
 - **WebUI：** 内置浏览器，可打开摄像机的网页管理界面
 - **其他：** 长按截图，4 个摄像机槽位，可接收其他应用分享的地址
 
@@ -92,15 +92,12 @@
 > 以下是我们计划解决的已知不足，每一项都有对应的 issue。欢迎留言、提交测试结果和 pull request。
 >
 > - **仅支持 RTSP over TCP**，不支持 UDP 和组播 — [#7](https://github.com/OpenIPC/decoder/issues/7)
-> - **仅支持 Basic 认证**，需要 Digest 认证的摄像机无法连接 — [#8](https://github.com/OpenIPC/decoder/issues/8)
-> - **视频编码按 payload type 编号判断**（96 = H.264，97 = H.265），而不是读取 SDP。使用 PT 96 传输的 H.265 无法播放 — [#9](https://github.com/OpenIPC/decoder/issues/9)
 > - **视频的 RTP 处理较为简单：** 不支持 STAP-A/AP 聚合包，带 CSRC 或扩展头的包会被丢弃，也不处理丢包 — [#10](https://github.com/OpenIPC/decoder/issues/10)
-> - **没有 RTSP 保活**，设置了会话超时的服务器可能会周期性断开视频流 — [#11](https://github.com/OpenIPC/decoder/issues/11)
 > - **Quad 模式下没有声音** — [#12](https://github.com/OpenIPC/decoder/issues/12)
 > - **仅有 4 个摄像机槽位** — [#13](https://github.com/OpenIPC/decoder/issues/13)
 > - **不支持的音频格式：** MP4A-LATM、Opus、G.726，以及跨多个 RTP 包分片的 AAC 帧 — [#14](https://github.com/OpenIPC/decoder/issues/14)
 > - **部分设备上可能依赖 Google 服务（GAPPS）**，仍在调查中，请谨慎禁用 GAPPS — [#15](https://github.com/OpenIPC/decoder/issues/15)
-> - **用户名和密码以明文存储和传输**（未加密的 RTSP/HTTP，Basic 认证） — [#16](https://github.com/OpenIPC/decoder/issues/16)
+> - **用户名和密码以明文存储和传输**（未加密的 RTSP/HTTP；摄像机未要求 Digest 时发送 Basic） — [#16](https://github.com/OpenIPC/decoder/issues/16)
 >
 > 已知的程序错误另行收录在 [`bug` 标签](https://github.com/OpenIPC/decoder/issues?q=is%3Aissue+is%3Aopen+label%3Abug)下。
 
@@ -153,7 +150,7 @@ export KEY_PASS=your_key_password
 
 ## 安全说明
 
-- 用户名和密码从地址中提取，通过 `Authorization: Basic` 头发送，不会出现在 RTSP 请求行中。
+- 用户名和密码从地址中提取，通过 `Authorization` 头发送：默认使用 Basic，摄像机要求时改用 Digest。不会出现在 RTSP 请求行中。
 - RTSP 和 HTTP 均未加密，请仅在可信网络中使用，参见 [#16](https://github.com/OpenIPC/decoder/issues/16)。
 - 摄像机地址（含密码）保存在应用私有存储中，并已禁用备份（`allowBackup="false"`）。
 
