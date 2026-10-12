@@ -41,6 +41,7 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 
 - Android 5.0 (API 21) or higher
 - An IP camera with RTSP over TCP (see [Known limitations](#known-limitations))
+- Google services (GAPPS) are **not** required: the app works on AOSP builds without them. WebUI uses the system WebView, so it needs a working WebView package (on some devices this is Google's *Android System WebView*); disabling it affects only WebUI — [#15](https://github.com/OpenIPC/decoder/issues/15)
 
 ## Quick start
 
@@ -90,7 +91,6 @@ Shows all configured slots in a 2×2 grid. Each cell has its own connection and 
 > - **RTSP over TCP only.** No UDP or multicast — [#7](https://github.com/OpenIPC/decoder/issues/7)
 > - **Only 4 camera slots** — [#13](https://github.com/OpenIPC/decoder/issues/13)
 > - **G.726 audio is not supported** — [#14](https://github.com/OpenIPC/decoder/issues/14)
-> - **Possible dependency on Google services (GAPPS)** on some devices; under investigation, so disable GAPPS with care — [#15](https://github.com/OpenIPC/decoder/issues/15)
 > - **Credentials are sent in clear text** over plain RTSP/HTTP (Basic auth unless the camera asks for Digest); RTSPS is not supported and not planned — [#16](https://github.com/OpenIPC/decoder/issues/16)
 >
 > Known bugs are tracked separately under the [`bug` label](https://github.com/OpenIPC/decoder/issues?q=is%3Aissue+is%3Aopen+label%3Abug).
