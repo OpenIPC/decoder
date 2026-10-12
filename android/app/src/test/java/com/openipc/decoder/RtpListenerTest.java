@@ -132,6 +132,7 @@ public class RtpListenerTest {
         sender.close();
         RtspSession.minRetryMs = 1000;
         RtspSession.maxRetryMs = 30000;
+        RtspSession.watchdogMs = 8000;
     }
 
     private static int freePort() throws IOException {
@@ -141,10 +142,12 @@ public class RtpListenerTest {
     }
 
     private void send(int port, int pt, int count) throws IOException {
-        for (int i = 0; i < count; i++) {
-            byte[] p = RtspSessionTest.udpPacket(pt, seq++);
-            sender.send(new DatagramPacket(p, p.length, InetAddress.getLoopbackAddress(), port));
-        }
+        for (int i = 0; i < count; i++) sendSeq(port, pt, seq++);
+    }
+
+    private void sendSeq(int port, int pt, int s) throws IOException {
+        byte[] p = RtspSessionTest.udpPacket(pt, s);
+        sender.send(new DatagramPacket(p, p.length, InetAddress.getLoopbackAddress(), port));
     }
 
     /** Start listening and wait until the port is bound ("buffering"). */
@@ -234,5 +237,57 @@ public class RtpListenerTest {
             }
         }
         fail("port still in use after stop()");
+    }
+
+    @Test
+    public void audioOnTheSamePortDoesNotPushVideoOut() throws Exception {
+        int port = freePort();
+        rec.latch = new CountDownLatch(6);
+        listen("udp://@:" + port);
+        // Audio with its own, higher sequence numbers between the video packets
+        for (int i = 0; i < 6; i++) {
+            sendSeq(port, 96, 100 + i);
+            sendSeq(port, 98, 40000 + i);
+        }
+        assertTrue(rec.latch.await(3, TimeUnit.SECONDS));
+        Thread.sleep(100);
+        assertEquals(6, rec.pts.size());
+    }
+
+    @Test
+    public void codecWithoutPtStillTakesOnly96Or97() throws Exception {
+        int port = freePort();
+        listen("udp://@:" + port + "?codec=h265");
+        send(port, 98, 2); // audio first: not video
+        send(port, 96, 3);
+        assertTrue(rec.latch.await(3, TimeUnit.SECONDS));
+        assertEquals(1, rec.sdps.size());
+        assertEquals(96, rec.sdps.get(0).videoPt);
+        assertTrue("codec forced by the URL", rec.sdps.get(0).videoH265);
+    }
+
+    @Test
+    public void silenceIsReportedWithoutRebinding() throws Exception {
+        RtspSession.watchdogMs = 200;
+        int port = freePort();
+        listen("udp://@:" + port);
+        send(port, 96, 3);
+        assertTrue(rec.latch.await(3, TimeUnit.SECONDS));
+        long deadline = System.currentTimeMillis() + 3000;
+        while (!rec.statuses.contains("disconnected") && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10);
+        }
+        assertTrue(rec.statuses.contains("disconnected"));
+        // Still bound to the port: the next packet plays at once
+        rec.latch = new CountDownLatch(1);
+        send(port, 96, 1);
+        assertTrue(rec.latch.await(3, TimeUnit.SECONDS));
+        assertEquals(1, Collections.frequency(rec.statuses, "buffering"));
+        deadline = System.currentTimeMillis() + 1000;
+        while (Collections.frequency(rec.statuses, "connected") < 2
+                && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10);
+        }
+        assertEquals(2, Collections.frequency(rec.statuses, "connected"));
     }
 }

@@ -38,7 +38,8 @@ class RtpListener implements Closeable {
     /**
      * udp://[source@][address]:port[?codec=h264|h265][&pt=N], as VLC writes it; rtp:// is
      * accepted too. An empty or local address listens on that port, a multicast address
-     * joins the group, and a source accepts datagrams from that sender only.
+     * joins the group, and a source accepts datagrams from that sender only. Video is
+     * payload type 96 or 97 unless pt= names another; codec= overrides the codec.
      */
     static final class Url {
         /** Multicast group or local address to bind; null for every local address. */
@@ -146,8 +147,11 @@ class RtpListener implements Closeable {
     private final String tag;
     private final Url url;
     private final MulticastSocket socket;
-    private final RtpReorder reorder =
-            new RtpReorder(64, UdpReceiver.REORDER_MS);
+    /**
+     * One reorder buffer per payload type: audio sharing the port has its own sequence
+     * numbers, which must not push video packets out as late ones.
+     */
+    private final RtpReorder[] reorders = new RtpReorder[128];
     private volatile boolean closed;
     private boolean joined;
     private long rejected;
@@ -188,8 +192,13 @@ class RtpListener implements Closeable {
         InetAddress source = url.source;
         try {
             while (!closed && keepGoing.holds()) {
-                long ms = reorder.msUntilDeadline(System.nanoTime());
-                socket.setSoTimeout(ms < 0 ? 250 : (int) Math.max(1, Math.min(250, ms)));
+                long now = System.nanoTime();
+                long ms = 250;
+                for (RtpReorder r : reorders) {
+                    long d = r != null ? r.msUntilDeadline(now) : -1;
+                    if (d >= 0) ms = Math.min(ms, d);
+                }
+                socket.setSoTimeout((int) Math.max(1, ms));
                 try {
                     p.setLength(buf.length);
                     socket.receive(p);
@@ -200,18 +209,28 @@ class RtpListener implements Closeable {
                         }
                         continue;
                     }
-                    reorder.push(buf, p.getOffset(), p.getLength(), System.nanoTime(), sink);
+                    if (p.getLength() < 12) continue;
+                    int pt = buf[p.getOffset() + 1] & 0x7F;
+                    RtpReorder r = reorders[pt];
+                    if (r == null) r = reorders[pt] = new RtpReorder(64, UdpReceiver.REORDER_MS);
+                    r.push(buf, p.getOffset(), p.getLength(), System.nanoTime(), sink);
                 } catch (SocketTimeoutException ignored) {
-                    // Check the condition and the reorder deadline
+                    // Check the condition and the reorder deadlines
                 }
-                reorder.poll(System.nanoTime(), sink);
+                now = System.nanoTime();
+                for (RtpReorder r : reorders) {
+                    if (r != null) r.poll(now, sink);
+                }
             }
         } catch (IOException e) {
             if (!closed) throw e;
         } finally {
-            if (reorder.dropped() > 0 || reorder.skipped() > 0) {
-                Log.i(TAG, tag + ": UDP " + reorder.skipped() + " packets lost, "
-                        + reorder.dropped() + " late or duplicate");
+            for (int pt = 0; pt < reorders.length; pt++) {
+                RtpReorder r = reorders[pt];
+                if (r != null && (r.dropped() > 0 || r.skipped() > 0)) {
+                    Log.i(TAG, tag + ": UDP pt " + pt + ": " + r.skipped() + " packets lost, "
+                            + r.dropped() + " late or duplicate");
+                }
             }
             close();
         }

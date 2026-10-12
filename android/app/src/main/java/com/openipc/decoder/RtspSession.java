@@ -88,6 +88,8 @@ class RtspSession {
     private boolean udpPlaying;
     /** Listener of a udp:// slot, else null. */
     private RtpListener listener;
+    /** A udp:// slot is listening: silence is reported, never "fixed" by a rebind. */
+    private volatile boolean listening;
     private Thread networkThread;
     private Thread watchdogThread;
 
@@ -147,6 +149,7 @@ class RtspSession {
         synchronized (lock) {
             generation++;
             active = false;
+            keepalive = null;
             closeSocketLocked();
             if (networkThread != null) networkThread.interrupt();
             if (watchdogThread != null) watchdogThread.interrupt();
@@ -232,7 +235,8 @@ class RtspSession {
                     }
                 }
             }
-            if (active && System.nanoTime() / 1_000_000 - lastPacketMs > watchdogMs) {
+            if (active && !listening
+                    && System.nanoTime() / 1_000_000 - lastPacketMs > watchdogMs) {
                 Log.w(TAG, tag + ": stream is inactive, reconnecting");
                 active = false;
                 synchronized (lock) {
@@ -419,6 +423,9 @@ class RtspSession {
                 return false;
             }
             listener = l;
+            listening = true;
+            // No RTSP here: nothing of an older connection may be sent by the watchdog
+            keepalive = null;
             lastPacketMs = System.nanoTime() / 1_000_000;
             streamBytes = 0;
             bitrateMarkNs = System.nanoTime();
@@ -430,14 +437,22 @@ class RtspSession {
             status(gen, "buffering");
             final Sdp[] current = new Sdp[1];
             final boolean[] first = {true};
-            l.run(() -> active && gen == generation, (buf, offset, length) -> {
+            l.run(() -> {
+                if (!active || gen != generation) return false;
+                // The sender went quiet: say so, keep listening (a rebind would only lose
+                // packets), and report "connected" again with the next usable one
+                if (!first[0] && System.nanoTime() / 1_000_000 - lastPacketMs > watchdogMs) {
+                    first[0] = true;
+                    status(gen, "disconnected");
+                }
+                return true;
+            }, (buf, offset, length) -> {
                 if (gen != generation || length < 12) return;
                 streamBytes += length;
                 int pt = buf[offset + 1] & 0x7F;
                 Sdp sdp = current[0];
-                boolean video = u.pt >= 0 ? pt == u.pt
-                        : u.codec != null ? sdp == null || pt == sdp.videoPt
-                        : pt == Sdp.PT_H264 || pt == Sdp.PT_H265;
+                // Video is the forced type, or 96/97; anything else (audio) is ignored
+                boolean video = u.pt >= 0 ? pt == u.pt : pt == Sdp.PT_H264 || pt == Sdp.PT_H265;
                 if (video && (sdp == null || sdp.videoPt != pt)) {
                     sdp = new Sdp();
                     sdp.videoPt = pt;
@@ -460,7 +475,10 @@ class RtspSession {
             return true;
         } finally {
             synchronized (lock) {
-                if (listener == l) listener = null;
+                if (listener == l) {
+                    listener = null;
+                    listening = false;
+                }
             }
             l.close();
         }
