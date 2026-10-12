@@ -19,10 +19,10 @@
 
 可直接安装的版本位于 [**latest** 发布页](https://github.com/OpenIPC/decoder/releases/tag/latest)：
 
-| 文件             | 说明                                    |
-|------------------|-----------------------------------------|
-| `decoder-v2.apk` | **当前版本**，推荐使用                  |
-| `decoder.apk`    | `basic` 分支的旧版本                    |
+| 文件             | 说明                   |
+|------------------|------------------------|
+| `decoder-v2.apk` | **当前版本**，推荐使用 |
+| `decoder.apk`    | `basic` 分支的旧版本   |
 
 [Google Play](https://play.google.com/apps/internaltest/4701231141824898735) 上提供测试渠道。如需加入，请通过 [OpenIPC Telegram 频道](https://openipc.org/our-channels)发送您的电子邮箱。
 
@@ -32,14 +32,14 @@
 - **音频：** AAC（RFC 3640 `mpeg4-generic`、ADTS、MP4A-LATM）、Opus、G.711 μ-law/A-law、L16 PCM（单声道/立体声）；多画面模式下播放所选画面的声音
 - **显示：** 单路画面，或多画面模式（Quad），以 2×2 或 3×3 网格最多同时显示 8 路摄像机
 - **操作：** 双指缩放、拖动平移、双击复位，支持 Android TV 遥控器（Leanback 启动器）
-- **网络：** 支持 Basic 和 Digest 认证、RTSP 保活，断线后自动重连（指数退避），连接质量指示
+- **网络：** RTSP over TCP 或 UDP（Auto 模式可回退到 TCP）、RTSP 组播、接收摄像机通过 UDP 主动推送的 RTP（单播或组播），支持 Basic 和 Digest 认证、RTSP 保活，断线后自动重连（指数退避），连接质量指示
 - **WebUI：** 内置浏览器，可打开摄像机的网页管理界面
 - **其他：** 8 个摄像机槽位，地址加密保存，长按截图，可接收其他应用分享的地址
 
 ## 系统要求
 
 - Android 5.0（API 21）或更高版本
-- 支持 RTSP over TCP 的 IP 摄像机（参见[已知限制](#已知限制)）
+- 支持 RTSP 的 IP 摄像机，或能通过 UDP 主动推送 RTP 的摄像机（OpenIPC Majestic `outgoing`），参见[传输方式](#传输方式)
 - **不**需要 Google 服务（GAPPS）：应用可在没有 GAPPS 的 AOSP 系统上运行。WebUI 使用系统 WebView，因此需要可用的 WebView 软件包（部分设备上为 Google 的 *Android System WebView*）；禁用它只影响 WebUI — [#15](https://github.com/OpenIPC/decoder/issues/15)
 
 ## 快速上手
@@ -50,6 +50,7 @@
    ```
    rtsp://username:password@ip_address:554/stream=0
    ```
+   地址下方可选择[传输方式](#传输方式)，默认为 TCP。
 4. 点击 **Save**。应用会立即连接；视频流中断时会自动重连。
 
 ## 操作说明
@@ -60,8 +61,8 @@
 |--------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
 | **Q**        | 开启或关闭多画面模式（Quad）                                                                                                                  |
 | **1**–**8**  | 切换摄像机槽位。当前槽位编号的颜色表示连接质量：绿色为抖动低于 100 毫秒，黄色为 100–300 毫秒，红色为高于 300 毫秒。灰色编号表示该槽位未配置。 |
-| **U**        | 全屏显示预留的 UDP RTP 画面（[#68](https://github.com/OpenIPC/decoder/issues/68)）                                                            |
-| **Settings** | 编辑当前槽位的 RTSP 地址（仅单路模式）                                                                                                        |
+| **U**        | 全屏显示 3×3 网格中预留的 UDP 画面                                                                                                            |
+| **Settings** | 编辑当前槽位的地址和传输方式（仅单路模式）                                                                                                    |
 | **WebUI**    | 打开摄像机网页界面，用户名和密码取自 RTSP 地址（仅单路模式）                                                                                  |
 | **Exit**     | 退出应用。旁边的小字是应用版本号和构建哈希。                                                                                                  |
 
@@ -77,18 +78,58 @@
 
 ### 从其他应用打开摄像机
 
-应用可接收纯文本分享（`ACTION_SEND`，`text/plain`）。从其他应用（例如 OpenIPC Network）分享 `rtsp://` 地址后，该地址会写入当前槽位。
+应用可接收纯文本分享（`ACTION_SEND`，`text/plain`）。从其他应用（例如 OpenIPC Network）分享 `rtsp://` 或 `udp://` 地址后，该地址会写入当前槽位。可选参数 `transport`（`tcp`、`udp`、`auto`、`multicast`）用于设置该槽位的传输方式：
+
+```sh
+adb shell am start -a android.intent.action.SEND -t text/plain \
+  --es android.intent.extra.TEXT 'rtsp://user:pass@192.168.1.10/stream=0' \
+  --es transport udp -n com.openipc.decoder/.Decoder
+```
 
 ### 多画面模式（Quad）
 
-以 2×2 网格显示已配置的槽位；只要使用了第 5–8 个槽位中的任意一个，就改为 3×3 网格。3×3 网格的第九格预留给通过 UDP 主动推送 RTP 的摄像机（计划中，[#68](https://github.com/OpenIPC/decoder/issues/68)）；目前其中显示推流目标地址和端口。菜单中的 **U** 可将其全屏显示。每个画面都有独立的连接和解码器，因此能流畅播放多少路高分辨率码流取决于设备的视频解码器：五路及以上时建议使用摄像机的子码流。部分摄像机同一时间只允许一个 RTSP 客户端。长按某个画面即可播放其声音（再次长按则静音）；被选中的画面显示 AUDIO 标记，选择会被记住。点击任意画面即可打开菜单。
+以 2×2 网格显示已配置的槽位；只要使用了第 5–8 个槽位中的任意一个，就改为 3×3 网格。3×3 网格的第九格预留给通过 UDP 主动推送 RTP 的摄像机；目前其中仅显示推流目标地址和端口，菜单中的 **U** 可将其全屏显示。如需立即观看此类摄像机，请在任意槽位中填写 [`udp://` 地址](#udp-槽位-majestic-outgoing)。每个画面都有独立的连接和解码器，因此能流畅播放多少路高分辨率码流取决于设备的视频解码器：五路及以上时建议使用摄像机的子码流。部分摄像机同一时间只允许一个 RTSP 客户端。长按某个画面即可播放其声音（再次长按则静音）；被选中的画面显示 AUDIO 标记，选择会被记住。点击任意画面即可打开菜单。
+
+## 传输方式
+
+每个槽位可单独设置传输方式：在 **Settings** 中地址下方选择（或通过分享链接的 `transport` 参数设置）。
+
+| 传输方式        | 视频如何到达                                | 说明                                                                                                                    |
+|-----------------|---------------------------------------------|-------------------------------------------------------------------------------------------------------------------------|
+| **TCP**（默认） | RTP 封装在 RTSP 连接中                      | 适用于所有环境，也可穿过 NAT 和防火墙                                                                                   |
+| **UDP**         | 通过 UDP 传输 RTP，每路一对端口             | 局域网内延迟更低。丢失的包直接跳过，不会重传。不会回退到 TCP                                                            |
+| **Auto**        | 优先 UDP，UDP 不可用时改用 TCP              | 摄像机拒绝 UDP 或 3 秒内未收到视频时回退到 TCP，并保持 TCP 直到修改该槽位                                               |
+| **Multicast**   | RTSP 组播（Android 8.0+），被拒绝时改用 TCP | 适用于提供 RTSP 组播的服务器。OpenIPC Majestic 和 XM 摄像机不支持：它们返回 400 或 451，槽位会在同一连接中改用 TCP 播放 |
+
+### UDP 槽位 (Majestic outgoing)
+
+槽位也可以接收摄像机不经 RTSP 主动推送的 RTP。为此请填写 `udp://` 地址代替 `rtsp://`：
+
+| 地址                                | 含义                                   |
+|-------------------------------------|----------------------------------------|
+| `udp://@:5600`                      | 监听 5600 端口                         |
+| `udp://@239.1.2.3:5600`             | 加入 239.1.2.3 组播组，端口 5600       |
+| `udp://192.168.1.10@239.1.2.3:5600` | 同上，但只接收该发送端的数据包         |
+| `udp://@:5600?codec=h265&pt=97`     | 默认值不适用时，指定编码或视频负载类型 |
+
+除非指定 `codec=`，编码根据 RTP 负载类型判断（96 → H.264，97 → H.265）；播放过程中摄像机切换编码也会自动跟随。仅支持视频。两个槽位不能监听同一端口。
+
+在摄像机上，将本设备添加为 `outgoing` 的目标（编辑 `/etc/majestic.yaml` 后重启 Majestic）：
+
+```yaml
+outgoing:
+  servers:
+    - udp://192.168.1.20:5600
+```
+
+摄像机上的 `/api/v1/outgoing.json` 可查看推流是否正常。Majestic 也可以推送到组播组（`udp://239.1.2.3:5600`），这样多台设备可以同时观看同一台摄像机。在 Wi‑Fi 下，应用加入组播组期间会持有 multicast lock。
 
 ## 已知限制
 
 > [!IMPORTANT]
 > 每一项都有对应的 issue。欢迎留言、提交测试结果和 pull request。
 >
-> - **仅支持 RTSP over TCP**，暂不支持 UDP 和组播 — [#7](https://github.com/OpenIPC/decoder/issues/7)
+> - **RTSP 组播需要 Android 8.0+**，且服务器须支持；OpenIPC 摄像机不支持 — [#69](https://github.com/OpenIPC/decoder/issues/69)
 > - **不支持 G.726 音频，也不支持流内配置的 MP4A-LATM（`cpresent=1`）。** OpenIPC Majestic 不使用这些格式，支持 G.726 的摄像机通常也能输出 G.711 或 AAC — [#14](https://github.com/OpenIPC/decoder/issues/14)
 > - **用户名和密码以明文传输**（未加密的 RTSP/HTTP；摄像机未要求 Digest 时发送 Basic），不支持 RTSPS，也不计划支持 — [#16](https://github.com/OpenIPC/decoder/issues/16)
 >
@@ -128,27 +169,29 @@ export KEY_PASS=your_key_password
 
 ## 架构
 
-| 类                                  | 作用                                                            |
-|-------------------------------------|-----------------------------------------------------------------|
-| `Decoder`                           | 主 Activity：界面、生命周期、设置、单路视频解码、多画面网格     |
-| `RtspClient`                        | 单路数据流：RTSP 会话、NAL 重组、音频、连接质量                 |
-| `RtspSession`                       | 单个 RTSP over TCP 会话：握手、RTP 接收、保活、看门狗、退避重连 |
-| `RtspAuth`、`Sdp`                   | Basic 与 Digest 认证；解析摄像机的会话描述                      |
-| `NalAssembler`                      | 将 RTP 包重组为 H.264/H.265 NAL 单元，丢弃因丢包而损坏的单元    |
-| `MediaCodecManager`、`DecoderRetry` | 硬件视频解码器的生命周期管理与出错后的恢复                      |
-| `AudioManager`、`AudioConfig`       | 音频处理：G.711/L16 转换、AAC/Opus 解码、通过 AudioTrack 播放   |
-| `QuadCell`                          | 多画面中的单个画面：独立的会话、解码器和可选音频                |
-| `MenuManager`                       | 弹出菜单、地址编辑器、WebUI 浏览器                              |
-| `CredentialStore`、`KeystoreCipher` | 摄像机地址加密存储（Android Keystore）                          |
-| `FramePool`、`Frame`                | 缓冲区池，减轻垃圾回收压力                                      |
-| `App`、`Crash`                      | 未捕获异常处理与崩溃报告界面                                    |
+| 类                                       | 作用                                                                      |
+|------------------------------------------|---------------------------------------------------------------------------|
+| `Decoder`                                | 主 Activity：界面、生命周期、设置、单路视频解码、多画面网格               |
+| `RtspClient`                             | 单路数据流：RTSP 会话、NAL 重组、音频、连接质量                           |
+| `RtspSession`                            | 单个 RTSP 会话（TCP、UDP 或组播）：握手、RTP 接收、保活、看门狗、退避重连 |
+| `RtspAuth`、`Sdp`                        | Basic 与 Digest 认证；解析摄像机的会话描述                                |
+| `Transport`、`UdpReceiver`、`RtpReorder` | 传输方式协商；带发送端过滤的 UDP 与组播接收；数据包重排序                 |
+| `RtpListener`                            | `udp://` 槽位：接收摄像机主动推送的 RTP                                   |
+| `NalAssembler`                           | 将 RTP 包重组为 H.264/H.265 NAL 单元，丢弃因丢包而损坏的单元              |
+| `MediaCodecManager`、`DecoderRetry`      | 硬件视频解码器的生命周期管理与出错后的恢复                                |
+| `AudioManager`、`AudioConfig`            | 音频处理：G.711/L16 转换、AAC/Opus 解码、通过 AudioTrack 播放             |
+| `QuadCell`                               | 多画面中的单个画面：独立的会话、解码器和可选音频                          |
+| `MenuManager`                            | 弹出菜单、地址编辑器、WebUI 浏览器                                        |
+| `CredentialStore`、`KeystoreCipher`      | 摄像机地址加密存储（Android Keystore）                                    |
+| `FramePool`、`Frame`                     | 缓冲区池，减轻垃圾回收压力                                                |
+| `App`、`Crash`                           | 未捕获异常处理与崩溃报告界面                                              |
 
 网络、视频解码和音频分别运行在独立线程中，解码器较慢时也不会阻塞网络读取。
 
 ## 安全说明
 
 - 用户名和密码从地址中提取，通过 `Authorization` 头发送：默认使用 Basic，摄像机要求时改用 Digest。不会出现在 RTSP 请求行中。
-- RTSP 和 HTTP 均未加密，不支持 RTSPS。若摄像机要求将用户名和密码写在地址路径或参数中（例如 `user=…_password=…`），它们会随每个请求发送。请仅在可信网络中使用，参见 [#16](https://github.com/OpenIPC/decoder/issues/16)。
+- RTSP、UDP 上的 RTP 和 HTTP 均未加密，不支持 RTSPS。若摄像机要求将用户名和密码写在地址路径或参数中（例如 `user=…_password=…`），它们会随每个请求发送。请仅在可信网络中使用，参见 [#16](https://github.com/OpenIPC/decoder/issues/16)。
 - 摄像机地址（含密码）加密保存在应用私有存储中（AES-256-GCM，密钥保存在 Android Keystore，Android 6.0 及以上），在 Android 5.x 或 Keystore 不可用时以明文保存，并已禁用备份（`allowBackup="false"`）。
 
 ## 设备兼容性

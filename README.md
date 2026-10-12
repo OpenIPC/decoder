@@ -19,10 +19,10 @@ A small Android app for watching RTSP streams from IP cameras, with hardware H.2
 
 Ready-to-install builds are in the [**latest** release](https://github.com/OpenIPC/decoder/releases/tag/latest):
 
-| File             | What it is                                                  |
-|------------------|-------------------------------------------------------------|
-| `decoder-v2.apk` | **Current version**, recommended                            |
-| `decoder.apk`    | Legacy version from the `basic` branch                      |
+| File             | What it is                             |
+|------------------|----------------------------------------|
+| `decoder-v2.apk` | **Current version**, recommended       |
+| `decoder.apk`    | Legacy version from the `basic` branch |
 
 A beta channel is available on [Google Play](https://play.google.com/apps/internaltest/4701231141824898735). To join it, send your e-mail through the [OpenIPC Telegram channels](https://openipc.org/our-channels).
 
@@ -32,14 +32,14 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 - **Audio:** AAC (RFC 3640 `mpeg4-generic`, ADTS, MP4A-LATM), Opus, G.711 μ-law/A-law, L16 PCM (mono/stereo); in multi-view, the sound of the selected cell
 - **Display:** single camera, or multi-view (Quad) with up to 8 cameras at once in a 2×2 or 3×3 grid
 - **Controls:** pinch-to-zoom, pan, double-tap to reset, Android TV remote (Leanback launcher)
-- **Network:** Basic and Digest authentication, RTSP keepalive, automatic reconnection with exponential back-off, connection-quality indicator
+- **Network:** RTSP over TCP or UDP (Auto falls back to TCP), RTSP multicast, plain RTP pushed over UDP by the camera (unicast or multicast), Basic and Digest authentication, RTSP keepalive, automatic reconnection with exponential back-off, connection-quality indicator
 - **WebUI:** built-in browser for the camera's web interface
 - **More:** 8 camera slots, URLs stored encrypted, long-press screenshot, URLs can be shared from other apps
 
 ## Requirements
 
 - Android 5.0 (API 21) or higher
-- An IP camera with RTSP over TCP (see [Known limitations](#known-limitations))
+- An IP camera with RTSP, or one that pushes RTP over UDP (OpenIPC Majestic `outgoing`), see [Transports](#transports)
 - Google services (GAPPS) are **not** required: the app works on AOSP builds without them. WebUI uses the system WebView, so it needs a working WebView package (on some devices this is Google's *Android System WebView*); disabling it affects only WebUI — [#15](https://github.com/OpenIPC/decoder/issues/15)
 
 ## Quick start
@@ -50,6 +50,7 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
    ```
    rtsp://username:password@ip_address:554/stream=0
    ```
+   Under the URL you can choose the [transport](#transports); TCP is the default.
 4. Press **Save**. The app connects straight away and reconnects automatically if the stream drops.
 
 ## Controls
@@ -60,8 +61,8 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 |--------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Q**        | Turn multi-view (Quad) on or off                                                                                                                                                   |
 | **1**–**8**  | Switch to a camera slot. The active slot's number shows the connection quality: green under 100 ms of jitter, yellow 100–300 ms, red above 300 ms. A grey number is an empty slot. |
-| **U**        | Show the reserved UDP RTP cell full-screen ([#68](https://github.com/OpenIPC/decoder/issues/68))                                                                                   |
-| **Settings** | Edit the RTSP URL of the active slot (single-camera mode only)                                                                                                                     |
+| **U**        | Show the reserved UDP cell of the 3×3 grid full-screen                                                                                                                             |
+| **Settings** | Edit the URL and the transport of the active slot (single-camera mode only)                                                                                                        |
 | **WebUI**    | Open the camera's web interface; credentials come from the RTSP URL (single-camera mode only)                                                                                      |
 | **Exit**     | Close the app. The small text next to it is the app version and build hash.                                                                                                        |
 
@@ -77,18 +78,58 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 
 ### Opening a camera from another app
 
-The app accepts plain-text shares (`ACTION_SEND`, `text/plain`). Sharing an `rtsp://` URL from another app, for example OpenIPC Network, puts it into the active slot.
+The app accepts plain-text shares (`ACTION_SEND`, `text/plain`). Sharing an `rtsp://` or `udp://` URL from another app, for example OpenIPC Network, puts it into the active slot. An optional `transport` extra (`tcp`, `udp`, `auto`, `multicast`) sets the slot's transport:
+
+```sh
+adb shell am start -a android.intent.action.SEND -t text/plain \
+  --es android.intent.extra.TEXT 'rtsp://user:pass@192.168.1.10/stream=0' \
+  --es transport udp -n com.openipc.decoder/.Decoder
+```
 
 ### Multi-view (Quad)
 
-Shows the configured slots in a 2×2 grid, or in a 3×3 grid once any of slots 5–8 is used. The ninth cell of the 3×3 grid is reserved for a camera that pushes RTP over UDP (planned, [#68](https://github.com/OpenIPC/decoder/issues/68)); for now it shows the address and port to send to. **U** in the menu opens it full-screen. Each cell has its own connection and decoder, so the device's video decoder limits how many high-resolution streams play smoothly: with five or more cameras, their substreams are a good choice. Some cameras accept only one RTSP client at a time. Long-press a cell to play its audio (long-press it again to mute); the selected cell shows an AUDIO badge and is remembered. Tap any cell to open the menu.
+Shows the configured slots in a 2×2 grid, or in a 3×3 grid once any of slots 5–8 is used. The ninth cell of the 3×3 grid is reserved for a camera that pushes RTP over UDP; for now it only shows the address and port to send to, and **U** in the menu opens it full-screen. To watch such a camera today, put a [`udp://` URL](#udp-slots-majestic-outgoing) into any slot. Each cell has its own connection and decoder, so the device's video decoder limits how many high-resolution streams play smoothly: with five or more cameras, their substreams are a good choice. Some cameras accept only one RTSP client at a time. Long-press a cell to play its audio (long-press it again to mute); the selected cell shows an AUDIO badge and is remembered. Tap any cell to open the menu.
+
+## Transports
+
+Each slot has its own transport, chosen under the URL in **Settings** (or with the `transport` extra of a shared link):
+
+| Transport         | How the video arrives                                    | Notes                                                                                                                                                    |
+|-------------------|----------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **TCP** (default) | RTP inside the RTSP connection                           | Works everywhere, also through NAT and firewalls                                                                                                         |
+| **UDP**           | RTP over UDP, a port pair per track                      | Lower latency on a LAN. Lost packets are skipped, not resent. Never falls back                                                                           |
+| **Auto**          | UDP, or TCP when UDP does not work                       | Falls back to TCP when the camera refuses UDP or no video arrives within 3 s, then stays on TCP until the slot is changed                                |
+| **Multicast**     | RTSP multicast (Android 8.0+), or TCP when it is refused | For servers that offer RTSP multicast. OpenIPC Majestic and XM cameras do not: they reply 400 or 451, and the slot plays over TCP in the same connection |
+
+### UDP slots (Majestic outgoing)
+
+A slot can also receive RTP that the camera pushes by itself, without RTSP. Put a `udp://` URL into the slot instead of `rtsp://`:
+
+| URL                                 | Meaning                                                              |
+|-------------------------------------|----------------------------------------------------------------------|
+| `udp://@:5600`                      | Listen on port 5600                                                  |
+| `udp://@239.1.2.3:5600`             | Join the multicast group 239.1.2.3 on port 5600                      |
+| `udp://192.168.1.10@239.1.2.3:5600` | The same, but accept packets from this sender only                   |
+| `udp://@:5600?codec=h265&pt=97`     | Set the codec or the video payload type when the defaults do not fit |
+
+The codec is taken from the RTP payload type (96 → H.264, 97 → H.265) unless `codec=` is given, and a codec change on the camera is followed while playing. Video only. Two slots cannot listen on the same port.
+
+On the camera, add the device as an `outgoing` destination in `/etc/majestic.yaml` (then restart Majestic):
+
+```yaml
+outgoing:
+  servers:
+    - udp://192.168.1.20:5600
+```
+
+`/api/v1/outgoing.json` on the camera shows whether the destination is live. Majestic can also send to a multicast group (`udp://239.1.2.3:5600`), so several devices can watch one camera. On Wi‑Fi the app holds a multicast lock while it is in a group.
 
 ## Known limitations
 
 > [!IMPORTANT]
 > Each item has an issue — comments, test results and pull requests are welcome.
 >
-> - **RTSP over TCP only.** No UDP or multicast yet — [#7](https://github.com/OpenIPC/decoder/issues/7)
+> - **RTSP multicast needs Android 8.0+** and a server that offers it; OpenIPC cameras do not — [#69](https://github.com/OpenIPC/decoder/issues/69)
 > - **G.726 audio and MP4A-LATM with in-band configuration (`cpresent=1`) are not supported.** OpenIPC Majestic does not use them, and cameras that offer G.726 can usually send G.711 or AAC instead — [#14](https://github.com/OpenIPC/decoder/issues/14)
 > - **Credentials are sent in clear text** over plain RTSP/HTTP (Basic auth unless the camera asks for Digest); RTSPS is not supported and not planned — [#16](https://github.com/OpenIPC/decoder/issues/16)
 >
@@ -128,27 +169,29 @@ Debug and release builds are signed with different keys. To switch from one to t
 
 ## Architecture
 
-| Class                               | Role                                                                                                 |
-|-------------------------------------|------------------------------------------------------------------------------------------------------|
-| `Decoder`                           | Main activity: UI, lifecycle, settings, single-view video decoding, multi-view grid                  |
-| `RtspClient`                        | Single-view stream: RTSP session, NAL assembly, audio, connection quality                            |
-| `RtspSession`                       | One RTSP-over-TCP session: handshake, RTP receive loop, keepalive, watchdog, reconnect with back-off |
-| `RtspAuth`, `Sdp`                   | Basic and Digest authentication; parsing of the camera's session description                         |
-| `NalAssembler`                      | Rebuilds H.264/H.265 NAL units from RTP packets, drops units damaged by packet loss                  |
-| `MediaCodecManager`, `DecoderRetry` | Hardware video decoder lifecycle and recovery after decoder errors                                   |
-| `AudioManager`, `AudioConfig`       | Audio pipeline: G.711/L16 conversion, AAC/Opus decoding, AudioTrack playback                         |
-| `QuadCell`                          | One multi-view cell: its own session, decoder and optional audio                                     |
-| `MenuManager`                       | Popup menu, URL editor, WebUI browser                                                                |
-| `CredentialStore`, `KeystoreCipher` | Encrypted storage of camera URLs (Android Keystore)                                                  |
-| `FramePool`, `Frame`                | Buffer pool that reduces garbage-collector load                                                      |
-| `App`, `Crash`                      | Uncaught-exception handler and crash report screen                                                   |
+| Class                                    | Role                                                                                                              |
+|------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
+| `Decoder`                                | Main activity: UI, lifecycle, settings, single-view video decoding, multi-view grid                               |
+| `RtspClient`                             | Single-view stream: RTSP session, NAL assembly, audio, connection quality                                         |
+| `RtspSession`                            | One RTSP session over TCP, UDP or multicast: handshake, RTP receive, keepalive, watchdog, reconnect with back-off |
+| `RtspAuth`, `Sdp`                        | Basic and Digest authentication; parsing of the camera's session description                                      |
+| `Transport`, `UdpReceiver`, `RtpReorder` | Transport negotiation; UDP and multicast receive with a sender filter; packet reordering                          |
+| `RtpListener`                            | `udp://` slots: plain RTP pushed by the camera                                                                    |
+| `NalAssembler`                           | Rebuilds H.264/H.265 NAL units from RTP packets, drops units damaged by packet loss                               |
+| `MediaCodecManager`, `DecoderRetry`      | Hardware video decoder lifecycle and recovery after decoder errors                                                |
+| `AudioManager`, `AudioConfig`            | Audio pipeline: G.711/L16 conversion, AAC/Opus decoding, AudioTrack playback                                      |
+| `QuadCell`                               | One multi-view cell: its own session, decoder and optional audio                                                  |
+| `MenuManager`                            | Popup menu, URL editor, WebUI browser                                                                             |
+| `CredentialStore`, `KeystoreCipher`      | Encrypted storage of camera URLs (Android Keystore)                                                               |
+| `FramePool`, `Frame`                     | Buffer pool that reduces garbage-collector load                                                                   |
+| `App`, `Crash`                           | Uncaught-exception handler and crash report screen                                                                |
 
 Network, video decoding and audio run on separate threads, so a slow decoder never blocks the socket.
 
 ## Security notes
 
 - Credentials are taken from the URL and sent in the `Authorization` header: Basic first, Digest when the camera asks for it. They are not included in the RTSP request line.
-- RTSP and HTTP are not encrypted, and RTSPS is not supported. Credentials that a camera expects inside the URL path or query (for example `user=…_password=…`) are sent with every request. Use the app only on trusted networks, see [#16](https://github.com/OpenIPC/decoder/issues/16).
+- RTSP, RTP over UDP and HTTP are not encrypted, and RTSPS is not supported. Credentials that a camera expects inside the URL path or query (for example `user=…_password=…`) are sent with every request. Use the app only on trusted networks, see [#16](https://github.com/OpenIPC/decoder/issues/16).
 - Camera URLs, including passwords, are stored encrypted (AES-256-GCM with a key kept in the Android Keystore, Android 6.0+) in the app's private storage. On Android 5.x, or if the Keystore is unavailable, they are stored in plain text. Backup is disabled (`allowBackup="false"`).
 
 ## Device compatibility
