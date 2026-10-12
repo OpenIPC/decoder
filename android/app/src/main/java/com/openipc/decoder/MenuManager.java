@@ -110,6 +110,7 @@ class MenuManager {
             int margin = dp(12);
             mMenuPopup.showAtLocation(anchor, Gravity.TOP | Gravity.START, margin, margin);
             mMenuPopup.setOnDismissListener(() -> mMenuPopup = null);
+            focusForKeys(mMenuLayout);
             return;
         }
 
@@ -126,6 +127,7 @@ class MenuManager {
             }
         };
         layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setFocusableInTouchMode(true);
 
         PopupWindow popup = new PopupWindow(layout, LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, true);
@@ -133,6 +135,7 @@ class MenuManager {
         popup.showAtLocation(anchor, Gravity.TOP | Gravity.START, margin, margin);
         mMenuPopup = popup;
         popup.setOnDismissListener(() -> mMenuPopup = null);
+        focusForKeys(layout);
 
         LinearLayout camRow = new LinearLayout(activity);
         camRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -245,6 +248,15 @@ class MenuManager {
                 }
             }
         }
+    }
+
+    /**
+     * A menu opened by touch has no focused view, so keys never reach the layout and Escape
+     * did not close it. In touch mode the layout itself takes focus; with a remote, focus
+     * stays on the menu items as before.
+     */
+    private static void focusForKeys(View layout) {
+        if (layout.isInTouchMode()) layout.requestFocus();
     }
 
     private TextView createItem(String title) {
