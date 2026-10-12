@@ -117,16 +117,18 @@ class RtspSession {
         this.mode = mode != null ? mode : Transport.Mode.TCP;
     }
 
-    private static boolean udpFailed(String url) {
-        Long at = udpFailedAt.get(url);
+    /** Keyed by mode too: a failed multicast says nothing about unicast UDP. */
+    private static boolean udpFailed(Transport.Mode mode, String url) {
+        String key = mode + " " + url;
+        Long at = udpFailedAt.get(key);
         if (at == null) return false;
         if (System.nanoTime() / 1_000_000 - at < udpRetryMs) return true;
-        udpFailedAt.remove(url);
+        udpFailedAt.remove(key);
         return false;
     }
 
-    private void markUdpFailed() {
-        udpFailedAt.put(url, System.nanoTime() / 1_000_000);
+    private void markUdpFailed(Transport.Mode mode) {
+        udpFailedAt.put(mode + " " + url, System.nanoTime() / 1_000_000);
     }
 
     boolean isActive() { return active; }
@@ -287,7 +289,14 @@ class RtspSession {
 
             Transport.Mode m = mode;
             boolean auto = m == Transport.Mode.AUTO;
-            if (m == Transport.Mode.UDP || (auto && !udpFailed(url))) {
+            boolean mc = m == Transport.Mode.MULTICAST && !udpFailed(m, url);
+            if (mc && !UdpReceiver.multicastSupported()) {
+                Log.i(TAG, tag + ": multicast needs Android 7, using TCP");
+                mc = false;
+            }
+            // Auto and Multicast fall back to TCP; UDP does not
+            boolean fallback = auto || m == Transport.Mode.MULTICAST;
+            if (m == Transport.Mode.UDP || (auto && !udpFailed(m, url)) || mc) {
                 rx = new UdpReceiver(tag);
                 synchronized (lock) {
                     if (gen != generation) return false;
@@ -295,15 +304,16 @@ class RtspSession {
                 }
             }
 
-            int videoPort = rx != null ? rx.addTrack(CHANNEL_VIDEO) : -1;
-            String transport = rx != null
-                    ? Transport.udpRequest(videoPort)
-                    : Transport.tcpRequest(CHANNEL_VIDEO);
+            int videoPort = rx != null && !mc ? rx.addTrack(CHANNEL_VIDEO) : -1;
+            String transport = rx == null ? Transport.tcpRequest(CHANNEL_VIDEO)
+                    : mc ? Transport.multicastRequest() : Transport.udpRequest(videoPort);
             r = exchange(c, "SETUP", sdp.videoUrl, "Transport: " + transport + "\r\n");
-            if (rx != null && auto && !r.ok()) {
-                // 461 Unsupported Transport and the like: the server does not do UDP
-                Log.i(TAG, tag + ": UDP SETUP failed (" + r.code + "), using TCP");
-                markUdpFailed();
+            if (rx != null && fallback && !r.ok()) {
+                // 461 Unsupported Transport and the like: Majestic answers a multicast
+                // request with 400, XM cameras with 451
+                Log.i(TAG, tag + ": " + (mc ? "multicast" : "UDP") + " SETUP failed ("
+                        + r.code + "), using TCP");
+                markUdpFailed(m);
                 rx = dropUdp(rx);
                 r = exchange(c, "SETUP", sdp.videoUrl,
                         "Transport: " + Transport.tcpRequest(CHANNEL_VIDEO) + "\r\n");
@@ -318,9 +328,17 @@ class RtspSession {
                 // Asked for UDP, answered with interleaved TCP: take what the server chose
                 Log.i(TAG, tag + ": server chose TCP instead of UDP");
                 rx = dropUdp(rx);
+            } else if (rx != null && mc) {
+                // A server may also answer with unicast (both Majestic and XM do when the
+                // request carries client_port): not what was asked, use TCP next time
+                if (!joinGroup(rx, CHANNEL_VIDEO, reply, s.getLocalAddress())) {
+                    markUdpFailed(m);
+                    throw new IOException("No usable multicast group in SETUP reply: "
+                            + r.header("transport"));
+                }
             } else if (rx != null && !udpReplyUsable(reply, videoPort)) {
-                // Multicast (#69) or other ports than ours: nothing would reach the receiver
-                if (auto) markUdpFailed();
+                // Multicast or other ports than ours: nothing would reach the receiver
+                if (auto) markUdpFailed(m);
                 throw new IOException("Unusable UDP transport in SETUP reply: "
                         + r.header("transport"));
             }
@@ -329,10 +347,9 @@ class RtspSession {
             boolean audio = withAudio && sdp.audioUrl != null
                     && !AudioConfig.NONE.equals(sdp.audio.codec);
             if (audio) {
-                int audioPort = rx != null ? rx.addTrack(CHANNEL_AUDIO) : -1;
-                transport = rx != null
-                        ? Transport.udpRequest(audioPort)
-                        : Transport.tcpRequest(CHANNEL_AUDIO);
+                int audioPort = rx != null && !mc ? rx.addTrack(CHANNEL_AUDIO) : -1;
+                transport = rx == null ? Transport.tcpRequest(CHANNEL_AUDIO)
+                        : mc ? Transport.multicastRequest() : Transport.udpRequest(audioPort);
                 r = exchange(c, "SETUP", sdp.audioUrl,
                         "Transport: " + transport + "\r\n" +
                         "Session: " + session + "\r\n");
@@ -341,6 +358,13 @@ class RtspSession {
                     // Not fatal: play video without audio
                     Log.w(TAG, tag + ": audio SETUP failed (" + r.code + "), no audio");
                     audio = false;
+                } else if (rx != null && mc) {
+                    if (!joinGroup(rx, CHANNEL_AUDIO, audioReply, s.getLocalAddress())) {
+                        Log.w(TAG, tag + ": no usable multicast group for audio, no audio");
+                        audio = false;
+                    } else {
+                        audioSource = sourceAddress(audioReply.source);
+                    }
                 } else if (rx != null && (audioReply.tcp
                         || !udpReplyUsable(audioReply, audioPort))) {
                     // Video over UDP, audio elsewhere: the UDP loop cannot play it
@@ -374,11 +398,11 @@ class RtspSession {
                 keepalive = new Keepalive(c, u.requestUrl, session, keepaliveMs);
                 udpPlaying = rx != null;
             }
-            Log.i(TAG, tag + ": playing over " + (rx != null ? "UDP" : "TCP"));
+            Log.i(TAG, tag + ": playing over " + (rx == null ? "TCP" : mc ? "multicast" : "UDP"));
             status(gen, "buffering");
             s.setSoTimeout(0); // the watchdog handles silence
             if (rx != null) {
-                receiveUdp(gen, c, rx, auto);
+                receiveUdp(gen, c, rx, fallback, m);
             } else {
                 receive(gen, c);
             }
@@ -485,6 +509,27 @@ class RtspSession {
     }
 
     /**
+     * Join the group of a multicast SETUP reply (#69): a literal multicast destination and
+     * a port are required. False when the reply is not usable or the join fails.
+     */
+    private boolean joinGroup(UdpReceiver rx, int channel, Transport reply, InetAddress local) {
+        InetAddress group = sourceAddress(reply.destination);
+        if (!reply.multicast || group == null || !group.isMulticastAddress()
+                || reply.port == null) {
+            return false;
+        }
+        try {
+            rx.addMulticastTrack(channel, group, reply.port[0], local);
+            Log.i(TAG, tag + ": joined " + group.getHostAddress() + ":" + reply.port[0]
+                    + (reply.ttl >= 0 ? ", ttl " + reply.ttl : ""));
+            return true;
+        } catch (IOException e) {
+            Log.w(TAG, tag + ": cannot join " + group.getHostAddress() + ": " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * A UDP reply we can receive: unicast, and the client ports, when given, are ours.
      * A missing Transport header is taken as agreement.
      */
@@ -545,7 +590,8 @@ class RtspSession {
      * (keepalives). With {@code auto}, no video within udpFirstPacketMs switches the
      * URL to TCP for the next connection.
      */
-    private void receiveUdp(int gen, Conn c, UdpReceiver rx, boolean auto) throws IOException {
+    private void receiveUdp(int gen, Conn c, UdpReceiver rx, boolean auto, Transport.Mode m)
+            throws IOException {
         AtomicReference<IOException> controlError = new AtomicReference<>();
         Thread control = new Thread(() -> {
             try {
@@ -568,8 +614,9 @@ class RtspSession {
             if (!active || gen != generation) return false;
             if (auto && first[0]
                     && System.nanoTime() / 1_000_000 - playMs > udpFirstPacketMs) {
-                Log.w(TAG, tag + ": no video over UDP, using TCP");
-                markUdpFailed();
+                Log.w(TAG, tag + ": no video over " + (m == Transport.Mode.MULTICAST
+                        ? "multicast" : "UDP") + ", using TCP");
+                markUdpFailed(m);
                 return false;
             }
             return true;

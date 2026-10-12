@@ -84,6 +84,11 @@ public class RtspSessionTest {
         volatile String udpFrom = "127.0.0.1";
         /** Answer a UDP SETUP with this Transport value instead of the client's ports. */
         volatile String udpReply;
+        /**
+         * Answer a multicast SETUP with this Transport value; null answers 400 as Majestic
+         * does. A "destination=group;port=n" reply streams to that group after PLAY.
+         */
+        volatile String multicastReply;
 
         FakeServer() throws IOException {
             server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
@@ -118,6 +123,8 @@ public class RtspSessionTest {
                 OutputStream out = socket.getOutputStream();
                 // Client RTP ports of this connection's UDP SETUPs: video, audio
                 int[] udpPorts = {-1, -1};
+                // Multicast group and port of this connection's SETUP, if any
+                String[] mcast = {null, null};
                 while (true) {
                     String line = RtspSession.readLine(in);
                     if (line == null) return;
@@ -154,7 +161,18 @@ public class RtspSessionTest {
                             int code = audioTrack ? audioSetupStatus : 200;
                             Transport asked = Transport.parse(header(headers, "Transport"));
                             String transport = "";
-                            if (asked.clientPort != null) {
+                            if (asked.multicast && asked.clientPort == null) {
+                                if (multicastReply == null) {
+                                    code = 400;
+                                } else {
+                                    Transport t = Transport.parse(multicastReply);
+                                    if (t.multicast && t.port != null) {
+                                        mcast[0] = t.destination;
+                                        mcast[1] = String.valueOf(t.port[0]);
+                                    }
+                                    transport = "Transport: " + multicastReply + "\r\n";
+                                }
+                            } else if (asked.clientPort != null) {
                                 if (udpUnsupported) code = 461;
                                 if (code == 200) udpPorts[audioTrack ? 1 : 0] = asked.clientPort[0];
                                 transport = "Transport: " + (udpReply != null ? udpReply
@@ -185,6 +203,10 @@ public class RtspSessionTest {
                             break;
                     }
                     write(out, reply);
+                    if (method.equals("PLAY") && mcast[0] != null) {
+                        sendMulticast(mcast[0], Integer.parseInt(mcast[1]));
+                        continue;
+                    }
                     if (method.equals("PLAY") && udpPorts[0] > 0) {
                         if (!udpSilent) sendUdp(udpPorts);
                         continue;
@@ -232,6 +254,25 @@ public class RtspSessionTest {
                     for (int i = 0; i < audioPackets && ports[1] > 0; i++) {
                         byte[] p = udpPacket(98, 500 + i);
                         ds.send(new DatagramPacket(p, p.length, to, ports[1]));
+                    }
+                } catch (IOException ignored) {
+                }
+            });
+            sender.setDaemon(true);
+            sender.start();
+        }
+
+        private void sendMulticast(String group, int port) {
+            Thread sender = new Thread(() -> {
+                try (java.net.MulticastSocket ms = new java.net.MulticastSocket()) {
+                    ms.setNetworkInterface(java.net.NetworkInterface.getByInetAddress(
+                            InetAddress.getLoopbackAddress()));
+                    ms.setTimeToLive(1);
+                    InetAddress to = InetAddress.getByName(group);
+                    int seq = 100;
+                    for (int i = 0; i < videoPackets; i++) {
+                        byte[] p = udpPacket(96, seq++);
+                        ms.send(new DatagramPacket(p, p.length, to, port));
                     }
                 } catch (IOException ignored) {
                 }
@@ -342,6 +383,7 @@ public class RtspSessionTest {
         server = new FakeServer();
         session = new RtspSession("test", rec);
         RtspSession.udpFailedAt.clear();
+        UdpReceiver.sdkInt = 29;
     }
 
     @After
@@ -352,6 +394,7 @@ public class RtspSessionTest {
         RtspSession.maxRetryMs = 30000;
         RtspSession.watchdogMs = 8000;
         RtspSession.udpFirstPacketMs = 3000;
+        UdpReceiver.sdkInt = android.os.Build.VERSION.SDK_INT;
     }
 
     private void runUntilVideo(String url, boolean withAudio) throws InterruptedException {
@@ -717,5 +760,77 @@ public class RtspSessionTest {
         assertTrue("video over TCP", rec.videoLatch.await(5, TimeUnit.SECONDS));
         List<String> s = setups();
         assertTrue(s.get(s.size() - 1).contains("interleaved=0-1"));
+    }
+
+    // ====================== Multicast (#69) ======================
+
+    @Test
+    public void multicastRefusedLikeMajesticFallsBackToTcp() throws Exception {
+        runUdp(Transport.Mode.MULTICAST, false);
+        assertTrue("video over TCP", rec.videoLatch.await(5, TimeUnit.SECONDS));
+        List<String> s = setups();
+        assertTrue(s.get(0).contains("Transport: RTP/AVP;multicast"));
+        assertTrue(s.get(1).contains("interleaved=0-1"));
+        assertEquals(1, server.connections.get());
+    }
+
+    @Test
+    public void multicastAnsweredWithUnicastFallsBackToTcp() throws Exception {
+        server.multicastReply = "RTP/AVP/UDP;unicast;client_port=50020-50021;server_port=1-2";
+        runUdp(Transport.Mode.MULTICAST, false);
+        assertTrue("video over TCP", rec.videoLatch.await(5, TimeUnit.SECONDS));
+        List<String> s = setups();
+        assertTrue(s.get(s.size() - 1).contains("interleaved=0-1"));
+        assertEquals(2, server.connections.get());
+    }
+
+    @Test
+    public void multicastNeedsAndroid7() throws Exception {
+        UdpReceiver.sdkInt = 23;
+        runUdp(Transport.Mode.MULTICAST, false);
+        assertTrue("video over TCP", rec.videoLatch.await(5, TimeUnit.SECONDS));
+        assertTrue(setups().get(0).contains("interleaved=0-1"));
+    }
+
+    @Test
+    public void multicastGroupIsJoinedAndReceived() throws Exception {
+        String group = "239.255.42.17";
+        int port = freeUdpPort();
+        org.junit.Assume.assumeTrue("loopback multicast works here",
+                loopbackMulticastWorks(group, port));
+        server.multicastReply = "RTP/AVP;multicast;destination=" + group + ";port="
+                + port + "-" + (port + 1) + ";ttl=1";
+        runUdp(Transport.Mode.MULTICAST, false);
+        assertTrue("video over multicast", rec.videoLatch.await(5, TimeUnit.SECONDS));
+        for (String r : setups()) assertFalse(r.contains("interleaved"));
+        assertEquals(1, server.connections.get());
+    }
+
+    private static int freeUdpPort() throws IOException {
+        try (DatagramSocket s = new DatagramSocket(0)) {
+            return s.getLocalPort() & ~1;
+        }
+    }
+
+    /** Whether this machine delivers a group joined on the loopback interface. */
+    private static boolean loopbackMulticastWorks(String group, int port) {
+        try (java.nio.channels.DatagramChannel ch = java.nio.channels.DatagramChannel.open(
+                java.net.StandardProtocolFamily.INET);
+             java.net.MulticastSocket tx = new java.net.MulticastSocket()) {
+            java.net.NetworkInterface lo = java.net.NetworkInterface.getByInetAddress(
+                    InetAddress.getLoopbackAddress());
+            ch.setOption(java.net.StandardSocketOptions.SO_REUSEADDR, true);
+            ch.bind(new InetSocketAddress(port));
+            ch.join(InetAddress.getByName(group), lo);
+            ch.socket().setSoTimeout(500);
+            tx.setNetworkInterface(lo);
+            byte[] p = {1, 2, 3};
+            tx.send(new DatagramPacket(p, p.length, InetAddress.getByName(group), port));
+            byte[] in = new byte[16];
+            ch.socket().receive(new DatagramPacket(in, in.length));
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 }

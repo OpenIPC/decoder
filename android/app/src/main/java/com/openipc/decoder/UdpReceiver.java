@@ -7,13 +7,19 @@
 
 package com.openipc.decoder;
 
+import android.annotation.TargetApi;
+import android.os.Build;
 import android.util.Log;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.NetworkInterface;
 import java.net.SocketAddress;
+import java.net.StandardProtocolFamily;
+import java.net.StandardSocketOptions;
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedSelectorException;
 import java.nio.channels.DatagramChannel;
@@ -49,6 +55,7 @@ class UdpReceiver implements Closeable {
     private static final class Track {
         final int channel;
         final DatagramChannel rtp;
+        /** Null for a multicast track: its RTCP is not received. */
         final DatagramChannel rtcp;
         final RtpReorder reorder = new RtpReorder(REORDER_PACKETS, REORDER_MS);
         /** Delivers to the handler of the running loop; one per track, not per packet. */
@@ -69,6 +76,7 @@ class UdpReceiver implements Closeable {
     private volatile boolean closed;
     private boolean running;
     private boolean released;
+    private boolean multicastLocked;
     private long rejected;
 
     UdpReceiver(String tag) throws IOException {
@@ -111,6 +119,48 @@ class UdpReceiver implements Closeable {
             }
         }
         throw new IOException("No free UDP port pair");
+    }
+
+    /** Joining a group from a DatagramChannel needs API 24 (Android 7). Tests override it. */
+    static volatile int sdkInt = Build.VERSION.SDK_INT;
+
+    static boolean multicastSupported() {
+        return sdkInt >= 24;
+    }
+
+    /**
+     * Join {@code group} on {@code port} for {@code channel}, on the interface that owns
+     * {@code local} (the local address of the RTSP connection, #69). Only when
+     * {@link #multicastSupported()}.
+     */
+    @TargetApi(24)
+    synchronized void addMulticastTrack(int channel, InetAddress group, int port,
+                                        InetAddress local) throws IOException {
+        if (closed) throw new IOException("Receiver closed");
+        if (!group.isMulticastAddress()) throw new IOException("Not a multicast group: " + group);
+        NetworkInterface nif = NetworkInterface.getByInetAddress(local);
+        if (nif == null) throw new IOException("No network interface for " + local);
+        DatagramChannel ch = DatagramChannel.open(group instanceof Inet6Address
+                ? StandardProtocolFamily.INET6 : StandardProtocolFamily.INET);
+        try {
+            // Other receivers of the group on this device bind the same port
+            ch.setOption(StandardSocketOptions.SO_REUSEADDR, true);
+            ch.bind(new InetSocketAddress(port));
+            ch.setOption(StandardSocketOptions.SO_RCVBUF,
+                    channel == RtspSession.CHANNEL_VIDEO ? VIDEO_RCVBUF : AUDIO_RCVBUF);
+            ch.join(group, nif);
+            ch.configureBlocking(false);
+            Track t = new Track(channel, ch, null);
+            ch.register(selector, SelectionKey.OP_READ, t);
+            tracks.add(t);
+        } catch (IOException e) {
+            ch.close();
+            throw e;
+        }
+        if (!multicastLocked) {
+            multicastLocked = true;
+            RtpListener.MulticastLock.acquire();
+        }
     }
 
     /** Accept datagrams only from these addresses (nulls are ignored). */
@@ -206,9 +256,13 @@ class UdpReceiver implements Closeable {
         closed = true;
         for (Track t : tracks) {
             closeQuietly(t.rtp);
-            closeQuietly(t.rtcp);
+            if (t.rtcp != null) closeQuietly(t.rtcp);
         }
         closeQuietly(selector);
+        if (multicastLocked) {
+            multicastLocked = false;
+            RtpListener.MulticastLock.release();
+        }
     }
 
     private static void closeQuietly(Closeable c) {

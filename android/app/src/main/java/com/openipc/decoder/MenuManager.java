@@ -354,11 +354,11 @@ class MenuManager {
         input.setSelectAllOnFocus(true);
         input.setSelection(input.getText().length());
 
-        // RTP transport of the slot (#67): Auto tries UDP and falls back to TCP
+        // RTP transport of the slot (#67, #69): Auto and Multicast fall back to TCP
         RadioGroup transport = new RadioGroup(activity);
         transport.setOrientation(RadioGroup.HORIZONTAL);
         Transport.Mode[] modes = Transport.Mode.values();
-        String[] labels = {"TCP", "UDP", "Auto"};
+        String[] labels = {"TCP", "UDP", "Auto", "Multicast"};
         for (int i = 0; i < modes.length; i++) {
             RadioButton b = new RadioButton(activity);
             b.setId(View.generateViewId());
