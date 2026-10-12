@@ -92,6 +92,13 @@ public class Decoder extends Activity
     // Quad audio (#12): the cell whose sound plays, -1 for none
     private int quadAudio = -1;
     private final TextView[] quadAudioBadges = new TextView[CAM_COUNT];
+    /** Small text in each cell's corner: stats while playing, otherwise the status (#80, #82). */
+    private final TextView[] quadStats = new TextView[CAM_COUNT];
+    /** Samples (seconds) a cell may fall behind before the grid is relieved (#83). */
+    private static final int OVERLOAD_SAMPLES = 5;
+    /** After pausing a cell, time for the load to settle before the next decision. */
+    private static final long RELIEF_COOLDOWN_MS = 10_000;
+    private long lastReliefMs;
     private volatile int quadAudioGen;
     private ExecutorService quadAudioExecutor;
 
@@ -571,6 +578,7 @@ public class Decoder extends Activity
     }
 
     private void stopQuad() {
+        quadContainer.removeCallbacks(quadStatsTick);
         stopQuadAudio();
         quadEnabled = false;
         getSharedPreferences("settings", MODE_PRIVATE).edit()
@@ -621,6 +629,7 @@ public class Decoder extends Activity
         quadContainer.removeAllViews();
         Arrays.fill(quadViews, null);
         Arrays.fill(quadAudioBadges, null);
+        Arrays.fill(quadStats, null);
         for (int row = 0; row < size; row++) {
             LinearLayout lr = new LinearLayout(this);
             lr.setOrientation(LinearLayout.HORIZONTAL);
@@ -662,6 +671,18 @@ public class Decoder extends Activity
                 bp.setMargins(dp(4), dp(4), dp(4), dp(4));
                 cell.addView(badge, bp);
                 quadAudioBadges[idx] = badge;
+                TextView stats = new TextView(this);
+                stats.setTextColor(Color.WHITE);
+                stats.setTextSize(10);
+                stats.setBackgroundColor(0x80000000);
+                stats.setPadding(dp(4), dp(1), dp(4), dp(1));
+                stats.setVisibility(View.GONE);
+                FrameLayout.LayoutParams sp = new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.START);
+                sp.setMargins(dp(2), dp(2), dp(2), dp(2));
+                cell.addView(stats, sp);
+                quadStats[idx] = stats;
                 lr.addView(cell, new LinearLayout.LayoutParams(
                         0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
             }
@@ -723,6 +744,7 @@ public class Decoder extends Activity
         }
         quadAudio = getSharedPreferences("settings", MODE_PRIVATE).getInt("quad_audio", -1);
         startQuadAudio();
+        startStatsTick();
     }
 
     // ====================== Quad audio (#12) ======================
@@ -807,22 +829,92 @@ public class Decoder extends Activity
     }
 
     private void clearQuadViews() {
-        for (int i = 0; i < CAM_COUNT; i++) {
-            SurfaceView t = quadViews[i];
-            if (t == null) continue;
-            FrameLayout cell = (FrameLayout) t.getParent();
-            View overlay = cell.findViewWithTag("quad_overlay_" + i);
-            if (overlay == null) {
-                overlay = new View(this);
-                overlay.setTag("quad_overlay_" + i);
-                overlay.setLayoutParams(new FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT));
-                overlay.setBackgroundColor(Color.BLACK);
-                cell.addView(overlay);
+        for (int i = 0; i < CAM_COUNT; i++) showQuadOverlay(i);
+    }
+
+    /** Black overlay over a cell; its corner text stays visible above it. */
+    private void showQuadOverlay(int i) {
+        SurfaceView t = quadViews[i];
+        if (t == null) return;
+        FrameLayout cell = (FrameLayout) t.getParent();
+        View overlay = cell.findViewWithTag("quad_overlay_" + i);
+        if (overlay == null) {
+            overlay = new View(this);
+            overlay.setTag("quad_overlay_" + i);
+            overlay.setLayoutParams(new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT));
+            overlay.setBackgroundColor(Color.BLACK);
+            cell.addView(overlay);
+        }
+        overlay.setVisibility(View.VISIBLE);
+        overlay.bringToFront();
+        if (quadStats[i] != null) quadStats[i].bringToFront();
+    }
+
+    // ====================== Cell stats and decoder load (#80, #82, #83) ======================
+
+    private final Runnable quadStatsTick = new Runnable() {
+        private int ticks;
+
+        @Override
+        public void run() {
+            QuadCell[] cells = quadCells;
+            if (!quadEnabled || cells == null) return;
+            long now = System.nanoTime() / 1_000_000;
+            boolean log = ++ticks % 5 == 0;
+            for (int i = 0; i < cells.length; i++) {
+                QuadCell c = cells[i];
+                TextView v = quadStats[i];
+                if (c == null || v == null) continue;
+                String line = c.sample(now);
+                v.setText(line);
+                v.setVisibility(View.VISIBLE);
+                if (log) Log.i(TAG, "Quad-" + i + ": " + line);
             }
-            overlay.setVisibility(View.VISIBLE);
-            overlay.bringToFront();
+            relieveDecoder(cells, now);
+            quadContainer.postDelayed(this, 1000);
+        }
+    };
+
+    private void startStatsTick() {
+        quadContainer.removeCallbacks(quadStatsTick);
+        quadContainer.postDelayed(quadStatsTick, 1000);
+    }
+
+    /**
+     * Load is judged by measurement, not by the declared budget: a cell falls behind when the
+     * decoder makes it lose frames (its queue overflows, or the decoder has no free input
+     * buffer). Frames lost on the network do not count: they lower decoded/received in the
+     * corner text but say nothing about the decoder. When a cell keeps falling behind, the
+     * highest-numbered playing cell is paused, then the load is given time to settle (#83).
+     */
+    private void relieveDecoder(QuadCell[] cells, long now) {
+        boolean overloaded = false;
+        int active = 0;
+        int last = -1;
+        for (int i = 0; i < cells.length; i++) {
+            QuadCell c = cells[i];
+            if (c == null || c.isPaused()) continue;
+            active++;
+            last = i;
+            if (c.isSettled(now) && c.inFps() >= 5) {
+                boolean behind = c.lostFps() >= Math.max(2f, 0.1f * c.inFps());
+                c.behindSamples = behind ? c.behindSamples + 1 : 0;
+                if (c.behindSamples >= OVERLOAD_SAMPLES) overloaded = true;
+            } else {
+                c.behindSamples = 0;
+            }
+        }
+        if (!overloaded || active < 2 || now - lastReliefMs < RELIEF_COOLDOWN_MS) return;
+        lastReliefMs = now;
+        String reason = "Paused: decoder overloaded";
+        Log.w(TAG, "Decoder overloaded with " + active + " streams: pausing Quad-" + last);
+        cells[last].pause(reason);
+        showQuadOverlay(last);
+        if (quadStats[last] != null) quadStats[last].setText(reason);
+        for (QuadCell c : cells) {
+            if (c != null) c.behindSamples = 0;
         }
     }
 
@@ -1058,6 +1150,7 @@ public class Decoder extends Activity
         menuManager.onPauseDismissBrowser();
         // The UDP view is not a saved mode: after a resume the slot or grid comes back
         leaveUdpView();
+        quadContainer.removeCallbacks(quadStatsTick);
         stopStreams();
     }
 
