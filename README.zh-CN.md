@@ -23,7 +23,6 @@
 |------------------|-----------------------------------------|
 | `decoder-v2.apk` | **当前版本**，推荐使用                  |
 | `decoder.apk`    | `basic` 分支的旧版本                    |
-| `*.aab`          | 用于 Google Play 的应用包，不能手动安装 |
 
 [Google Play](https://play.google.com/apps/internaltest/4701231141824898735) 上提供测试渠道。如需加入，请通过 [OpenIPC Telegram 频道](https://openipc.org/our-channels)发送您的电子邮箱。
 
