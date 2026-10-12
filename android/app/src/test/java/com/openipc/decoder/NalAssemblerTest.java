@@ -198,6 +198,13 @@ public class NalAssemblerTest {
     }
 
     @Test
+    public void firstPacketDoesNotCountAsACodecSwitch() {
+        // An H.265 stream used to close its first decoder on the first packet (seen on device)
+        feed(rtp(0x40, 0x01, 0x0C), true);
+        assertEquals(0, codecSwitches);
+    }
+
+    @Test
     public void codecSwitchResetsAndNotifies() {
         feed(rtp(0x67, 0x42), false);
         assertEquals(0, codecSwitches);

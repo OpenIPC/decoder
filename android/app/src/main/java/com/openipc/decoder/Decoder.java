@@ -721,7 +721,7 @@ public class Decoder extends Activity
         // Audio playback thread
         executor.execute(() -> {
             Thread.currentThread().setName("rtsp-audio");
-            while (gen == listenerGen) {
+            while (gen == listenerGen && !Thread.currentThread().isInterrupted()) {
                 audioManager.playPcmFrame();
             }
         });
@@ -759,6 +759,9 @@ public class Decoder extends Activity
     }
 
     private void stopExecutor() {
+        // Invalidate the loops first: shutdownNow() alone left the audio loop spinning on
+        // InterruptedException at 100% CPU (seen on the device after entering Quad)
+        listenerGen++;
         if (executor != null) {
             executor.shutdownNow();
             executor = null;
