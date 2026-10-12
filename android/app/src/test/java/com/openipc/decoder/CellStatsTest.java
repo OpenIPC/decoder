@@ -102,8 +102,23 @@ public class CellStatsTest {
                 MediaCodecManager.InstanceBudget.tryAcquire(hevc));
         MediaCodecManager.InstanceBudget.release(hevc);
         assertTrue(MediaCodecManager.InstanceBudget.tryAcquire(hevc));
-        // Other codecs are counted separately
+        // Other codecs are counted separately; while a limit is unknown, one at a time
         assertTrue(MediaCodecManager.InstanceBudget.tryAcquire("video/avc"));
         assertEquals(-1, MediaCodecManager.InstanceBudget.limit("video/avc"));
+        assertFalse("second decoder waits until the first has told its limit",
+                MediaCodecManager.InstanceBudget.tryAcquire("video/avc"));
+        MediaCodecManager.InstanceBudget.learn("video/avc", 16);
+        assertTrue(MediaCodecManager.InstanceBudget.tryAcquire("video/avc"));
+    }
+
+    @Test
+    public void decoderLimitIsNotHiddenByAConnectionError() {
+        QuadCell c = cell();
+        c.onStatus("connected");
+        c.setKeyFramesOnly(false);
+        c.onFailure("ECONNREFUSED");
+        assertEquals("Connection refused", c.sample(1000));
+        c.onStatus("connected");
+        assertEquals("H.264 0/0 fps", c.sample(2000));
     }
 }

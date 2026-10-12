@@ -40,6 +40,8 @@ final class DecodePlanner {
         long fullLoad;
         /** The decoder lost frames of this cell in the last sample. */
         boolean lossy;
+        /** Connected and decoding: only such cells are demoted or paused (Qodo on #84). */
+        boolean playing = true;
 
         Cell(int index, boolean full, boolean known, long fullLoad, boolean lossy) {
             this.index = index;
@@ -119,7 +121,7 @@ final class DecodePlanner {
             lossySamples = 0;
             for (int i = cells.size() - 1; i >= 0; i--) {
                 Cell c = cells.get(i);
-                if (c.full && !c.paused) {
+                if (c.full && !c.paused && c.playing && c.known) {
                     // Losses at this load: the capacity is below it, but not below a proven load
                     capacity = Math.max(proven, Math.round(load * 0.9));
                     learnt = true;
@@ -129,7 +131,9 @@ final class DecodePlanner {
             // Even key frames are too much: pause the lowest-priority cell as a last resort
             for (int i = cells.size() - 1; i >= 0; i--) {
                 Cell c = cells.get(i);
-                if (!c.paused && countActive(cells) > 1) return change(nowMs, Action.PAUSE, c.index);
+                if (!c.paused && c.playing && countActive(cells) > 1) {
+                    return change(nowMs, Action.PAUSE, c.index);
+                }
             }
             return Decision.NONE;
         }

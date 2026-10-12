@@ -109,7 +109,10 @@ class QuadCell implements RtspSession.Callback {
                 decoderStartedMs = System.nanoTime() / 1_000_000;
                 if (listener != null) listener.onRemoveOverlay(index);
             }
-            @Override public void onDecoderFailed() {}
+            @Override public void onDecoderFailed() {
+                // A decoder limit message says more; keep it
+                if (problem == null || !problem.startsWith("Decoder limit")) problem = "Decoder error";
+            }
             @Override public void onDecoderLimit(String mime, int limit) {
                 problem = "Decoder limit: " + (limit > 0 ? limit + " × " : "")
                         + (mime.contains("hevc") ? "H.265" : "H.264");
@@ -229,7 +232,9 @@ class QuadCell implements RtspSession.Callback {
 
     @Override
     public void onFailure(String message) {
-        problem = shortError(message);
+        // A decoder problem stays visible; the connection retries on its own
+        String p = problem;
+        if (p == null || !p.startsWith("Decoder")) problem = shortError(message);
     }
 
     /** A connection error short enough for a cell corner. */
@@ -331,6 +336,11 @@ class QuadCell implements RtspSession.Callback {
     /** Connected, not paused and a frame shown within the last {@code ms} milliseconds (#98). */
     boolean showsVideo(long ms) {
         return pausedReason == null && "connected".equals(state) && decoder.renderedWithin(ms);
+    }
+
+    /** Connected and decoding: its load is real, so demoting or pausing it helps (#85). */
+    boolean isPlaying() {
+        return pausedReason == null && "connected".equals(state) && decoder.hasDecoder();
     }
 
     /** Playing long enough for its decode rate to mean something (#83). */

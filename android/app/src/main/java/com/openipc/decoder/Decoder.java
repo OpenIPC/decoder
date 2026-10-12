@@ -983,6 +983,7 @@ public class Decoder extends Activity
         DecodePlanner.Cell pc = new DecodePlanner.Cell(index, !c.isKeyFramesOnly(),
                 c.knowsLoad(), c.knowsLoad() ? c.fullLoad() : 0, lossy);
         pc.paused = c.isPaused();
+        pc.playing = c.isPlaying();
         return pc;
     }
 
