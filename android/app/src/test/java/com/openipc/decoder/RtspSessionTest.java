@@ -52,6 +52,18 @@ public class RtspSessionTest {
         volatile int videoPackets = 3;
         /** Send the DESCRIBE body without a Content-Length header. */
         volatile boolean omitContentLength;
+        /** When set, every request must carry a valid Digest response for these credentials. */
+        volatile String digestUser;
+        volatile String digestPassword;
+        /** Session timeout announced in SETUP replies. */
+        volatile int sessionTimeout = 60;
+        /** Reply 501 to GET_PARAMETER. */
+        volatile boolean rejectGetParameter;
+        /** Reply 401 (Digest, never stale) to every GET_PARAMETER. */
+        volatile boolean keepaliveUnauthorized;
+        /** After PLAY keep sending video packets every 20 ms instead of a fixed burst. */
+        volatile boolean streamContinuously;
+        final AtomicInteger unauthorized = new AtomicInteger();
         volatile int audioPackets = 1;
 
         FakeServer() throws IOException {
@@ -97,7 +109,17 @@ public class RtspSessionTest {
                     }
                     requests.add(requestLine + "\n" + headers);
                     String method = requestLine.split(" ")[0];
+                    String uri = requestLine.split(" ")[1];
                     String reply;
+                    if (digestUser != null && !digestOk(headers.toString(), method, uri)) {
+                        unauthorized.incrementAndGet();
+                        reply = "RTSP/1.0 401 Unauthorized\r\nCSeq: " + cseq + "\r\n"
+                                + "WWW-Authenticate: Basic realm=\"cam\"\r\n"
+                                + "WWW-Authenticate: Digest realm=\"cam\", nonce=\"N0NCE\", "
+                                + "qop=\"auth\"\r\n\r\n";
+                        write(out, reply);
+                        continue;
+                    }
                     switch (method) {
                         case "DESCRIBE":
                             byte[] body = sdp.getBytes(StandardCharsets.UTF_8);
@@ -109,26 +131,72 @@ public class RtspSessionTest {
                         case "SETUP":
                             int code = requestLine.contains("trackID=1") ? audioSetupStatus : 200;
                             reply = "RTSP/1.0 " + code + (code == 200 ? " OK" : " Not Found")
-                                    + "\r\nCSeq: " + cseq + "\r\nSession: ABC123;timeout=60\r\n\r\n";
+                                    + "\r\nCSeq: " + cseq + "\r\nSession: ABC123;timeout="
+                                    + sessionTimeout + "\r\n\r\n";
+                            break;
+                        case "GET_PARAMETER":
+                            if (keepaliveUnauthorized) {
+                                reply = "RTSP/1.0 401 Unauthorized\r\nCSeq: " + cseq + "\r\n"
+                                        + "WWW-Authenticate: Digest realm=\"cam\", nonce=\"K\"\r\n\r\n";
+                                break;
+                            }
+                            reply = rejectGetParameter
+                                    ? "RTSP/1.0 501 Not Implemented\r\nCSeq: " + cseq + "\r\n\r\n"
+                                    : "RTSP/1.0 200 OK\r\nCSeq: " + cseq + "\r\nSession: ABC123\r\n\r\n";
                             break;
                         default:
                             reply = "RTSP/1.0 200 OK\r\nCSeq: " + cseq + "\r\n\r\n";
                             break;
                     }
-                    out.write(reply.getBytes(StandardCharsets.UTF_8));
-                    out.flush();
+                    write(out, reply);
+                    if (method.equals("PLAY") && streamContinuously) {
+                        Thread writer = new Thread(() -> {
+                            try {
+                                while (!socket.isClosed()) {
+                                    synchronized (out) {
+                                        out.write(packet(0, 96));
+                                        out.flush();
+                                    }
+                                    Thread.sleep(20);
+                                }
+                            } catch (Exception ignored) {
+                            }
+                        });
+                        writer.setDaemon(true);
+                        writer.start();
+                        continue; // keep answering requests (keepalives) while streaming
+                    }
                     if (method.equals("PLAY")) {
                         for (int i = 0; i < videoPackets; i++) out.write(packet(0, 96));
                         for (int i = 0; i < audioPackets; i++) out.write(packet(2, 98));
                         out.flush();
                         if (closeAfterPackets) return;
-                        // Keep the session open until the client goes away
-                        while (in.read() >= 0) { /* ignore */ }
-                        return;
+                        // Stay idle but keep answering requests (keepalives)
+                        continue;
                     }
                 }
             } catch (IOException ignored) {
             }
+        }
+
+        private static void write(OutputStream out, String reply) throws IOException {
+            synchronized (out) {
+                out.write(reply.getBytes(StandardCharsets.UTF_8));
+                out.flush();
+            }
+        }
+
+        private boolean digestOk(String headers, String method, String uri) {
+            for (String h : headers.split("\n")) {
+                if (!h.startsWith("Authorization: Digest ")) continue;
+                java.util.Map<String, String> p = RtspAuth.parseParams(h.substring(22));
+                String ha1 = RtspAuth.md5(digestUser + ":cam:" + digestPassword);
+                String ha2 = RtspAuth.md5(method + ":" + uri);
+                String expected = RtspAuth.md5(ha1 + ":N0NCE:" + p.get("nc") + ":"
+                        + p.get("cnonce") + ":auth:" + ha2);
+                return expected.equals(p.get("response")) && uri.equals(p.get("uri"));
+            }
+            return false;
         }
 
         static byte[] packet(int channel, int pt) {
@@ -340,5 +408,103 @@ public class RtspSessionTest {
             long d = RtspSession.retryDelay(1000);
             assertTrue(d >= 1000 && d <= 1500);
         }
+    }
+
+    @Test
+    public void digestAuthentication() throws Exception {
+        // #8: the server offers Basic and Digest and accepts only Digest
+        server.digestUser = "admin";
+        server.digestPassword = "s3cr3t";
+        runUntilVideo(server.url("admin:s3cr3t"), true);
+        List<String> m = server.methods();
+        assertTrue("DESCRIBE retried with Digest", m.get(1).startsWith("DESCRIBE"));
+        assertTrue(m.get(m.size() - 1).startsWith("PLAY"));
+        assertEquals("only the first request is challenged", 1, server.unauthorized.get());
+    }
+
+    @Test
+    public void wrongPasswordDoesNotLoop() throws Exception {
+        server.digestUser = "admin";
+        server.digestPassword = "s3cr3t";
+        session.configure(server.url("admin:wrong"), "", true);
+        session.start();
+        Thread.sleep(500);
+        session.stop();
+        Thread.sleep(100);
+        assertEquals(0, rec.sdpCount.get());
+        // Each connection: Basic DESCRIBE + one Digest DESCRIBE, no endless retries
+        int connections = server.connections.get();
+        assertTrue(connections >= 1);
+        assertTrue("at most 2 requests per connection",
+                server.methods().size() <= connections * 2);
+    }
+
+    @Test
+    public void keepaliveUsesGetParameter() throws Exception {
+        // #11: timeout=2 s -> a keepalive every second
+        server.sessionTimeout = 2;
+        server.streamContinuously = true;
+        runUntilVideo(server.url(null), true);
+        Thread.sleep(2500);
+        long keepalives = server.methods().stream()
+                .filter(x -> x.startsWith("GET_PARAMETER")).count();
+        assertTrue("keepalives sent: " + keepalives, keepalives >= 2);
+        assertTrue(session.isActive());
+        assertEquals(1, server.connections.get());
+        String ka = server.requests.stream().filter(x -> x.startsWith("GET_PARAMETER"))
+                .findFirst().get();
+        assertTrue(ka.contains("Session: ABC123"));
+    }
+
+    @Test
+    public void keepaliveFallsBackToOptions() throws Exception {
+        server.sessionTimeout = 2;
+        server.streamContinuously = true;
+        server.rejectGetParameter = true;
+        runUntilVideo(server.url(null), true);
+        Thread.sleep(3200);
+        List<String> m = server.methods();
+        assertEquals(1, m.stream().filter(x -> x.startsWith("GET_PARAMETER")).count());
+        assertTrue(m.stream().anyMatch(x -> x.startsWith("OPTIONS")));
+        assertTrue(session.isActive());
+        assertEquals(1, server.connections.get());
+    }
+
+    @Test
+    public void keepaliveIntervalFromSessionHeader() {
+        assertEquals(30000, RtspSession.keepaliveInterval("ABC"));
+        assertEquals(5000, RtspSession.keepaliveInterval("ABC;timeout=10"));
+        // Half of a one-second session, not the whole second
+        assertEquals(500, RtspSession.keepaliveInterval("ABC; timeout=1"));
+        assertEquals(30000, RtspSession.keepaliveInterval("ABC;timeout=junk"));
+        assertEquals(30000, RtspSession.keepaliveInterval("ABC;timeout=0"));
+    }
+
+    @Test
+    public void keepaliveIsSentWhileTheStreamIsIdle() throws Exception {
+        // Watchdog long enough not to interfere: only the keepalive is under test
+        RtspSession.watchdogMs = 10000;
+        server.sessionTimeout = 2; // keepalive every second
+        runUntilVideo(server.url(null), true); // 3 packets, then the server goes quiet
+        Thread.sleep(2600);
+        long keepalives = server.methods().stream()
+                .filter(x -> x.startsWith("GET_PARAMETER")).count();
+        assertTrue("keepalives while idle: " + keepalives, keepalives >= 2);
+        assertEquals(1, server.connections.get());
+    }
+
+    @Test
+    public void rejectedKeepaliveEndsTheSession() throws Exception {
+        server.sessionTimeout = 1;
+        server.streamContinuously = true;
+        server.keepaliveUnauthorized = true;
+        runUntilVideo(server.url("admin:pw"), true);
+        long deadline = System.nanoTime() + 4_000_000_000L;
+        while (server.connections.get() < 2 && System.nanoTime() < deadline) Thread.sleep(20);
+        assertTrue("reconnected after the keepalive was rejected", server.connections.get() >= 2);
+        // Bounded: Basic, then one Digest retry per connection, no endless repetition
+        long perFirstConnection = server.requests.stream()
+                .filter(x -> x.startsWith("GET_PARAMETER")).count();
+        assertTrue(perFirstConnection <= 2 * server.connections.get());
     }
 }
