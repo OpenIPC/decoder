@@ -35,7 +35,7 @@ class MediaCodecManager {
     /** A fresh decoder skips non-config input until all parameter sets arrived. */
     private boolean awaitingConfig;
     /** Bumped by setEnabled(); a creation started in an older generation is discarded. */
-    private int lifecycle;
+    private volatile int lifecycle;
     private final MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
 
     // Surface set by the owning activity
@@ -58,25 +58,34 @@ class MediaCodecManager {
     }
 
     /** Enable or disable decoding; disabling also releases the decoder. */
+    /**
+     * Enable or disable decoding. Never blocks the caller (the UI thread): disabling only
+     * sets flags; the decoder is detached and released on a short-lived thread, which is
+     * the only one that waits for decoderLock.
+     */
     void setEnabled(boolean enabled) {
-        MediaCodec codec;
-        synchronized (decoderLock) {
-            this.enabled = enabled;
-            lifecycle++;
-            if (enabled) return;
-            retry.onSuccess();
-            codec = decoder;
-            decoder = null;
-        }
-        // stop()/release() can take a while: never on the caller's (UI) thread
-        if (codec != null) releaseAsync(codec);
+        this.enabled = enabled;
+        lifecycle++;
+        if (enabled) return;
+        final MediaCodec target = decoder;
+        if (target == null) return;
+        new Thread(() -> {
+            synchronized (decoderLock) {
+                if (decoder != target) return; // already replaced or released
+                decoder = null;
+                retry.onSuccess();
+            }
+            releaseNow(target);
+        }, "decoder-release").start();
+    }
+
+    private static void releaseNow(MediaCodec codec) {
+        try { codec.stop(); } catch (Exception ignored) {}
+        try { codec.release(); } catch (Exception ignored) {}
     }
 
     private static void releaseAsync(MediaCodec codec) {
-        new Thread(() -> {
-            try { codec.stop(); } catch (Exception ignored) {}
-            try { codec.release(); } catch (Exception ignored) {}
-        }, "decoder-release").start();
+        new Thread(() -> releaseNow(codec), "decoder-release").start();
     }
 
     /** Release the decoder on purpose (codec switch, camera switch): no back-off. */
@@ -174,8 +183,11 @@ class MediaCodecManager {
         boolean needCreate = false;
         synchronized (decoderLock) {
             MediaCodec codec = decoder;
-            if (codec == null) {
-                needCreate = enabled && retry.mayCreate(nowMs());
+            if (!enabled) {
+                // Paused: the decoder is being released, feed nothing
+                return false;
+            } else if (codec == null) {
+                needCreate = retry.mayCreate(nowMs());
             } else if (awaitingConfig && !isConfigNal) {
                 // Frames before the full parameter set only produce errors in a new decoder
                 return false;
