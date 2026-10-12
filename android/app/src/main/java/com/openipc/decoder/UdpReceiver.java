@@ -14,7 +14,6 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.net.StandardSocketOptions;
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedSelectorException;
 import java.nio.channels.DatagramChannel;
@@ -22,7 +21,6 @@ import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.BooleanSupplier;
 
 /**
  * One RTP/RTCP port pair per track, bound to ephemeral ports (never fixed ones, see #40),
@@ -34,6 +32,11 @@ class UdpReceiver implements Closeable {
 
     interface Handler {
         void onPacket(int channel, byte[] buf, int offset, int length);
+    }
+
+    /** java.util.function.BooleanSupplier needs API 24. */
+    interface Condition {
+        boolean holds();
     }
 
     /** Hold time of the reorder buffer; only spent when a packet is missing. */
@@ -83,16 +86,17 @@ class UdpReceiver implements Closeable {
             DatagramChannel rtp = DatagramChannel.open();
             DatagramChannel rtcp = null;
             try {
-                rtp.bind(new InetSocketAddress(0));
-                int port = ((InetSocketAddress) rtp.getLocalAddress()).getPort();
+                // Through socket(): DatagramChannel.bind() and setOption() need API 24
+                rtp.socket().bind(new InetSocketAddress(0));
+                int port = rtp.socket().getLocalPort();
                 if ((port & 1) != 0 || port >= 65535) {
                     rtp.close();
                     continue;
                 }
                 rtcp = DatagramChannel.open();
-                rtcp.bind(new InetSocketAddress(port + 1));
+                rtcp.socket().bind(new InetSocketAddress(port + 1));
                 int size = channel == RtspSession.CHANNEL_VIDEO ? VIDEO_RCVBUF : AUDIO_RCVBUF;
-                rtp.setOption(StandardSocketOptions.SO_RCVBUF, size);
+                rtp.socket().setReceiveBufferSize(size);
                 rtp.configureBlocking(false);
                 rtcp.configureBlocking(false);
                 Track t = new Track(channel, rtp, rtcp);
@@ -121,7 +125,7 @@ class UdpReceiver implements Closeable {
      * Receive until {@code keepGoing} turns false or {@link #close} is called. The
      * condition is checked at least every 250 ms.
      */
-    void run(BooleanSupplier keepGoing, Handler handler) throws IOException {
+    void run(Condition keepGoing, Handler handler) throws IOException {
         List<InetAddress> accepted;
         synchronized (this) {
             if (closed) return;
@@ -134,7 +138,7 @@ class UdpReceiver implements Closeable {
         ByteBuffer buf = ByteBuffer.allocate(65536);
         byte[] array = buf.array();
         try {
-            while (!closed && keepGoing.getAsBoolean()) {
+            while (!closed && keepGoing.holds()) {
                 long now = System.nanoTime();
                 long timeout = 250;
                 for (Track t : tracks) {
