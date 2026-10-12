@@ -41,6 +41,7 @@
 
 - Android 5.0（API 21）或更高版本
 - 支持 RTSP over TCP 的 IP 摄像机（参见[已知限制](#已知限制)）
+- **不**需要 Google 服务（GAPPS）：应用可在没有 GAPPS 的 AOSP 系统上运行。WebUI 使用系统 WebView，因此需要可用的 WebView 软件包（部分设备上为 Google 的 *Android System WebView*）；禁用它只影响 WebUI — [#15](https://github.com/OpenIPC/decoder/issues/15)
 
 ## 快速上手
 
@@ -90,7 +91,6 @@
 > - **仅支持 RTSP over TCP**，不支持 UDP 和组播 — [#7](https://github.com/OpenIPC/decoder/issues/7)
 > - **仅有 4 个摄像机槽位** — [#13](https://github.com/OpenIPC/decoder/issues/13)
 > - **不支持 G.726 音频** — [#14](https://github.com/OpenIPC/decoder/issues/14)
-> - **部分设备上可能依赖 Google 服务（GAPPS）**，仍在调查中，请谨慎禁用 GAPPS — [#15](https://github.com/OpenIPC/decoder/issues/15)
 > - **用户名和密码以明文传输**（未加密的 RTSP/HTTP；摄像机未要求 Digest 时发送 Basic），不支持 RTSPS，也不计划支持 — [#16](https://github.com/OpenIPC/decoder/issues/16)
 >
 > 已知的程序错误另行收录在 [`bug` 标签](https://github.com/OpenIPC/decoder/issues?q=is%3Aissue+is%3Aopen+label%3Abug)下。

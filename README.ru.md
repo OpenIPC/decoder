@@ -41,6 +41,7 @@
 
 - Android 5.0 (API 21) или новее
 - IP-камера с RTSP поверх TCP (см. [Известные ограничения](#известные-ограничения))
+- Сервисы Google (GAPPS) **не** нужны: приложение работает и на AOSP-сборках без них. WebUI использует системный WebView, поэтому ему нужен рабочий пакет WebView (на некоторых устройствах это *Android System WebView* от Google); его отключение затрагивает только WebUI — [#15](https://github.com/OpenIPC/decoder/issues/15)
 
 ## Быстрый старт
 
@@ -90,7 +91,6 @@
 > - **Только RTSP поверх TCP.** UDP и multicast не поддерживаются — [#7](https://github.com/OpenIPC/decoder/issues/7)
 > - **Только 4 слота для камер** — [#13](https://github.com/OpenIPC/decoder/issues/13)
 > - **Не поддерживается звук G.726** — [#14](https://github.com/OpenIPC/decoder/issues/14)
-> - **Возможная зависимость от сервисов Google (GAPPS)** на некоторых устройствах; изучается, поэтому отключайте GAPPS осознанно — [#15](https://github.com/OpenIPC/decoder/issues/15)
 > - **Логин и пароль передаются в открытом виде** по RTSP/HTTP без шифрования (Basic, если камера не запросила Digest); RTSPS не поддерживается и не планируется — [#16](https://github.com/OpenIPC/decoder/issues/16)
 >
 > Известные ошибки собраны отдельно, под [меткой `bug`](https://github.com/OpenIPC/decoder/issues?q=is%3Aissue+is%3Aopen+label%3Abug).
