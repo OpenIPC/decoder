@@ -29,13 +29,13 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 
 ## Features
 
-- **Video:** RTSP playback, hardware H.264/H.265 decoding via MediaCodec
-- **Audio:** AAC (RFC 3640 `mpeg4-generic`, ADTS, MP4A-LATM), Opus, G.711 μ-law/A-law, L16 PCM (mono/stereo)
-- **Display:** single camera, or Quad mode with up to 8 cameras at once (2×2 or 3×3 grid)
+- **Video:** RTSP playback, hardware H.264/H.265 decoding via MediaCodec, automatic decoder recovery, picture fitted to any screen shape
+- **Audio:** AAC (RFC 3640 `mpeg4-generic`, ADTS, MP4A-LATM), Opus, G.711 μ-law/A-law, L16 PCM (mono/stereo); in multi-view, the sound of the selected cell
+- **Display:** single camera, or multi-view (Quad) with up to 8 cameras at once in a 2×2 or 3×3 grid
 - **Controls:** pinch-to-zoom, pan, double-tap to reset, Android TV remote (Leanback launcher)
 - **Network:** Basic and Digest authentication, RTSP keepalive, automatic reconnection with exponential back-off, connection-quality indicator
 - **WebUI:** built-in browser for the camera's web interface
-- **More:** long-press screenshot, 8 camera slots, URLs can be shared from other apps
+- **More:** 8 camera slots, URLs stored encrypted, long-press screenshot, URLs can be shared from other apps
 
 ## Requirements
 
@@ -47,7 +47,7 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 
 1. Install the APK from the [latest release](https://github.com/OpenIPC/decoder/releases/tag/latest) and launch the app.
 2. Tap the screen, or press **OK** on a remote, to open the menu.
-3. Choose a camera number (**1**–**4**), then press **Settings** and enter the camera URL:
+3. Choose a camera number (**1**–**8**), then press **Settings** and enter the camera URL:
    ```
    rtsp://username:password@ip_address:554/stream=0
    ```
@@ -59,7 +59,7 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 
 | Item         | Action                                                                                                                                                                             |
 |--------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Q**        | Turn Quad mode on or off                                                                                                                                                           |
+| **Q**        | Turn multi-view (Quad) on or off                                                                                                                                                   |
 | **1**–**8**  | Switch to a camera slot. The active slot's number shows the connection quality: green under 100 ms of jitter, yellow 100–300 ms, red above 300 ms. A grey number is an empty slot. |
 | **Settings** | Edit the RTSP URL of the active slot (single-camera mode only)                                                                                                                     |
 | **WebUI**    | Open the camera's web interface; credentials come from the RTSP URL (single-camera mode only)                                                                                      |
@@ -67,29 +67,29 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 
 ### Gestures and keys
 
-| Input                    | Action                                  |
-|--------------------------|-----------------------------------------|
-| Tap / **OK** / **Enter** | Open or close the menu                  |
-| **Back** / **Esc**       | Close the menu                          |
-| Pinch, then drag         | Zoom (up to 5×) and pan                 |
-| Double tap               | Reset zoom                              |
-| Long press               | Save a screenshot to `Pictures/OpenIPC` |
+| Input                    | Action                                                                                   |
+|--------------------------|------------------------------------------------------------------------------------------|
+| Tap / **OK** / **Enter** | Open or close the menu                                                                   |
+| **Back** / **Esc**       | Close the menu                                                                           |
+| Pinch, then drag         | Zoom (up to 5×) and pan, single view                                                     |
+| Double tap               | Reset zoom                                                                               |
+| Long press               | Single view: save a screenshot to `Pictures/OpenIPC`. Multi-view: play this cell's sound |
 
 ### Opening a camera from another app
 
 The app accepts plain-text shares (`ACTION_SEND`, `text/plain`). Sharing an `rtsp://` URL from another app, for example OpenIPC Network, puts it into the active slot.
 
-### Quad mode
+### Multi-view (Quad)
 
 Shows the configured slots in a 2×2 grid, or in a 3×3 grid once any of slots 5–8 is used. Each cell has its own connection and decoder, so the device's video decoder limits how many high-resolution streams play smoothly: with five or more cameras, their substreams are a good choice. Some cameras accept only one RTSP client at a time. Long-press a cell to play its audio (long-press it again to mute); the selected cell shows an AUDIO badge and is remembered. Tap any cell to open the menu.
 
 ## Known limitations
 
 > [!IMPORTANT]
-> These are known gaps that we plan to address. Each one has an issue — comments, test results and pull requests are welcome.
+> Each item has an issue — comments, test results and pull requests are welcome.
 >
-> - **RTSP over TCP only.** No UDP or multicast — [#7](https://github.com/OpenIPC/decoder/issues/7)
-> - **G.726 audio is not supported** — [#14](https://github.com/OpenIPC/decoder/issues/14)
+> - **RTSP over TCP only.** No UDP or multicast yet — [#7](https://github.com/OpenIPC/decoder/issues/7)
+> - **G.726 audio and MP4A-LATM with in-band configuration (`cpresent=1`) are not supported.** OpenIPC Majestic does not use them, and cameras that offer G.726 can usually send G.711 or AAC instead — [#14](https://github.com/OpenIPC/decoder/issues/14)
 > - **Credentials are sent in clear text** over plain RTSP/HTTP (Basic auth unless the camera asks for Digest); RTSPS is not supported and not planned — [#16](https://github.com/OpenIPC/decoder/issues/16)
 >
 > Known bugs are tracked separately under the [`bug` label](https://github.com/OpenIPC/decoder/issues?q=is%3Aissue+is%3Aopen+label%3Abug).
@@ -128,16 +128,20 @@ Debug and release builds are signed with different keys. To switch from one to t
 
 ## Architecture
 
-| Class                         | Role                                                                    |
-|-------------------------------|-------------------------------------------------------------------------|
-| `Decoder`                     | Main activity: UI, lifecycle, settings, video decode thread             |
-| `RtspClient`                  | RTSP handshake, RTP-over-TCP receive loop, watchdog, SDP parsing        |
-| `NalAssembler`                | Rebuilds H.264/H.265 NAL units from RTP fragmentation units             |
-| `MediaCodecManager`           | Hardware video decoder lifecycle                                        |
-| `AudioManager`, `AudioConfig` | Audio pipeline: G.711/L16 conversion, AAC decoding, AudioTrack playback |
-| `QuadCell`                    | A self-contained stream (network, watchdog, decoder) for one Quad cell  |
-| `MenuManager`                 | Popup menu, URL editor, WebUI browser                                   |
-| `FramePool`                   | Buffer pool that reduces garbage-collector load                         |
+| Class                               | Role                                                                                                 |
+|-------------------------------------|------------------------------------------------------------------------------------------------------|
+| `Decoder`                           | Main activity: UI, lifecycle, settings, single-view video decoding, multi-view grid                  |
+| `RtspClient`                        | Single-view stream: RTSP session, NAL assembly, audio, connection quality                            |
+| `RtspSession`                       | One RTSP-over-TCP session: handshake, RTP receive loop, keepalive, watchdog, reconnect with back-off |
+| `RtspAuth`, `Sdp`                   | Basic and Digest authentication; parsing of the camera's session description                         |
+| `NalAssembler`                      | Rebuilds H.264/H.265 NAL units from RTP packets, drops units damaged by packet loss                  |
+| `MediaCodecManager`, `DecoderRetry` | Hardware video decoder lifecycle and recovery after decoder errors                                   |
+| `AudioManager`, `AudioConfig`       | Audio pipeline: G.711/L16 conversion, AAC/Opus decoding, AudioTrack playback                         |
+| `QuadCell`                          | One multi-view cell: its own session, decoder and optional audio                                     |
+| `MenuManager`                       | Popup menu, URL editor, WebUI browser                                                                |
+| `CredentialStore`, `KeystoreCipher` | Encrypted storage of camera URLs (Android Keystore)                                                  |
+| `FramePool`, `Frame`                | Buffer pool that reduces garbage-collector load                                                      |
+| `App`, `Crash`                      | Uncaught-exception handler and crash report screen                                                   |
 
 Network, video decoding and audio run on separate threads, so a slow decoder never blocks the socket.
 
@@ -153,38 +157,39 @@ Tested the app on your device? Please [**submit a Device report**](https://githu
 
 ### Verified devices
 
-The devices below were reported with the legacy 1.0x version (`basic` branch). New reports should include the app version.
+Most devices below were reported with the legacy 1.0x version (`basic` branch); the *App* column shows the version that was tested. New reports should include the app version.
 
-| Type        | Device                                 | Android                           | Kernel         | App  | Notes                                                                |
-|-------------|----------------------------------------|-----------------------------------|----------------|------|----------------------------------------------------------------------|
-| Phone       | Asus ZC553KL                           | 8.1                               | 3.18.71        | 1.0x |                                                                      |
-| Phone       | Blackview BV4900Pro                    | 12                                | 4.19.191       | 1.0x |                                                                      |
-| Phone       | Oppo 5X                                | ColorOS 15.0                      | 5.15.149       | 1.0x |                                                                      |
-| Phone       | Oppo A17                               | ColorOS 12.1                      | 4.19.191       | 1.0x |                                                                      |
-| Phone       | Samsung Galaxy A51                     | 13                                | 4.14.113       | 1.0x |                                                                      |
-| Phone       | Samsung Galaxy M21 (SM-M215F/DSN)      | 12                                | 4.14.113       | 1.0x |                                                                      |
-| Phone       | Samsung Galaxy S25                     | 15                                | 6.6.30         | 1.0x |                                                                      |
-| Phone       | Samsung A55 5G                         | 14                                | 6.1.93         | 1.0x |                                                                      |
-| Phone       | Samsung Galaxy J7                      | 10                                | 3.18.150       | 1.0x |                                                                      |
-| Phone       | Samsung S8                             | 9                                 | 4.4.153        | 1.0x |                                                                      |
-| Phone       | Samsung S23 Ultra                      | 15                                | 5.15.153       | 1.0x |                                                                      |
-| Phone       | Xiaomi Redmi 7A                        | 10                                | 4.9.261        | 1.0x |                                                                      |
-| Phone       | Xiaomi Redmi Note 7 (M1901F7G)         | 10                                | 4.4.192        | 1.0x |                                                                      |
-| Phone       | Xiaomi Redmi Note 13 4G                | 13                                | 5.15.94        | 1.0x |                                                                      |
-| Tablet      | Lenovo TB-X304L                        | 8.1.0                             | 3.18.71        | 1.0x | Picture cropped, [#17](https://github.com/OpenIPC/decoder/issues/17) |
-| Tablet      | Lenovo TB-X606F                        | 10                                | —              | 1.0x | Picture cropped, [#17](https://github.com/OpenIPC/decoder/issues/17) |
-| Tablet      | Lenovo Tab P11                         | 11                                | 4.19.157-perf+ | 1.0x | Picture cropped, [#17](https://github.com/OpenIPC/decoder/issues/17) |
-| Tablet      | Samsung Galaxy Tab A                   | 7.1.1                             | 3.10.49        | 1.0x |                                                                      |
-| Tablet      | Samsung Galaxy Tab A                   | 11                                | 4.9.227        | 1.0x |                                                                      |
-| Tablet      | Samsung Tab A7 (SM-T505)               | 12                                | 4.19.157-perf- | 1.0x |                                                                      |
-| Set-top box | A95X F3 AIR                            | 9 (SlimBOXtv AOSP 9.14, no GAPPS) | 4.9.113        | 1.0x |                                                                      |
-| Set-top box | IE X3 Air                              | 9 (SlimBOXtv AOSP 9.14, no GAPPS) | 4.9.113        | 1.0x |                                                                      |
-| Set-top box | SberBox SBDV-00001                     | custom                            | 4.9.228        | 1.0x |                                                                      |
-| Set-top box | X96Q (Allwinner H313)                  | 10                                | 4.9.170        | 1.0x |                                                                      |
-| TV          | Haier Candy Android TV 2K              | 11                                | 4.9.243+       | 1.0x | No icon in the device's app list                                     |
-| TV          | Yandex TV Novex NVX-55U169TSY          | 7.1.1                             | 4.4.3          | 1.0x |                                                                      |
-| Car         | Media Center JCAC10003 (ac8227/ac8229) | 12                                | 3.18.79+       | 1.0x |                                                                      |
-| Car         | Mirror Z55                             | 8.1.0                             | 4.4.83         | 1.0x |                                                                      |
+| Type        | Device                                 | Android                           | Kernel         | App     | Notes                                                                                      |
+|-------------|----------------------------------------|-----------------------------------|----------------|---------|--------------------------------------------------------------------------------------------|
+| Phone       | Asus ZC553KL                           | 8.1                               | 3.18.71        | 1.0x    |                                                                                            |
+| Phone       | Blackview BV4900Pro                    | 12                                | 4.19.191       | 1.0x    |                                                                                            |
+| Phone       | Oppo 5X                                | ColorOS 15.0                      | 5.15.149       | 1.0x    |                                                                                            |
+| Phone       | Oppo A17                               | ColorOS 12.1                      | 4.19.191       | 1.0x    |                                                                                            |
+| Phone       | Samsung Galaxy A51                     | 13                                | 4.14.113       | 1.0x    |                                                                                            |
+| Phone       | Samsung Galaxy M21 (SM-M215F/DSN)      | 12                                | 4.14.113       | 1.0x    |                                                                                            |
+| Phone       | Samsung Galaxy S25                     | 15                                | 6.6.30         | 1.0x    |                                                                                            |
+| Phone       | Samsung A55 5G                         | 14                                | 6.1.93         | 1.0x    |                                                                                            |
+| Phone       | Samsung Galaxy J7                      | 10                                | 3.18.150       | 1.0x    |                                                                                            |
+| Phone       | Samsung S8                             | 9                                 | 4.4.153        | 1.0x    |                                                                                            |
+| Phone       | Samsung S23 Ultra                      | 15                                | 5.15.153       | 1.0x    |                                                                                            |
+| Phone       | Xiaomi Redmi 7A                        | 10                                | 4.9.261        | 1.0x    |                                                                                            |
+| Phone       | Xiaomi Redmi Note 7 (M1901F7G)         | 10                                | 4.4.192        | 1.0x    |                                                                                            |
+| Phone       | Xiaomi Redmi Note 13 4G                | 13                                | 5.15.94        | 1.0x    |                                                                                            |
+| Tablet      | Lenovo TB-X304L                        | 8.1.0                             | 3.18.71        | 1.0x    | Picture cropped in 1.0x, fixed in v2 ([#17](https://github.com/OpenIPC/decoder/issues/17)) |
+| Tablet      | Lenovo TB-X606F                        | 10                                | —              | 1.0x    | Picture cropped in 1.0x, fixed in v2 ([#17](https://github.com/OpenIPC/decoder/issues/17)) |
+| Tablet      | Lenovo Tab P11                         | 11                                | 4.19.157-perf+ | 1.0x    | Picture cropped in 1.0x, fixed in v2 ([#17](https://github.com/OpenIPC/decoder/issues/17)) |
+| Tablet      | Samsung Galaxy Tab A                   | 7.1.1                             | 3.10.49        | 1.0x    |                                                                                            |
+| Tablet      | Samsung Galaxy Tab A                   | 11                                | 4.9.227        | 1.0x    |                                                                                            |
+| Tablet      | Samsung Tab A7 (SM-T505)               | 12                                | 4.19.157-perf- | 1.0x    |                                                                                            |
+| Set-top box | A95X F3 AIR                            | 9 (SlimBOXtv AOSP 9.14, no GAPPS) | 4.9.113        | 1.0x    |                                                                                            |
+| Set-top box | IE X3 Air                              | 9 (SlimBOXtv AOSP 9.14, no GAPPS) | 4.9.113        | 1.0x    |                                                                                            |
+| Set-top box | AG-216                                 | 10                                | 4.9.170        | v2 1.28 | v2 test device: 8-camera multi-view, H.264/H.265, Opus/AAC/L16                             |
+| Set-top box | SberBox SBDV-00001                     | custom                            | 4.9.228        | 1.0x    |                                                                                            |
+| Set-top box | X96Q (Allwinner H313)                  | 10                                | 4.9.170        | 1.0x    |                                                                                            |
+| TV          | Haier Candy Android TV 2K              | 11                                | 4.9.243+       | 1.0x    | No icon in the device's app list                                                           |
+| TV          | Yandex TV Novex NVX-55U169TSY          | 7.1.1                             | 4.4.3          | 1.0x    |                                                                                            |
+| Car         | Media Center JCAC10003 (ac8227/ac8229) | 12                                | 3.18.79+       | 1.0x    |                                                                                            |
+| Car         | Mirror Z55                             | 8.1.0                             | 4.4.83         | 1.0x    |                                                                                            |
 
 ### Not working
 
