@@ -379,7 +379,13 @@ class RtspSession {
             if (rx != null) {
                 // Only the camera may send to our ports; "source" may be its own view of
                 // its address (NAT), so the address we connected to is accepted as well
-                rx.setSources(s.getInetAddress(), sourceAddress(reply.source), audioSource);
+                if (mc) {
+                    // The group already selects the stream, and a server may send it from
+                    // another interface than the RTSP one: only a named source restricts it
+                    rx.setSources(sourceAddress(reply.source), audioSource);
+                } else {
+                    rx.setSources(s.getInetAddress(), sourceAddress(reply.source), audioSource);
+                }
             }
 
             if (gen != generation) return false;
@@ -515,7 +521,7 @@ class RtspSession {
     private boolean joinGroup(UdpReceiver rx, int channel, Transport reply, InetAddress local) {
         InetAddress group = sourceAddress(reply.destination);
         if (!reply.multicast || group == null || !group.isMulticastAddress()
-                || reply.port == null) {
+                || reply.port == null || reply.port[0] <= 0) {
             return false;
         }
         try {

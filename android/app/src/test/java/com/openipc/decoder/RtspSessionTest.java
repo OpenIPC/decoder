@@ -785,6 +785,15 @@ public class RtspSessionTest {
     }
 
     @Test
+    public void multicastReplyWithoutAPortFallsBackToTcp() throws Exception {
+        server.multicastReply = "RTP/AVP;multicast;destination=239.255.42.18;port=0-1;ttl=1";
+        runUdp(Transport.Mode.MULTICAST, false);
+        assertTrue("video over TCP", rec.videoLatch.await(5, TimeUnit.SECONDS));
+        List<String> s = setups();
+        assertTrue(s.get(s.size() - 1).contains("interleaved=0-1"));
+    }
+
+    @Test
     public void multicastNeedsAndroid8() throws Exception {
         UdpReceiver.sdkInt = 25;
         runUdp(Transport.Mode.MULTICAST, false);

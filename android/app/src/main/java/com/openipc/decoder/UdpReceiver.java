@@ -138,14 +138,17 @@ class UdpReceiver implements Closeable {
                                         InetAddress local) throws IOException {
         if (closed) throw new IOException("Receiver closed");
         if (!group.isMulticastAddress()) throw new IOException("Not a multicast group: " + group);
+        if (port <= 0 || port > 65535) throw new IOException("Invalid multicast port: " + port);
         NetworkInterface nif = NetworkInterface.getByInetAddress(local);
         if (nif == null) throw new IOException("No network interface for " + local);
         DatagramChannel ch = DatagramChannel.open(group instanceof Inet6Address
                 ? StandardProtocolFamily.INET6 : StandardProtocolFamily.INET);
         try {
-            // Other receivers of the group on this device bind the same port
+            // Other receivers of the group on this device bind the same port. Bound to the
+            // group, not the wildcard: on Linux a wildcard socket also receives every other
+            // group joined on this port, e.g. another channel of the same NVR
             ch.setOption(StandardSocketOptions.SO_REUSEADDR, true);
-            ch.bind(new InetSocketAddress(port));
+            ch.bind(new InetSocketAddress(group, port));
             ch.setOption(StandardSocketOptions.SO_RCVBUF,
                     channel == RtspSession.CHANNEL_VIDEO ? VIDEO_RCVBUF : AUDIO_RCVBUF);
             ch.join(group, nif);
