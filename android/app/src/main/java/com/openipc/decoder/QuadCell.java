@@ -42,6 +42,8 @@ class QuadCell implements RtspSession.Callback {
 
     private final BlockingQueue<Frame> nalQueue = new ArrayBlockingQueue<>(30);
     private final NalAssembler nalAssembler;
+    private final NalAssembler.Sink nalSink;
+    private int queueFullDrops;
     private int lastUnknownPayload = -1;
 
     private ExecutorService executor;
@@ -61,6 +63,15 @@ class QuadCell implements RtspSession.Callback {
         this.userAgent = userAgent;
         this.listener = listener;
         this.session = new RtspSession(tag, this);
+        this.nalSink = nal -> {
+            if (!nalQueue.offer(nal)) {
+                // Rate-limited: one aggregation packet can carry many NAL units
+                if (queueFullDrops++ % 100 == 0) {
+                    Log.w(TAG, tag + " queue full, NAL dropped (" + queueFullDrops + ")");
+                }
+                pool.recycle(nal);
+            }
+        };
         this.nalAssembler = new NalAssembler(512 * 1024, () -> {
             nalQueue.clear();
             synchronized (decoderLock) {
@@ -129,7 +140,14 @@ class QuadCell implements RtspSession.Callback {
             while (running) {
                 try {
                     Frame f = nalQueue.poll(5, TimeUnit.MILLISECONDS);
-                    if (f != null) decode(f);
+                    if (f != null) {
+                        try {
+                            decode(f);
+                        } finally {
+                            // The decoder copied the data: give the buffer back to the pool
+                            cellFramePool.recycle(f);
+                        }
+                    }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
@@ -189,8 +207,6 @@ class QuadCell implements RtspSession.Callback {
     @Override
     public boolean onPacket(int channel, byte[] buf, int offset, int length) {
         if (channel != RtspSession.CHANNEL_VIDEO || length < 12) return false;
-        // CSRC and header extensions are not supported for video yet (#10)
-        if ((buf[offset] & 0x0F) != 0 || (buf[offset] & 0x10) != 0) return false;
         int pt = buf[offset + 1] & 0x7F;
         if (pt != videoPt) {
             if (pt != lastUnknownPayload) {
@@ -200,17 +216,9 @@ class QuadCell implements RtspSession.Callback {
             return false;
         }
 
-        Frame frame = cellFramePool.obtain(length);
-        System.arraycopy(buf, offset, frame.data(), 0, length);
-        frame.setLength(length);
-        Frame output = nalAssembler.assemble(frame, codecH265);
-        cellFramePool.recycle(frame);
-        if (output != null && !nalQueue.offer(output)) {
-            Log.w(TAG, tag + " queue full, dropping frame");
-            cellFramePool.recycle(output);
-        }
-        return true;
+        return nalAssembler.assemble(buf, offset, length, codecH265, nalSink);
     }
+
 
     private void decode(Frame buffer) {
         if (buffer.length() < 5) return;

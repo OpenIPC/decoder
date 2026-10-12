@@ -1,7 +1,7 @@
 /*
  * Copyright (c) OpenIPC  https://openipc.org  Prosperity Public License 3.0.0
  *
- * NalAssembler.java — reusable NAL unit reassembler from RTP fragmentation units
+ * NalAssembler.java — H.264/H.265 NAL units from RTP packets (RFC 6184 / RFC 7798)
  *
  */
 
@@ -10,20 +10,37 @@ package com.openipc.decoder;
 import android.util.Log;
 
 /**
- * Reassembles NAL units from RTP fragmentation units (FU-A for H.264, FU for H.265).
- * Shared by the main decoder and QuadCell streams. Replaces duplicated buildFrame()/assembleNal().
+ * Turns RTP video packets into Annex B NAL units (with a 4-byte start code). Handles single
+ * NAL unit packets, fragmentation units (FU-A, FU) and aggregation packets (STAP-A, AP),
+ * any RTP header length (CSRC, extension, padding) and packet loss: a fragmented NAL unit
+ * with a missing piece is dropped instead of being passed on corrupted.
  */
 class NalAssembler {
     private static final String TAG = "OpenIPCDecoder";
 
-    private static final int RTP_FU_H264 = 28;
-    private static final int RTP_FU_H265 = 49;
+    private static final int H264_STAP_A = 24;
+    private static final int H264_FU_A = 28;
+    private static final int H265_AP = 48;
+    private static final int H265_FU = 49;
+    private static final int H265_PACI = 50;
+
+    interface Sink {
+        /** A complete NAL unit; the sink owns the frame (recycle it when done). */
+        void onNal(Frame nal);
+    }
 
     private final byte[] nalBuffer;
-    private int nalSize;
-    private boolean lastCodec;
     private final Runnable onCodecSwitch;
     private final FramePool framePool;
+
+    private int nalSize;
+    /** A fragmented NAL unit is being collected in nalBuffer. */
+    private boolean inFragment;
+    /** Skipping the rest of a fragmented NAL unit whose start was not seen (counted once). */
+    private boolean orphan;
+    private int lastSeq = -1;
+    private boolean lastCodec;
+    private int dropped;
 
     NalAssembler(int bufferSize, Runnable onCodecSwitch, FramePool framePool) {
         this.nalBuffer = new byte[bufferSize];
@@ -31,88 +48,156 @@ class NalAssembler {
         this.framePool = framePool;
     }
 
-    void reset() { nalSize = 0; }
+    void reset() {
+        nalSize = 0;
+        inFragment = false;
+        orphan = false;
+        lastSeq = -1;
+    }
 
-    /** Reassemble one RTP packet into (possibly null) NAL frame. */
-    Frame assemble(Frame frame, boolean codecH265) {
-        byte[] rx = frame.data();
-        int rxSize = frame.length();
-        int cp = 12;
-        rxSize -= cp;
-        if (rxSize <= 0) return null;
+    /** NAL units dropped so far because of packet loss or size (for diagnostics). */
+    int droppedCount() { return dropped; }
+
+    /**
+     * Process one RTP packet ({@code length} bytes at {@code offset}, header included).
+     * Returns false if the RTP header is malformed.
+     */
+    boolean assemble(byte[] buf, int offset, int length, boolean codecH265, Sink sink) {
+        int header = RtspSession.rtpHeaderLength(buf, offset, length);
+        if (header < 0) return false;
+        int end = RtspSession.rtpPayloadEnd(buf, offset, length);
+        if (end < header) return false;
+        int start = offset + header;
+        end += offset;
 
         if (lastCodec != codecH265) {
             lastCodec = codecH265;
-            nalSize = 0;
+            reset();
             onCodecSwitch.run();
         }
 
-        int frag = fragment(rx[cp], codecH265);
-        if (frag == RTP_FU_H264 || frag == RTP_FU_H265) {
-            int minPayload = codecH265 ? 3 : 2;
-            if (rxSize < minPayload) return null;
+        int seq = ((buf[offset + 2] & 0xFF) << 8) | (buf[offset + 3] & 0xFF);
+        boolean gap = lastSeq >= 0 && seq != ((lastSeq + 1) & 0xFFFF);
+        lastSeq = seq;
+        if (gap && inFragment) {
+            drop("packet loss inside a fragmented NAL unit");
+            orphan = true; // its remaining pieces belong to the unit just counted
+        }
 
-            int staBit, endBit;
-            if (codecH265) {
-                staBit = rx[cp + 2] & 0x80;
-                endBit = rx[cp + 2] & 0x40;
-            } else {
-                staBit = rx[cp + 1] & 0x80;
-                endBit = rx[cp + 1] & 0x40;
-            }
+        int nalHeader = codecH265 ? 2 : 1;
+        if (end - start < nalHeader) return true;
+        int type = fragment(buf[start], codecH265);
 
-            if (staBit != 0) {
-                nalSize = 0;
-                if (codecH265) {
-                    nalBuffer[nalSize++] = 0;
-                    nalBuffer[nalSize++] = 0;
-                    nalBuffer[nalSize++] = 0;
-                    nalBuffer[nalSize++] = 1;
-                    // 2-byte NAL header: F + FU type + layer-id MSB, then layer-id/TID as sent
-                    nalBuffer[nalSize++] = (byte)((rx[cp] & 0x81) | ((rx[cp + 2] & 0x3F) << 1));
-                    nalBuffer[nalSize++] = rx[cp + 1];
-                    cp += 3; // payload header + FU header
-                } else {
-                    nalBuffer[nalSize++] = 0;
-                    nalBuffer[nalSize++] = 0;
-                    nalBuffer[nalSize++] = 0;
-                    nalBuffer[nalSize++] = 1;
-                    nalBuffer[nalSize++] = (byte)((rx[cp] & 0xE0) | (rx[cp + 1] & 0x1F));
-                    cp += 2;
-                }
-                rxSize = frame.length() - cp;
-            } else {
-                cp += codecH265 ? 3 : 2;
-                rxSize = frame.length() - cp;
-            }
-
-            int copyLen = Math.min(rxSize, nalBuffer.length - nalSize);
-            if (copyLen > 0) {
-                System.arraycopy(rx, cp, nalBuffer, nalSize, copyLen);
-                nalSize += copyLen;
-            }
-
-            if (endBit != 0) {
-                Frame out = framePool.obtain(nalSize);
-                System.arraycopy(nalBuffer, 0, out.data(), 0, nalSize);
-                out.setLength(nalSize);
-                nalSize = 0;
-                return out;
-            }
-            return null;
+        if (codecH265 ? type == H265_FU : type == H264_FU_A) {
+            fragmentUnit(buf, start, end, codecH265, sink);
+            return true;
+        }
+        // Any other packet ends a fragmented NAL unit that did not finish; its remaining
+        // pieces, if any arrive, belong to the unit counted here
+        if (inFragment) {
+            drop("fragmented NAL unit interrupted by another packet");
+            orphan = true;
         } else {
+            orphan = false;
+        }
+        if (codecH265 ? type == H265_AP : type == H264_STAP_A) {
+            aggregation(buf, start + nalHeader, end, sink);
+        } else if (codecH265 ? type == H265_PACI : (type >= 25 && type <= 29)) {
+            // PACI, STAP-B, MTAP and FU-B are not used by cameras in non-interleaved mode
+            return true;
+        } else {
+            emit(buf, start, end - start, sink);
+        }
+        return true;
+    }
+
+    private void fragmentUnit(byte[] buf, int start, int end, boolean h265, Sink sink) {
+        int payloadHeader = h265 ? 2 : 1;
+        if (end - start <= payloadHeader) return;
+        int fu = buf[start + payloadHeader] & 0xFF;
+        boolean first = (fu & 0x80) != 0;
+        boolean last = (fu & 0x40) != 0;
+        int pos = start + payloadHeader + 1;
+
+        if (first) {
+            if (inFragment) drop("fragmented NAL unit without its end");
+            orphan = false;
             nalSize = 0;
-            int copyLen = rxSize + 4;
-            if (copyLen > nalBuffer.length || copyLen < 5) return null;
-            nalBuffer[0] = 0;
-            nalBuffer[1] = 0;
-            nalBuffer[2] = 0;
-            nalBuffer[3] = 1;
-            System.arraycopy(rx, cp, nalBuffer, 4, rxSize);
-            Frame out = framePool.obtain(copyLen);
-            System.arraycopy(nalBuffer, 0, out.data(), 0, copyLen);
-            out.setLength(copyLen);
-            return out;
+            inFragment = true;
+            nalBuffer[nalSize++] = 0;
+            nalBuffer[nalSize++] = 0;
+            nalBuffer[nalSize++] = 0;
+            nalBuffer[nalSize++] = 1;
+            if (h265) {
+                // 2-byte NAL header: F + FU type + layer-id MSB, then layer-id/TID as sent
+                nalBuffer[nalSize++] = (byte) ((buf[start] & 0x81) | ((fu & 0x3F) << 1));
+                nalBuffer[nalSize++] = buf[start + 1];
+            } else {
+                nalBuffer[nalSize++] = (byte) ((buf[start] & 0xE0) | (fu & 0x1F));
+            }
+        } else if (!inFragment) {
+            // The start was lost (or we joined mid-unit): nothing to attach this piece to.
+            // Count the lost unit once, not once per remaining piece.
+            if (!orphan) {
+                orphan = true;
+                dropped++;
+                logDrop("fragmented NAL unit without its start");
+            }
+            if (last) orphan = false;
+            return;
+        }
+
+        int len = end - pos;
+        if (nalSize + len > nalBuffer.length) {
+            drop("NAL unit larger than " + nalBuffer.length + " bytes");
+            return;
+        }
+        System.arraycopy(buf, pos, nalBuffer, nalSize, len);
+        nalSize += len;
+
+        if (last) {
+            Frame out = framePool.obtain(nalSize);
+            System.arraycopy(nalBuffer, 0, out.data(), 0, nalSize);
+            out.setLength(nalSize);
+            nalSize = 0;
+            inFragment = false;
+            sink.onNal(out);
+        }
+    }
+
+    /** STAP-A / AP: a sequence of (16-bit size, NAL unit). */
+    private void aggregation(byte[] buf, int pos, int end, Sink sink) {
+        while (end - pos >= 2) {
+            int size = ((buf[pos] & 0xFF) << 8) | (buf[pos + 1] & 0xFF);
+            pos += 2;
+            if (size == 0 || pos + size > end) break;
+            emit(buf, pos, size, sink);
+            pos += size;
+        }
+    }
+
+    private void emit(byte[] buf, int pos, int size, Sink sink) {
+        Frame out = framePool.obtain(size + 4);
+        byte[] d = out.data();
+        d[0] = 0;
+        d[1] = 0;
+        d[2] = 0;
+        d[3] = 1;
+        System.arraycopy(buf, pos, d, 4, size);
+        out.setLength(size + 4);
+        sink.onNal(out);
+    }
+
+    private void drop(String reason) {
+        nalSize = 0;
+        inFragment = false;
+        dropped++;
+        logDrop(reason);
+    }
+
+    private void logDrop(String reason) {
+        if (dropped <= 3 || dropped % 100 == 0) {
+            Log.w(TAG, "NAL unit dropped (" + dropped + "): " + reason);
         }
     }
 

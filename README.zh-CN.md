@@ -92,7 +92,6 @@
 > 以下是我们计划解决的已知不足，每一项都有对应的 issue。欢迎留言、提交测试结果和 pull request。
 >
 > - **仅支持 RTSP over TCP**，不支持 UDP 和组播 — [#7](https://github.com/OpenIPC/decoder/issues/7)
-> - **视频的 RTP 处理较为简单：** 不支持 STAP-A/AP 聚合包，带 CSRC 或扩展头的包会被丢弃，也不处理丢包 — [#10](https://github.com/OpenIPC/decoder/issues/10)
 > - **Quad 模式下没有声音** — [#12](https://github.com/OpenIPC/decoder/issues/12)
 > - **仅有 4 个摄像机槽位** — [#13](https://github.com/OpenIPC/decoder/issues/13)
 > - **不支持的音频格式：** MP4A-LATM、Opus、G.726，以及跨多个 RTP 包分片的 AAC 帧 — [#14](https://github.com/OpenIPC/decoder/issues/14)

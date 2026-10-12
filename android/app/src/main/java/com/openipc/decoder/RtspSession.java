@@ -580,8 +580,14 @@ class RtspSession {
 
     /** Payload end: packet length minus RTP padding, or -1 if malformed. */
     static int rtpPayloadEnd(byte[] data, int length) {
-        if ((data[0] & 0x20) == 0) return length;
-        int pad = data[length - 1] & 0xFF;
+        return rtpPayloadEnd(data, 0, length);
+    }
+
+    /** Payload end relative to {@code offset}: length minus RTP padding, or -1 if malformed. */
+    static int rtpPayloadEnd(byte[] data, int offset, int length) {
+        if (length < 1) return -1;
+        if ((data[offset] & 0x20) == 0) return length;
+        int pad = data[offset + length - 1] & 0xFF;
         return pad <= length ? length - pad : -1;
     }
 
