@@ -104,7 +104,8 @@ public class Decoder extends Activity
     /** Debug text in every cell (menu D), or in none (#92). */
     private boolean showStats;
     /** Slide mode (#108): multi-view, every cell on key frames only; saved as "slides". */
-    private boolean slides;
+    /** Read by the single view's decode thread too (Qodo on #155). */
+    private volatile boolean slides;
     /** With the debug text on: where the debug page is (#96). */
     private TextView debugUrls;
     private volatile int quadAudioGen;
@@ -1453,7 +1454,8 @@ public class Decoder extends Activity
             single.put("codec", rtspClient != null && rtspClient.isJpeg() ? "MJPEG"
                     : codecH265 ? "H.265" : "H.264");
             single.put("audio", audioCodec);
-            // Frames shown so far and the playback mode of S (#153)
+            // Frames shown since the app started (all single-view streams; the rate is the
+            // difference of two samples) and the playback mode of S (#153)
             single.put("frames_out", videoDecoder.framesOut() + jpegFramesOut);
             single.put("decode", slides ? "key frames" : "full");
             m.put("single", single);
