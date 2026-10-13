@@ -11,9 +11,10 @@ on:
 
 # One run per branch (and event): a newer push cancels the older run, so on basic / v2 the
 # "latest" release always gets the build of the newest commit, not of the run that finished
-# last (#90). Manual runs have their own group and are never cancelled by a push.
+# last (#90). Every manual run has a group of its own: never cancelled, never replaced by
+# another manual run waiting in the same group.
 concurrency:
-  group: build-${{ github.event_name }}-${{ github.ref }}
+  group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}', github.run_id) || format('build-{0}-{1}', github.event_name, github.ref) }}
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
