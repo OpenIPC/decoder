@@ -142,6 +142,14 @@ class QuadCell implements RtspSession.Callback {
             }
         });
         this.nalSink = nal -> {
+            // Picture slices out of the assembler, before the queue: what the video decoder
+            // would get (#145); parameter sets alone are no picture (Qodo on #147)
+            // On key frames only, just the slices decode() really passes on (Qodo on #147)
+            if (!jpeg && nal.length() > 4 && NalAssembler.isSlice(nal.data()[4], codecH265)
+                    && (!(keyFramesOnly || waitingKeyFrame) || isKeyNal(
+                            NalAssembler.fragment(nal.data()[4], codecH265), codecH265))) {
+                assembled++;
+            }
             if (!nalQueue.offer(nal)) {
                 // Rate-limited: one aggregation packet can carry many NAL units
                 if (queueFullDrops++ % 100 == 0) {
@@ -328,6 +336,13 @@ class QuadCell implements RtspSession.Callback {
         lastIn = in;
         lastOut = out;
         lastLost = lost;
+        // Any lost packet, not only one inside a fragmented NAL unit (Qodo on #147)
+        int netLoss = jpeg ? jpegAssembler.droppedCount() : nalAssembler.gapCount();
+        networkLoss = netLoss > lastNetLoss;
+        int units = assembled;
+        unitsArrived = units != lastAssembled;
+        lastAssembled = units;
+        lastNetLoss = netLoss;
         lastSampleMs = nowMs;
         checkUdpStall();
 
@@ -477,6 +492,31 @@ class QuadCell implements RtspSession.Callback {
     boolean showsVideo(long ms) {
         long window = keyFramesOnly ? Math.max(ms, KEY_FRAMES_LIVE_MS) : ms;
         return pausedReason == null && "connected".equals(state) && renderedWithin(window);
+    }
+
+    /** NAL units were lost on the network in the last second (#145). */
+    private volatile boolean networkLoss;
+    /**
+     * NAL units or JPEG frames out of the assembler: unlike marker bits (inFps), only data the
+     * decoder could take; queue drops included (Qodo on #147).
+     */
+    private volatile int assembled;
+    private int lastAssembled;
+    /** Some arrived since the last sample, whatever the sampling interval. */
+    private volatile boolean unitsArrived;
+    private int lastNetLoss;
+
+    /**
+     * Connected, not paused, and whole frames arrive (#145): a cell losing packets on the
+     * network may decode nothing for that reason alone (#113, #133).
+     */
+    /** H.264/H.265, decoded by the device's video decoder (not MJPEG, #145). */
+    boolean usesVideoDecoder() { return !jpeg; }
+
+    boolean isReceiving() {
+        // A cell with its own decoder problem (error, limit) says so itself (Qodo on #147)
+        return pausedReason == null && problem == null && "connected".equals(state)
+                && unitsArrived && !networkLoss;
     }
 
     private boolean renderedWithin(long ms) {

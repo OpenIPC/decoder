@@ -76,4 +76,23 @@ public class QuadGridTest {
                 java.util.Arrays.asList("172.17.32.144", "192.168.1.20"), 5600);
         assertTrue(two, two.endsWith("output to\n\n172.17.32.144:5600\n192.168.1.20:5600"));
     }
+
+    @Test
+    public void decoderStuckIsReportedAfterTwentySecondsOfTime() {
+        long since = -1;
+        // Ticks a little late: the time counts, not the ticks (Qodo on #147)
+        long t = 1000;
+        for (; t < 1000 + Decoder.STUCK_MS; t += 1300) {
+            since = Decoder.stuckSince(since, t, 9, false);
+            assertEquals(1000, since);
+            assertFalse(Decoder.isStuck(since, t));
+        }
+        since = Decoder.stuckSince(since, t, 9, false);
+        assertTrue(Decoder.isStuck(since, t));
+        // Any output, from any cell, ends it
+        assertEquals(-1, Decoder.stuckSince(since, t, 9, true));
+        // One camera alone may just wait for a key frame
+        assertEquals(-1, Decoder.stuckSince(-1, t, 1, false));
+        assertFalse(Decoder.isStuck(-1, t));
+    }
 }

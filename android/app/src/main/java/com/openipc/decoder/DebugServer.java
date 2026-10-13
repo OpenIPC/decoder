@@ -512,8 +512,11 @@ final class DebugServer {
             + "up(s.uptime_s):'';\n"
             // Orange: the UI thread is stuck, or there is no activity behind the server at all
             + "var ui=s.ui_thread&&s.ui_thread!=='ok',none=!s.ui_thread;\n"
-            + "$('err').textContent=ui?'UI '+s.ui_thread:none?(s.mode||'no data'):'';\n"
-            + "$('dot').className='dot '+(ui||none?'warn':'ok');\n"
+            // Red: frames arrive, the device's decoder gives none; only a restart helps (#145)
+            + "var stuck=s.decoder_stuck===true;\n"
+            + "$('err').textContent=stuck?'video decoder not responding \u2014 restart the device'"
+            + ":ui?'UI '+s.ui_thread:none?(s.mode||'no data'):'';\n"
+            + "$('dot').className='dot '+(stuck?'bad':ui||none?'warn':'ok');\n"
             + "var list,side=1;\n"
             + "if(s.mode==='paused'||!(s.cells||s.single))"
             + "list=[{text:s.mode==='paused'?'App in background':(s.mode||'')}];\n"

@@ -44,6 +44,8 @@ class NalAssembler {
     private int dropped;
     /** Of those, dropped because a packet of them was lost (not for size) (#113). */
     private int lostDropped;
+    /** Written by the receive thread, read by the UI thread (Qodo on #147). */
+    private volatile int gaps;
     /**
      * Pass a NAL unit with a lost piece on cut short at the gap instead of dropping it (#133):
      * for a stream that loses a piece of every key frame, where dropping them leaves nothing to
@@ -69,6 +71,8 @@ class NalAssembler {
     int droppedCount() { return dropped; }
     /** NAL units dropped because one of their packets was lost (#113). */
     int lossCount() { return lostDropped; }
+    /** Gaps in the RTP sequence, any packet lost (#145). */
+    int gapCount() { return gaps; }
 
     void setSalvage(boolean on) { salvage = on; }
     boolean salvaging() { return salvage; }
@@ -98,6 +102,7 @@ class NalAssembler {
 
         int seq = ((buf[offset + 2] & 0xFF) << 8) | (buf[offset + 3] & 0xFF);
         boolean gap = lastSeq >= 0 && seq != ((lastSeq + 1) & 0xFFFF);
+        if (gap) gaps++;
         lastSeq = seq;
         if (gap && inFragment) {
             lostDropped++;
