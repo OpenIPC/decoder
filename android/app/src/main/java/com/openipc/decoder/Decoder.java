@@ -943,7 +943,7 @@ public class Decoder extends Activity
     private static final long DEBUG_UI_TIMEOUT_MS = 1000;
     private final DebugServer.Source debugSource = new DebugServer.Source() {
         @Override public Map<String, Object> snapshot() { return debugSnapshot(); }
-        @Override public byte[] snapshotJpeg() { return debugSnapshotJpeg(); }
+        @Override public byte[] snapshotJpeg(boolean labels) { return debugSnapshotJpeg(labels); }
     };
     /** A cell counts as playing in a snapshot when it showed a frame this recently (#98). */
     private static final long SNAPSHOT_LIVE_MS = 2000;
@@ -951,7 +951,7 @@ public class Decoder extends Activity
     private volatile String singleState = "disconnected";
 
     /** Called on a server thread (#98): the cells are chosen on the UI thread, copied here. */
-    private byte[] debugSnapshotJpeg() {
+    private byte[] debugSnapshotJpeg(boolean labels) {
         AtomicReference<List<Snapshots.Cell>> ref = new AtomicReference<>();
         int[] side = new int[1];
         CountDownLatch done = new CountDownLatch(1);
@@ -969,7 +969,7 @@ public class Decoder extends Activity
             return null;
         }
         List<Snapshots.Cell> cells = ref.get();
-        return cells != null ? Snapshots.render(cells, side[0]) : null;
+        return cells != null ? Snapshots.render(cells, side[0], labels) : null;
     }
 
     /** What to draw, UI thread only; side[0] gets the grid side (1 for a single picture). */
@@ -985,7 +985,7 @@ public class Decoder extends Activity
         if (!quadEnabled) {
             Snapshots.Cell c = new Snapshots.Cell();
             c.slot = mActive + 1;
-            c.live = "connected".equals(singleState)
+            c.live = mResumed && "connected".equals(singleState)
                     && videoDecoder.renderedWithin(SNAPSHOT_LIVE_MS);
             c.label = statusText != null && statusText.getVisibility() == View.VISIBLE
                     ? statusText.getText().toString() : c.live ? "Playing" : "No new frames";
@@ -1048,10 +1048,14 @@ public class Decoder extends Activity
         return m;
     }
 
-    /** Device and app facts, safe to read from any thread. */
+    /** Device and app facts, safe to read from any thread; the page's header comes first. */
     private Map<String, Object> debugDevice() {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("app", "OpenIPC Decoder " + mVersion + " (" + BuildConfig.GIT_HASH + ")");
+        m.put("app", "OpenIPC Decoder");
+        m.put("version", mVersion);
+        m.put("git", BuildConfig.GIT_HASH);
+        m.put("time", new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date()));
+        m.put("uptime_s", SystemClock.elapsedRealtime() / 1000);
         String soc = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
                 ? Build.SOC_MANUFACTURER + " " + Build.SOC_MODEL : Build.HARDWARE;
         m.put("device", Build.MANUFACTURER + " " + Build.MODEL + " \u00b7 " + soc
@@ -1062,7 +1066,7 @@ public class Decoder extends Activity
         List<String> urls = new ArrayList<>();
         for (String ip : NetInfo.addresses()) urls.add("http://" + ip + ":" + DebugServer.PORT + "/");
         m.put("addresses", urls);
-        m.put("uptime_s", SystemClock.elapsedRealtime() / 1000);
+        m.put("server", DebugServer.get().state());
         return m;
     }
 
@@ -1073,6 +1077,7 @@ public class Decoder extends Activity
         m.put("mode", !mResumed ? "paused" : udpViewShown ? "udp"
                 : quadEnabled ? "multi-view" : "single");
         m.put("active_slot", mActive + 1);
+        if (quadEnabled) m.put("overload_after_s", OVERLOAD_SAMPLES);
         if (udpViewShown) {
             Map<String, Object> udp = new LinkedHashMap<>();
             udp.put("port", UDP_RTP_PORT);
@@ -1082,10 +1087,13 @@ public class Decoder extends Activity
             Map<String, Object> single = new LinkedHashMap<>();
             single.put("url", DebugServer.redact(mHost));
             single.put("transport", mTransports[mActive] != null ? mTransports[mActive].name() : null);
-            single.put("status", statusText != null ? statusText.getText().toString() : null);
+            single.put("video", mResumed && "connected".equals(singleState)
+                    && videoDecoder.renderedWithin(SNAPSHOT_LIVE_MS));
+            single.put("status", statusText != null && statusText.getVisibility() == View.VISIBLE
+                    ? statusText.getText().toString() : singleState);
+            if (mVideoWidth > 0) single.put("size", mVideoWidth + "x" + mVideoHeight);
             single.put("codec", codecH265 ? "H.265" : "H.264");
             single.put("audio", audioCodec);
-            if (mVideoWidth > 0) single.put("video", mVideoWidth + "x" + mVideoHeight);
             m.put("single", single);
         }
         QuadCell[] cells = quadCells;
@@ -1097,12 +1105,15 @@ public class Decoder extends Activity
                 c.put("slot", i + 1);
                 QuadCell cell = cells[i];
                 if (cell == null) {
+                    c.put("video", false);
                     c.put("text", "not configured");
                 } else {
-                    c.put("url", DebugServer.redact(mHosts[i]));
-                    c.put("transport", mTransports[i] != null ? mTransports[i].name() : null);
+                    c.put("video", cell.showsVideo(SNAPSHOT_LIVE_MS));
                     TextView v = quadStats[i];
                     c.put("text", v != null ? v.getText().toString() : null);
+                    c.put("url", DebugServer.redact(mHosts[i]));
+                    c.put("transport", mTransports[i] != null ? mTransports[i].name() : null);
+                    c.put("out_fps", cell.outFps());
                     c.put("in_fps", cell.inFps());
                     c.put("lost_fps", cell.lostFps());
                     // Seconds in a row the decoder made this cell lose frames; at
@@ -1114,7 +1125,6 @@ public class Decoder extends Activity
                 list.add(c);
             }
             m.put("cells", list);
-            m.put("overload_after_s", OVERLOAD_SAMPLES);
         }
         return m;
     }
@@ -1347,6 +1357,8 @@ public class Decoder extends Activity
     }
 
     private void stopStreams() {
+        // The single view's stream ends here: it is no longer "connected" for the debug page
+        singleState = "disconnected";
         if (quadCells != null) {
             for (QuadCell cell : quadCells) {
                 if (cell != null) cell.stop();
