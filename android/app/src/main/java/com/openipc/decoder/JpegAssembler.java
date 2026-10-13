@@ -92,10 +92,13 @@ final class JpegAssembler {
         this.pool = pool;
     }
 
+    /** A new stream: its frames must not use the tables of the previous one (Qodo on #139). */
     void reset() {
         expectedOffset = -1;
         scanLength = 0;
         header = null;
+        tablesByQ.clear();
+        precisionByQ.clear();
     }
 
     /** Frames dropped because a fragment was missing or malformed. */
