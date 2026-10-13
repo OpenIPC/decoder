@@ -1857,6 +1857,8 @@ public class Decoder extends Activity
 
     private void stopStreams() {
         lastJpegFrameMs = 0;
+        // The next stream's first MJPEG frame shows at once with S on (Qodo on #155)
+        lastSlideJpegMs = 0;
         resetDecoderStuck();
         mSurface.removeCallbacks(singleUdpCheck);
         // The single view's stream ends here: it is no longer "connected" for the debug page
