@@ -1345,6 +1345,8 @@ public class Decoder extends Activity
                     c.put("out_fps", cell.outFps());
                     c.put("in_fps", cell.inFps());
                     c.put("lost_fps", cell.lostFps());
+                    // NAL units dropped because one of their packets was lost (#113)
+                    c.put("nal_dropped", cell.nalDropped());
                     // Every frame, or key frames only while the decoder has no room (#85)
                     c.put("decode", cell.isKeyFramesOnly() ? "key frames" : "full");
                     if (cell.knowsLoad()) c.put("load", cell.isKeyFramesOnly()

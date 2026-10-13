@@ -42,6 +42,8 @@ class NalAssembler {
     /** -1 until the first packet, then 0 for H.264 and 1 for H.265. */
     private int lastCodec = -1;
     private int dropped;
+    /** Of those, dropped because a packet of them was lost (not for size) (#113). */
+    private int lostDropped;
 
     NalAssembler(int bufferSize, Runnable onCodecSwitch, FramePool framePool) {
         this.nalBuffer = new byte[bufferSize];
@@ -58,6 +60,8 @@ class NalAssembler {
 
     /** NAL units dropped so far because of packet loss or size (for diagnostics). */
     int droppedCount() { return dropped; }
+    /** NAL units dropped because one of their packets was lost (#113). */
+    int lossCount() { return lostDropped; }
 
     /**
      * Process one RTP packet ({@code length} bytes at {@code offset}, header included).
@@ -84,6 +88,7 @@ class NalAssembler {
         boolean gap = lastSeq >= 0 && seq != ((lastSeq + 1) & 0xFFFF);
         lastSeq = seq;
         if (gap && inFragment) {
+            lostDropped++;
             drop("packet loss inside a fragmented NAL unit");
             orphan = true; // its remaining pieces belong to the unit just counted
         }
@@ -124,7 +129,10 @@ class NalAssembler {
         int pos = start + payloadHeader + 1;
 
         if (first) {
-            if (inFragment) drop("fragmented NAL unit without its end");
+            if (inFragment) {
+                lostDropped++;
+                drop("fragmented NAL unit without its end");
+            }
             orphan = false;
             nalSize = 0;
             inFragment = true;
@@ -145,6 +153,7 @@ class NalAssembler {
             if (!orphan) {
                 orphan = true;
                 dropped++;
+                lostDropped++;
                 logDrop("fragmented NAL unit without its start");
             }
             if (last) orphan = false;
