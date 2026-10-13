@@ -278,6 +278,7 @@ class QuadCell implements RtspSession.Callback {
         lastOut = out;
         lastLost = lost;
         lastSampleMs = nowMs;
+        checkUdpStall();
 
         if (pausedReason != null) return pausedReason;
         String p = problem;
@@ -335,6 +336,30 @@ class QuadCell implements RtspSession.Callback {
 
     /** Transport in use, with the mode after a fallback (#112). */
     String transportLabel() { return Transport.label(session.transportInUse(), transport); }
+
+    /** Samples (seconds) in a row with packets but no decoded frame over UDP (#113). */
+    private int udpStallSamples;
+    /** Longer than the key frame interval of any lab camera (up to ~5 s on .167). */
+    static final int UDP_STALL_SAMPLES = 8;
+
+    /**
+     * Over UDP a lost packet drops the whole NAL unit; on key frames only (#85) a camera that
+     * keeps losing a piece of every key frame shows nothing at all although its packets arrive.
+     * After UDP_STALL_SAMPLES such seconds the session is told; with Auto it goes to TCP.
+     */
+    private void checkUdpStall() {
+        boolean stalled = session.playsOverUdp() && "connected".equals(state)
+                && pausedReason == null && inFps >= 5 && outFps == 0;
+        udpStallSamples = stalled ? udpStallSamples + 1 : 0;
+        if (udpStallSamples >= UDP_STALL_SAMPLES) {
+            udpStallSamples = 0;
+            session.reportUdpBroken("packets but no decoded frame for " + UDP_STALL_SAMPLES
+                    + " s (" + nalAssembler.droppedCount() + " NAL units dropped)");
+        }
+    }
+
+    /** NAL units dropped so far because a packet of them was lost (#113). */
+    int nalDropped() { return nalAssembler.droppedCount(); }
 
     float inFps() { return inFps; }
     float outFps() { return outFps; }

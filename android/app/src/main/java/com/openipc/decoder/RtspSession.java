@@ -134,6 +134,19 @@ class RtspSession {
         udpFailedAt.put(mode + " " + url, System.nanoTime() / 1_000_000);
     }
 
+    /** Why the stream over UDP is not usable although packets arrive, or null (#113). */
+    private volatile String udpBroken;
+
+    /** RTSP is playing with RTP over UDP or multicast (not TCP, not a udp:// URL). */
+    boolean playsOverUdp() { return udpPlaying; }
+
+    /**
+     * Packets arrive over UDP but the stream cannot be decoded (#113: key frames keep losing
+     * a piece). With Auto or Multicast the session goes over to TCP, as when no video comes
+     * at all; an explicit UDP setting stays.
+     */
+    void reportUdpBroken(String why) { udpBroken = why; }
+
     boolean isActive() { return active; }
     long getStreamBytes() { return streamBytes; }
     long getBitrateMarkNs() { return bitrateMarkNs; }
@@ -638,8 +651,17 @@ class RtspSession {
 
         final boolean[] first = {true};
         long playMs = System.nanoTime() / 1_000_000;
+        udpBroken = null;
         rx.run(() -> {
             if (!active || gen != generation) return false;
+            String broken = udpBroken;
+            if (broken != null && (auto || m == Transport.Mode.MULTICAST)) {
+                Log.w(TAG, tag + ": " + broken + " over " + (m == Transport.Mode.MULTICAST
+                        ? "multicast" : "UDP") + ", using TCP");
+                udpBroken = null;
+                markUdpFailed(m);
+                return false;
+            }
             if (auto && first[0]
                     && System.nanoTime() / 1_000_000 - playMs > udpFirstPacketMs) {
                 Log.w(TAG, tag + ": no video over " + (m == Transport.Mode.MULTICAST
