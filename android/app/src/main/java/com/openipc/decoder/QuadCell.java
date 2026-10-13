@@ -144,7 +144,10 @@ class QuadCell implements RtspSession.Callback {
         this.nalSink = nal -> {
             // Picture slices out of the assembler, before the queue: what the video decoder
             // would get (#145); parameter sets alone are no picture (Qodo on #147)
-            if (!jpeg && nal.length() > 4 && NalAssembler.isSlice(nal.data()[4], codecH265)) {
+            // On key frames only, just the slices decode() really passes on (Qodo on #147)
+            if (!jpeg && nal.length() > 4 && NalAssembler.isSlice(nal.data()[4], codecH265)
+                    && (!(keyFramesOnly || waitingKeyFrame) || isKeyNal(
+                            NalAssembler.fragment(nal.data()[4], codecH265), codecH265))) {
                 assembled++;
             }
             if (!nalQueue.offer(nal)) {
@@ -511,8 +514,9 @@ class QuadCell implements RtspSession.Callback {
     boolean usesVideoDecoder() { return !jpeg; }
 
     boolean isReceiving() {
-        return pausedReason == null && "connected".equals(state) && unitsArrived
-                && !networkLoss;
+        // A cell with its own decoder problem (error, limit) says so itself (Qodo on #147)
+        return pausedReason == null && problem == null && "connected".equals(state)
+                && unitsArrived && !networkLoss;
     }
 
     private boolean renderedWithin(long ms) {
