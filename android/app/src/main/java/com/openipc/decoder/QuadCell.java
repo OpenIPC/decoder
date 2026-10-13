@@ -156,6 +156,8 @@ class QuadCell implements RtspSession.Callback {
     private final SurfaceHolder.Callback holderCallback = new SurfaceHolder.Callback() {
         @Override
         public void surfaceCreated(SurfaceHolder holder) {
+            // A stopped cell keeps this callback only to see its surface go (#76)
+            if (!started) return;
             // The surface belongs to the SurfaceView: it is used, never released, here
             surface = holder.getSurface();
             if (!threadsStarted) startThreads();
@@ -169,6 +171,7 @@ class QuadCell implements RtspSession.Callback {
             // a new one when the next surface is there
             surface = null;
             decoder.closeDecoder();
+            if (!started) holder.removeCallback(this);
         }
     };
 
@@ -218,7 +221,10 @@ class QuadCell implements RtspSession.Callback {
             executor = null;
         }
         nalQueue.clear();
-        if (view != null) view.getHolder().removeCallback(holderCallback);
+        // The holder callback stays until surfaceDestroyed(): there the decoder is closed
+        // before the surface goes away. Removing it here let the grid's surfaces be destroyed
+        // while up to nine decoders were still being released on their own threads, and
+        // SurfaceFlinger then stalled the window's buffers for tens of seconds (#76)
         surface = null;
     }
 
