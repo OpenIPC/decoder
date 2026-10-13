@@ -15,6 +15,7 @@ import android.graphics.Rect;
 import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.os.SystemClock;
 import android.util.Log;
 import android.view.PixelCopy;
 import android.view.SurfaceView;
@@ -39,7 +40,8 @@ final class Snapshots {
     static final int CELL_W = 320;
     static final int CELL_H = 180;
     private static final int JPEG_QUALITY = 70;
-    private static final long COPY_TIMEOUT_MS = 500;
+    /** For all cells together: what is not copied by then is shown as "no picture". */
+    private static final long COPY_TIMEOUT_MS = 2000;
 
     /** One cell of the picture, filled on the UI thread. */
     static final class Cell {
@@ -68,8 +70,19 @@ final class Snapshots {
 
     /** JPEG of the cells laid out in a grid of the given side (1 for the single view). */
     static byte[] render(List<Cell> cells, int side) {
+        long t0 = SystemClock.elapsedRealtime();
         int cw = side == 1 ? CELL_W * 2 : CELL_W;
         int ch = side == 1 ? CELL_H * 2 : CELL_H;
+        int n = Math.min(cells.size(), side * side);
+        // All copies are requested at once and run side by side, then awaited together
+        Copy[] copies = new Copy[n];
+        for (int i = 0; i < n; i++) {
+            Cell c = cells.get(i);
+            if (c != null && c.frame == null && c.live && c.view != null) {
+                copies[i] = Copy.start(c.view, cw, ch);
+            }
+        }
+        long deadline = SystemClock.elapsedRealtime() + COPY_TIMEOUT_MS;
         Bitmap out = Bitmap.createBitmap(cw * side, ch * side, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(out);
         canvas.drawColor(Color.BLACK);
@@ -79,20 +92,21 @@ final class Snapshots {
         band.setColor(0xA0000000);
         Paint grid = new Paint();
         grid.setColor(Color.DKGRAY);
-        for (int i = 0; i < cells.size() && i < side * side; i++) {
+        int copied = 0;
+        for (int i = 0; i < n; i++) {
             Cell c = cells.get(i);
             if (c == null) continue;
             int x = (i % side) * cw;
             int y = (i / side) * ch;
-            Bitmap frame = c.frame;
-            if (frame == null && c.live && c.view != null) frame = copy(c.view, cw, ch);
+            Bitmap frame = copies[i] != null ? copies[i].await(deadline) : c.frame;
+            if (copies[i] != null && frame != null) copied++;
             boolean shown = c.live && frame != null;
             if (shown) {
                 canvas.drawBitmap(frame, null, new Rect(x, y, x + cw, y + ch), null);
             }
             if (frame != null) frame.recycle();
-            String label = (c.slot > 0 ? c.slot + " · " : "") + (c.label != null ? c.label : "");
-            if (c.live && !shown) label += " · no picture";
+            String label = (c.slot > 0 ? c.slot + " \u00b7 " : "") + (c.label != null ? c.label : "");
+            if (c.live && !shown) label += " \u00b7 no picture";
             if (shown) {
                 canvas.drawRect(x, y + ch - 20, x + cw, y + ch, band);
                 text.setColor(Color.WHITE);
@@ -106,6 +120,7 @@ final class Snapshots {
             canvas.drawRect(x, y, x + cw, y + 1, grid);
             canvas.drawRect(x, y, x + 1, y + ch, grid);
         }
+        long t1 = SystemClock.elapsedRealtime();
         String time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
         text.setColor(Color.WHITE);
         float tw = text.measureText(time);
@@ -114,34 +129,54 @@ final class Snapshots {
         ByteArrayOutputStream jpeg = new ByteArrayOutputStream(64 * 1024);
         out.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, jpeg);
         out.recycle();
+        long t2 = SystemClock.elapsedRealtime();
+        Log.d(TAG, "Snapshot: " + copied + " cells copied in " + (t1 - t0) + " ms, JPEG "
+                + jpeg.size() / 1024 + " KiB in " + (t2 - t1) + " ms");
         return jpeg.toByteArray();
     }
 
-    /** The frame the SurfaceView shows, scaled to w×h; null if it cannot be copied. */
-    private static Bitmap copy(SurfaceView view, int w, int h) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return null;
-        Bitmap bm = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-        AtomicInteger result = new AtomicInteger(-1);
-        CountDownLatch done = new CountDownLatch(1);
-        try {
-            PixelCopy.request(view, bm, r -> {
-                result.set(r);
-                done.countDown();
-            }, copyHandler());
-            if (!done.await(COPY_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-                // Still copying into bm: leave it to the garbage collector, not recycle()
+    /** One PixelCopy in flight. */
+    private static final class Copy {
+        final Bitmap bitmap;
+        final CountDownLatch done = new CountDownLatch(1);
+        final AtomicInteger result = new AtomicInteger(-1);
+
+        private Copy(Bitmap bitmap) { this.bitmap = bitmap; }
+
+        /** Starts copying what the SurfaceView shows, scaled to w×h; null if it cannot. */
+        static Copy start(SurfaceView view, int w, int h) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return null;
+            Copy c = new Copy(Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888));
+            try {
+                PixelCopy.request(view, c.bitmap, r -> {
+                    c.result.set(r);
+                    c.done.countDown();
+                }, copyHandler());
+                return c;
+            } catch (RuntimeException e) {
+                // The surface went away (the grid was rebuilt)
+                Log.d(TAG, "Snapshot copy failed: " + e.getMessage());
+                c.bitmap.recycle();
                 return null;
             }
-            if (result.get() == PixelCopy.SUCCESS) return bm;
-            Log.d(TAG, "Snapshot copy failed: " + result.get());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return null;
-        } catch (RuntimeException e) {
-            // The surface went away (the grid was rebuilt)
-            Log.d(TAG, "Snapshot copy failed: " + e.getMessage());
         }
-        bm.recycle();
-        return null;
+
+        /** The copied frame, or null if it failed or is not done by the deadline. */
+        Bitmap await(long deadlineMs) {
+            try {
+                long wait = Math.max(0, deadlineMs - SystemClock.elapsedRealtime());
+                if (!done.await(wait, TimeUnit.MILLISECONDS)) {
+                    // Still copying into the bitmap: leave it to the GC, not recycle()
+                    return null;
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return null;
+            }
+            if (result.get() == PixelCopy.SUCCESS) return bitmap;
+            Log.d(TAG, "Snapshot copy failed: " + result.get());
+            bitmap.recycle();
+            return null;
+        }
     }
 }
