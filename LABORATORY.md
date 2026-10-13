@@ -126,7 +126,15 @@ Only for filling grid cells (Quad 2×2, 3×3) and screenshots; not used in strea
 | 7 | `.167` |
 | 8 | `.53` (XM, bottom right) |
 
-The ninth cell is the U cell (pushed UDP RTP, #87). `.165` is repaired and available as a spare filler for any slot.
+The ninth cell is the U cell (pushed UDP RTP, #87). Its source on the bench: `.165` pushes its main stream with Majestic `outgoing` to `udp://172.17.32.144:5600` (Aceline-1); `.165` is also a spare filler for any slot.
+
+### Other sources
+
+| What | Where | Notes |
+|---|---|---|
+| MJPEG over RTSP (#119) | `rtsp://<.133>/stream=2` | RTP/JPEG PT 26, type 0 (4:2:2), Q = 255 (tables in-band), 1280×720, 5 fps, ≈ 5 Mbit/s, plus Opus |
+| HTTP MJPEG (#121) | `http://<.133>/mjpeg` | `multipart/x-mixed-replace; boundary=boundarydonotcross`, Basic auth |
+| Pushed RTP | `.165` → Aceline-1 `:5600` | the U cell; check with `curl -u … http://172.17.32.165/api/v1/outgoing.json` (`state: live`) |
 
 ## What the servers support
 
@@ -144,6 +152,10 @@ Checked with raw RTSP `SETUP` requests (2026-10-12).
 No camera in the lab does RTSP multicast. To test #69 for real, run a multicast-capable RTSP server on the lab host (e.g. mediamtx relaying `.133`).
 
 Multicast from OpenIPC is only available as plain RTP via Majestic `outgoing` (`udp://<group>:<port>`), see #68.
+
+### RTP over UDP from the lab cameras
+
+Measured on the lab host (8 s of RTSP-over-UDP video each, #113): the cameras send the packets **heavily reordered** (up to ~42 positions, p99 34 — the app's reorder buffer handles that), and `.126` also **loses** about 1.5 packets/s on the way (`.133`: almost none). A 1080p key frame is a few hundred packets, so over UDP key frames often arrive with a hole and are dropped whole: on key frames only (multi-view) such a cell shows nothing. Auto then falls back to TCP (#125, #128); pushed streams (`udp://`, the U cell) cannot (#133). Over TCP nothing is lost. The AG-216 caps the socket receive buffer at 256 KiB (`rmem_max`), which is not the cause.
 
 ### SDP
 
@@ -210,7 +222,8 @@ The link goes into the active slot and is saved. The transport extra exists from
 
 - Transport in the UI: menu → URL dialog of the slot → **TCP / UDP / Auto / Multicast** under the URL.
 - udp:// slots (#72) are a URL, not a transport: `udp://@:5600`, `udp://@239.1.2.3:5600`, `udp://<camera ip>@239.1.2.3:5600`, optional `?codec=h265&pt=97`.
-- Filling slots on the box by hand: menu (OK or tap a cell) → slot button N (`x=30+34·N, y=33` at 1280×720) → share intent with the URL → menu → Q.
+- The share intent writes into the **active** slot (and switches to the single view): select the slot first.
+- Filling slots on the box: tap a menu button by its text rather than by coordinates (the row is `1 2 3 4 5 6 7 8 U D Q S`): `uiautomator dump`, take the `bounds` of `text="N"`, `input tap` its centre; the URL dialog of a slot: **Settings** (single view only) → `TCP` / `UDP` / `Auto` / `Multicast` → `SAVE`.
 
 ## Methods
 
@@ -255,6 +268,8 @@ The script uninstalls first. To test an upgrade that keeps the settings, use `$A
 | UDP socket leak | `$ADB shell cat /proc/$(pidof com.openipc.decoder)/net/udp`, count lines before and after |
 | CPU per thread | `$ADB shell top -H -p <pid>` (a spinning `rtsp-audio` thread was found this way) |
 | Screen off / on | `input keyevent KEYCODE_SLEEP` / `KEYCODE_WAKEUP` |
+| Grid ↔ single stress (#76) | loop: menu → tap `4` (grid → single), 4 s, menu → tap `Q` (single → grid), 8 s; afterwards count `Davey! duration=` ≥ 1000 ms and `ANR in` in logcat; 8–10 cycles reproduce #76 today |
+| Transport in use | `/stats.json`: `transport` (in use, e.g. `TCP (auto)` after a fallback) and `transport_mode` (setting) per cell; `nal_dropped` = NAL units lost to packet loss |
 | Menu with a remote (#91) | `input keyevent KEYCODE_DPAD_CENTER` opens the menu with the focus on the active item (slot, Q or U); `DPAD_RIGHT` ×n, `DPAD_DOWN` (Exit), `DPAD_UP`, then `DPAD_CENTER` must switch to that slot; `KEYCODE_BACK` closes it. The focused item: `uiautomator dump /sdcard/m.xml` and look for `focused="true"`. Check in single view and multi-view |
 | 4:3 screen | `wm size 960x720`, back with `wm size reset` |
 | Audio playback (sound cannot be heard remotely) | `dumpsys media.audio_flinger`: server position of the app's track; frames/s ≈ sample rate, no underruns |
@@ -276,6 +291,11 @@ The script uninstalls first. To test an upgrade that keeps the settings, use `$A
 | `joined 239.x.x.x:port` | RTSP multicast group joined |
 | `UDP channel …: N packets lost, M late or duplicate` | reorder stats when a session ends |
 | `UDP from an unexpected sender ignored` | sender filter |
+| `…: packets but no decoded frame for 8 s (N NAL units lost) over UDP, using TCP` | Auto: UDP delivered, but nothing decodable (#125) |
+| `audio SETUP over UDP failed (…), using TCP`, `audio not over UDP like video, using TCP` | Auto: UDP audio not possible, both tracks over TCP (#128) |
+| `NAL unit dropped (…): packet loss inside a fragmented NAL unit` | a NAL unit with a lost packet (logged 1st–3rd, then every 100th) |
+| `Video pt 26 MJPEG`, `JPEG frame dropped (…)` | MJPEG stream (#119) / a JPEG frame with a lost packet |
+| `Decoder capacity of this device: … blocks/s, failed at …` | multi-view planner learnt a new capacity (#85, #126) |
 
 ### Pitfalls
 
@@ -283,3 +303,5 @@ The script uninstalls first. To test an upgrade that keeps the settings, use `$A
 - Count `FATAL EXCEPTION` only; plain `AndroidRuntime` lines come from the `input` / `am` shell commands.
 - Mask the camera password in every log you post (the `mask` function in the smoke script).
 - The XM camera serves one RTSP client at a time: a session that is not torn down blocks the next connection.
+- Switching multi-view ↔ single view can freeze the window for 3–68 s on the AG-216 (#76, open): `Davey! … QueueBufferDuration=…` in logcat, sometimes an ANR. After many switches `media.codec` once hung in `D` state (load ~70) — reboot the box (`adb reboot`, ~25 s). Avoid needless switches in tests; start the app straight into the wanted mode (a cold start with the share intent opens the single view).
+- `/stats.json` `ui_thread: not responding within 1000 ms` means the UI thread is stuck — usually #76.

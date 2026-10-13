@@ -30,9 +30,9 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 
 - **Video:** RTSP playback, hardware H.264/H.265 decoding via MediaCodec, MJPEG over RTSP (RTP/JPEG, single view), automatic decoder recovery, picture fitted to any screen shape
 - **Audio:** AAC (RFC 3640 `mpeg4-generic`, ADTS, MP4A-LATM), Opus, G.711 μ-law/A-law, L16 PCM (mono/stereo); in multi-view, the sound of the selected cell
-- **Display:** single camera, or multi-view (Quad) with up to 8 cameras at once in a 2×2 or 3×3 grid
+- **Display:** single camera, or multi-view (Quad) with up to 8 cameras plus the U cell (a camera that pushes RTP) in a 2×2 or 3×3 grid; adaptive decoding (full rate or key frames per cell, learnt per device); slides (S): every camera on key frames only
 - **Controls:** pinch-to-zoom, pan, double-tap to reset, Android TV remote (Leanback launcher)
-- **Network:** RTSP over TCP or UDP (Auto falls back to TCP), RTSP multicast, plain RTP pushed over UDP by the camera (unicast or multicast), Basic and Digest authentication, RTSP keepalive, automatic reconnection with exponential back-off, connection-quality indicator
+- **Network:** RTSP over TCP or UDP (Auto, the default, falls back to TCP when UDP is refused, brings no video or keeps losing key frames), the transport in use shown on connect, RTSP multicast, plain RTP pushed over UDP by the camera (unicast or multicast), Basic and Digest authentication, RTSP keepalive, automatic reconnection with exponential back-off, connection-quality indicator
 - **WebUI:** built-in browser for the camera's web interface
 - **More:** 8 camera slots, URLs stored encrypted, long-press screenshot, URLs can be shared from other apps
 
@@ -105,6 +105,10 @@ Each slot has its own transport, chosen under the URL in **Settings** (or with t
 
 The transport actually in use is shown when a stream starts in single view (`Connected • UDP • H.265 …`), on the debug page and in `/stats.json` (`transport`; the slot's setting is `transport_mode`). After a fallback it reads, for example, `TCP (auto)`.
 
+<p align="center">
+  <img src="screenshots/single_status.jpg" alt="Single view right after connecting: transport, codecs and bitrate" width="640">
+</p>
+
 ### UDP slots (Majestic outgoing)
 
 A slot can also receive RTP that the camera pushes by itself, without RTSP. Put a `udp://` URL into the slot instead of `rtsp://`:
@@ -152,6 +156,8 @@ Only clients on the local network are answered (loopback, 10/8, 172.16/12, 192.1
 >
 > - **RTSP multicast needs Android 8.0+** and a server that offers it; OpenIPC cameras do not — [#69](https://github.com/OpenIPC/decoder/issues/69)
 > - **G.726 audio and MP4A-LATM with in-band configuration (`cpresent=1`) are not supported.** OpenIPC Majestic does not use them, and cameras that offer G.726 can usually send G.711 or AAC instead — [#14](https://github.com/OpenIPC/decoder/issues/14)
+> - **MJPEG plays in the single view only and is decoded in software**; hardware decoding and multi-view — [#132](https://github.com/OpenIPC/decoder/issues/132)
+> - **Switching between multi-view and the single view can freeze the picture for seconds** on some TV boxes (seen on the AG-216) — [#76](https://github.com/OpenIPC/decoder/issues/76)
 > - **Credentials are sent in clear text** over plain RTSP/HTTP (Basic auth unless the camera asks for Digest); RTSPS is not supported and not planned — [#16](https://github.com/OpenIPC/decoder/issues/16)
 >
 > Known bugs are tracked separately under the [`bug` label](https://github.com/OpenIPC/decoder/issues?q=is%3Aissue+is%3Aopen+label%3Abug).
@@ -199,6 +205,8 @@ Debug and release builds are signed with different keys. To switch from one to t
 | `Transport`, `UdpReceiver`, `RtpReorder` | Transport negotiation; UDP and multicast receive with a sender filter; packet reordering                          |
 | `RtpListener`                            | `udp://` slots: plain RTP pushed by the camera                                                                    |
 | `NalAssembler`                           | Rebuilds H.264/H.265 NAL units from RTP packets, drops units damaged by packet loss                               |
+| `JpegAssembler`                          | MJPEG: rebuilds whole JPEG frames from RTP/JPEG (RFC 2435)                                                        |
+| `DecodePlanner`                          | Multi-view: which cells decode every frame and which only key frames, within the learnt decoder capacity          |
 | `MediaCodecManager`, `DecoderRetry`      | Hardware video decoder lifecycle and recovery after decoder errors                                                |
 | `AudioManager`, `AudioConfig`            | Audio pipeline: G.711/L16 conversion, AAC/Opus decoding, AudioTrack playback                                      |
 | `QuadCell`                               | One multi-view cell: its own session, decoder and optional audio                                                  |
@@ -206,7 +214,7 @@ Debug and release builds are signed with different keys. To switch from one to t
 | `CredentialStore`, `KeystoreCipher`      | Encrypted storage of camera URLs (Android Keystore)                                                               |
 | `FramePool`, `Frame`                     | Buffer pool that reduces garbage-collector load                                                                   |
 | `App`, `Crash`                           | Uncaught-exception handler and crash report screen                                                                |
-| `DebugServer`, `NetInfo`                 | Debug page on port 8085 (LAN clients only), device addresses                                                      |
+| `DebugServer`, `NetInfo`, `Snapshots`    | Debug page on port 8085 (LAN clients only), device addresses, snapshots of the screen                             |
 
 Network, video decoding and audio run on separate threads, so a slow decoder never blocks the socket.
 
