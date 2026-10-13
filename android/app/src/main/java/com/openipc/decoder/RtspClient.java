@@ -103,6 +103,8 @@ class RtspClient implements RtspSession.Callback {
 
     @Override
     public void onStatus(String status) {
+        // A pushed stream that went quiet may come back whole (Qodo on #146)
+        if ("disconnected".equals(status)) nalAssembler.setSalvage(false);
         Listener l = listenerCb;
         if (l != null) l.onStatusChanged(status);
     }

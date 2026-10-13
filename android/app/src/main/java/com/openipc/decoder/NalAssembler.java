@@ -72,7 +72,7 @@ class NalAssembler {
 
     void setSalvage(boolean on) { salvage = on; }
     boolean salvaging() { return salvage; }
-    /** NAL units passed on cut short at a lost piece (#133). */
+    /** Slices passed on to the sink cut short at a lost piece (#133); the queue may drop some. */
     int salvagedCount() { return salvaged; }
 
     /**
@@ -215,8 +215,9 @@ class NalAssembler {
 
     /** The unit collected so far, cut short, when salvaging (#133); dropped otherwise. */
     private void dropOrSalvage(String reason, Sink sink) {
-        // Start code and NAL header plus some slice data, or there is nothing to decode
-        if (!salvage || nalSize < 16) {
+        // Start code and NAL header plus some slice data, or there is nothing to decode; only
+        // slices: a cut parameter set would be taken for a valid configuration (Qodo on #146)
+        if (!salvage || nalSize < 16 || !isSlice(nalBuffer[4], lastCodec == 1)) {
             drop(reason);
             return;
         }
@@ -229,6 +230,13 @@ class NalAssembler {
             Log.w(TAG, "NAL unit passed on cut short (" + salvaged + "): " + reason);
         }
         sink.onNal(out);
+    }
+
+    /** A coded slice (VCL NAL unit): H.264 types 1–5, H.265 types 0–31. */
+    static boolean isSlice(byte nalHeader, boolean h265) {
+        if (h265) return ((nalHeader >> 1) & 0x3F) <= 31;
+        int type = nalHeader & 0x1F;
+        return type >= 1 && type <= 5;
     }
 
     private void drop(String reason) {

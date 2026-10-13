@@ -160,6 +160,22 @@ public class NalAssemblerTest {
     }
 
     @Test
+    public void salvageNeverPassesACutParameterSet() {
+        nal.setSalvage(true);
+        // FU-A of an SPS (type 7), then a lost packet (Qodo on #146)
+        feed(rtp(0x7C, 0x87, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16), false);
+        seq++;
+        feed(rtp(0x7C, 0x47, 0xC1), false);
+        assertEquals(0, out.size());
+        assertEquals(0, nal.salvagedCount());
+        assertTrue(NalAssembler.isSlice((byte) 0x65, false));
+        assertFalse(NalAssembler.isSlice((byte) 0x68, false));
+        // H.265: IDR_W_RADL (19) is a slice, VPS (32) is not
+        assertTrue(NalAssembler.isSlice((byte) (19 << 1), true));
+        assertFalse(NalAssembler.isSlice((byte) (32 << 1), true));
+    }
+
+    @Test
     public void salvageOffDropsAsBefore() {
         feed(rtp(0x7C, 0x85, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16), false);
         seq++;

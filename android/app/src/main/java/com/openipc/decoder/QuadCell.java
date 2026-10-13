@@ -232,6 +232,9 @@ class QuadCell implements RtspSession.Callback {
     public void onStatus(String status) {
         // A new connection (or a lost one) starts the UDP stall count afresh (Qodo on #125)
         if (!status.equals(state)) udpStallSamples = 0;
+        // A pushed stream that went quiet may come back whole: no damaged decoding until it
+        // stalls again (Qodo on #146)
+        if ("disconnected".equals(status)) nalAssembler.setSalvage(false);
         state = status;
         // A connection that works again clears the last connection error
         if ("connected".equals(status) && problem != null && !problem.startsWith("Decoder")) {
@@ -407,7 +410,7 @@ class QuadCell implements RtspSession.Callback {
     /** NAL units dropped so far because a packet of them was lost (#113). */
     int nalDropped() { return nalAssembler.lossCount(); }
 
-    /** NAL units decoded cut short at a lost piece, or -1 while that is off (#133). */
+    /** Slices passed on cut short at a lost piece, or -1 while that is off (#133). */
     int nalSalvaged() { return nalAssembler.salvaging() ? nalAssembler.salvagedCount() : -1; }
 
     float inFps() { return inFps; }
