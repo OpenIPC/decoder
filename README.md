@@ -124,6 +124,16 @@ outgoing:
 
 `/api/v1/outgoing.json` on the camera shows whether the destination is live. Majestic can also send to a multicast group (`udp://239.1.2.3:5600`), so several devices can watch one camera. On Wi‑Fi the app holds a multicast lock while it is in a group.
 
+## Debug page (port 8085)
+
+While the app runs it serves its debug information over HTTP on port **8085**, for a browser or `curl` on the same network:
+
+- `http://<device>:8085/` — a page that refreshes itself: device, app version, mode and every cell (resolution, codec, decoded/received fps, pauses);
+- `http://<device>:8085/stats.json` — the same as JSON, for scripts;
+- `http://<device>:8085/log` — the last 500 lines of the app's log.
+
+Only clients on the local network are answered (loopback, 10/8, 172.16/12, 192.168/16, link-local, IPv6 fc00::/7); others get 403. Logins and passwords are never shown.
+
 ## Known limitations
 
 > [!IMPORTANT]
@@ -185,6 +195,7 @@ Debug and release builds are signed with different keys. To switch from one to t
 | `CredentialStore`, `KeystoreCipher`      | Encrypted storage of camera URLs (Android Keystore)                                                               |
 | `FramePool`, `Frame`                     | Buffer pool that reduces garbage-collector load                                                                   |
 | `App`, `Crash`                           | Uncaught-exception handler and crash report screen                                                                |
+| `DebugServer`, `NetInfo`                 | Debug page on port 8085 (LAN clients only), device addresses                                                      |
 
 Network, video decoding and audio run on separate threads, so a slow decoder never blocks the socket.
 
@@ -193,6 +204,7 @@ Network, video decoding and audio run on separate threads, so a slow decoder nev
 - Credentials are taken from the URL and sent in the `Authorization` header: Basic first, Digest when the camera asks for it. They are not included in the RTSP request line.
 - RTSP, RTP over UDP and HTTP are not encrypted, and RTSPS is not supported. Credentials that a camera expects inside the URL path or query (for example `user=…_password=…`) are sent with every request. Use the app only on trusted networks, see [#16](https://github.com/OpenIPC/decoder/issues/16).
 - Camera URLs, including passwords, are stored encrypted (AES-256-GCM with a key kept in the Android Keystore, Android 6.0+) in the app's private storage. On Android 5.x, or if the Keystore is unavailable, they are stored in plain text. Backup is disabled (`allowBackup="false"`).
+- The debug page on port 8085 is not encrypted and has no password; it answers only local-network clients and never shows logins or passwords.
 
 ## Device compatibility
 
