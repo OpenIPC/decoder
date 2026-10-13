@@ -75,6 +75,8 @@ class RtspClient implements RtspSession.Callback {
     boolean isActive() { return session.isActive(); }
     /** RTP over UDP or multicast at the moment (#128). */
     boolean playsOverUdp() { return session.playsOverUdp(); }
+    /** A udp:// slot listening for a pushed stream (#133). */
+    boolean listens() { return session.listens(); }
     /** Packets arrive but nothing decodes: with Auto the session goes over to TCP. */
     void reportUdpBroken(String why) { session.reportUdpBroken(why); }
     /** Transport the stream really uses now, or null (#115). */
@@ -108,6 +110,8 @@ class RtspClient implements RtspSession.Callback {
     @Override
     public void onSdp(Sdp sdp) {
         nalAssembler.reset();
+        // A new stream gets a chance to be complete again (#133)
+        nalAssembler.setSalvage(false);
         lastUnknownPayload = -1;
         lastRtpTimestamp = -1;
         lastRtpArrivalNs = -1;
