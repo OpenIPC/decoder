@@ -323,7 +323,11 @@ public class Decoder extends Activity
             return;
         }
         boolean newState = !quadEnabled;
-        if (newState) startQuad(); else {
+        if (newState) {
+            // Q always opens the adaptive grid; slides only come with S (Qodo on #124)
+            if (slides) setSlides(false);
+            startQuad();
+        } else {
             stopQuad();
             boolean configured = mHost != null && !mHost.isEmpty() && !mHost.equals(DEFAULT_URL);
             if (configured) {
@@ -347,7 +351,7 @@ public class Decoder extends Activity
         }
         if (!quadEnabled) {
             setSlides(true);
-            onToggleQuad();
+            startQuad();
             return;
         }
         setSlides(!slides);
