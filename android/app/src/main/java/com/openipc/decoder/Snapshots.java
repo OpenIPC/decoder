@@ -68,8 +68,11 @@ final class Snapshots {
         return new Handler(copyThread.getLooper());
     }
 
-    /** JPEG of the cells laid out in a grid of the given side (1 for the single view). */
-    static byte[] render(List<Cell> cells, int side) {
+    /**
+     * JPEG of the cells laid out in a grid of the given side (1 for the single view). Without
+     * labels the picture has only the frames: the debug page draws the text itself.
+     */
+    static byte[] render(List<Cell> cells, int side, boolean labels) {
         long t0 = SystemClock.elapsedRealtime();
         int cw = side == 1 ? CELL_W * 2 : CELL_W;
         int ch = side == 1 ? CELL_H * 2 : CELL_H;
@@ -105,27 +108,20 @@ final class Snapshots {
                 canvas.drawBitmap(frame, null, new Rect(x, y, x + cw, y + ch), null);
             }
             if (frame != null) frame.recycle();
-            String label = (c.slot > 0 ? c.slot + " \u00b7 " : "") + (c.label != null ? c.label : "");
-            if (c.live && !shown) label += " \u00b7 no picture";
-            if (shown) {
-                canvas.drawRect(x, y + ch - 20, x + cw, y + ch, band);
-                text.setColor(Color.WHITE);
-                canvas.drawText(label, x + 4, y + ch - 6, text);
-            } else {
-                // No video: slot number and status in the middle, in red
-                text.setColor(0xFFFF6060);
-                float w = text.measureText(label);
-                canvas.drawText(label, x + Math.max(4, (cw - w) / 2), y + ch / 2f + 5, text);
+            if (labels) {
+                drawLabel(canvas, c, shown, x, y, cw, ch, text, band);
+                canvas.drawRect(x, y, x + cw, y + 1, grid);
+                canvas.drawRect(x, y, x + 1, y + ch, grid);
             }
-            canvas.drawRect(x, y, x + cw, y + 1, grid);
-            canvas.drawRect(x, y, x + 1, y + ch, grid);
         }
         long t1 = SystemClock.elapsedRealtime();
-        String time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
-        text.setColor(Color.WHITE);
-        float tw = text.measureText(time);
-        canvas.drawRect(out.getWidth() - tw - 8, 0, out.getWidth(), 20, band);
-        canvas.drawText(time, out.getWidth() - tw - 4, 15, text);
+        if (labels) {
+            String time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
+            text.setColor(Color.WHITE);
+            float tw = text.measureText(time);
+            canvas.drawRect(out.getWidth() - tw - 8, 0, out.getWidth(), 20, band);
+            canvas.drawText(time, out.getWidth() - tw - 4, 15, text);
+        }
         ByteArrayOutputStream jpeg = new ByteArrayOutputStream(64 * 1024);
         out.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, jpeg);
         out.recycle();
@@ -133,6 +129,22 @@ final class Snapshots {
         Log.d(TAG, "Snapshot: " + copied + " cells copied in " + (t1 - t0) + " ms, JPEG "
                 + jpeg.size() / 1024 + " KiB in " + (t2 - t1) + " ms");
         return jpeg.toByteArray();
+    }
+
+    private static void drawLabel(Canvas canvas, Cell c, boolean shown, int x, int y, int cw,
+                                  int ch, Paint text, Paint band) {
+        String label = (c.slot > 0 ? c.slot + " \u00b7 " : "") + (c.label != null ? c.label : "");
+        if (c.live && !shown) label += " \u00b7 no picture";
+        if (shown) {
+            canvas.drawRect(x, y + ch - 20, x + cw, y + ch, band);
+            text.setColor(Color.WHITE);
+            canvas.drawText(label, x + 4, y + ch - 6, text);
+        } else {
+            // No video: slot number and status in the middle, in red
+            text.setColor(0xFFFF6060);
+            float w = text.measureText(label);
+            canvas.drawText(label, x + Math.max(4, (cw - w) / 2), y + ch / 2f + 5, text);
+        }
     }
 
     /** One PixelCopy in flight. */

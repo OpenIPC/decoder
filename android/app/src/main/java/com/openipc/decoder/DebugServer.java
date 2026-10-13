@@ -56,8 +56,11 @@ final class DebugServer {
         /** State as nested Map / List / String / Number / Boolean, see {@link #toJson}. */
         Map<String, Object> snapshot();
 
-        /** JPEG of what the screen shows (#98), or null when there is nothing to show. */
-        byte[] snapshotJpeg();
+        /**
+         * JPEG of what the screen shows (#98), or null when there is nothing to show. Without
+         * labels: only the frames, for the page that draws the text over them.
+         */
+        byte[] snapshotJpeg(boolean labels);
     }
 
     private static DebugServer instance;
@@ -84,6 +87,7 @@ final class DebugServer {
     private final LogBuffer log = new LogBuffer(LOG_LINES);
     private final Object snapshotLock = new Object();
     private byte[] lastSnapshot;
+    private boolean lastSnapshotLabels;
     private long lastSnapshotMs;
     /** Bumped when the source changes: a picture of an earlier source is never served. */
     private volatile int sourceGen;
@@ -169,18 +173,22 @@ final class DebugServer {
                 return;
             }
             String path = parts[1];
+            String query = "";
             int q = path.indexOf('?');
-            if (q >= 0) path = path.substring(0, q);
+            if (q >= 0) {
+                query = path.substring(q + 1);
+                path = path.substring(0, q);
+            }
             switch (path) {
                 case "/":
                 case "/index.html":
                     reply(out, 200, "text/html; charset=utf-8", PAGE);
                     break;
                 case "/stats.json":
-                    reply(out, 200, "application/json; charset=utf-8", toJson(snapshot()));
+                    reply(out, 200, "application/json; charset=utf-8", toJson(snapshot(), true));
                     break;
                 case "/snapshot.jpg":
-                    byte[] jpeg = snapshotJpeg();
+                    byte[] jpeg = snapshotJpeg(!("&" + query + "&").contains("&labels=0&"));
                     if (jpeg != null) reply(out, 200, "image/jpeg", jpeg);
                     else reply(out, 503, "text/plain", "No picture\n");
                     break;
@@ -206,27 +214,29 @@ final class DebugServer {
             m = s.snapshot();
         } else {
             m = new java.util.LinkedHashMap<>();
+            m.put("app", "OpenIPC Decoder");
+            m.put("server", state);
             m.put("mode", "no activity");
         }
-        m.put("server", state);
         return m;
     }
 
     /** Captured only when asked for, one capture at a time, reused for a second. */
-    private byte[] snapshotJpeg() {
+    private byte[] snapshotJpeg(boolean labels) {
         synchronized (snapshotLock) {
             long now = android.os.SystemClock.elapsedRealtime();
             int gen = sourceGen;
-            if (lastSnapshot != null && lastSnapshotGen == gen
+            if (lastSnapshot != null && lastSnapshotGen == gen && lastSnapshotLabels == labels
                     && now - lastSnapshotMs < SNAPSHOT_REUSE_MS) {
                 return lastSnapshot;
             }
             Source s = source;
-            byte[] jpeg = s != null ? s.snapshotJpeg() : null;
+            byte[] jpeg = s != null ? s.snapshotJpeg(labels) : null;
             // The activity was replaced or went away meanwhile: that picture is out of date
             if (gen != sourceGen) jpeg = null;
             lastSnapshot = jpeg;
             lastSnapshotGen = gen;
+            lastSnapshotLabels = labels;
             lastSnapshotMs = android.os.SystemClock.elapsedRealtime();
             return jpeg;
         }
@@ -301,12 +311,19 @@ final class DebugServer {
 
     /** JSON of nested Map / List / array / String / Number / Boolean / null. */
     static String toJson(Object v) {
+        return toJson(v, false);
+    }
+
+    /** As {@link #toJson(Object)}; pretty: one value per line, indented by two spaces. */
+    static String toJson(Object v, boolean pretty) {
         StringBuilder sb = new StringBuilder();
-        writeJson(sb, v);
+        writeJson(sb, v, pretty ? 0 : -1);
+        if (pretty) sb.append('\n');
         return sb.toString();
     }
 
-    private static void writeJson(StringBuilder sb, Object v) {
+    /** {@code depth} < 0: compact. */
+    private static void writeJson(StringBuilder sb, Object v, int depth) {
         if (v == null) {
             sb.append("null");
         } else if (v instanceof Boolean || v instanceof Integer || v instanceof Long) {
@@ -315,31 +332,35 @@ final class DebugServer {
             double d = ((Number) v).doubleValue();
             if (Double.isNaN(d) || Double.isInfinite(d)) sb.append("null");
             else sb.append(String.format(Locale.US, "%.2f", d));
-        } else if (v instanceof Map) {
-            sb.append('{');
+        } else if (v instanceof Map || v instanceof List || v instanceof Object[]) {
+            boolean map = v instanceof Map;
+            java.util.Collection<?> items = map ? ((Map<?, ?>) v).entrySet()
+                    : v instanceof List ? (List<?>) v : java.util.Arrays.asList((Object[]) v);
+            sb.append(map ? '{' : '[');
             boolean first = true;
-            for (Map.Entry<?, ?> e : ((Map<?, ?>) v).entrySet()) {
+            for (Object o : items) {
                 if (!first) sb.append(',');
                 first = false;
-                writeString(sb, String.valueOf(e.getKey()));
-                sb.append(':');
-                writeJson(sb, e.getValue());
+                newline(sb, depth + 1, depth);
+                if (map) {
+                    Map.Entry<?, ?> e = (Map.Entry<?, ?>) o;
+                    writeString(sb, String.valueOf(e.getKey()));
+                    sb.append(depth < 0 ? ":" : ": ");
+                    o = e.getValue();
+                }
+                writeJson(sb, o, depth < 0 ? -1 : depth + 1);
             }
-            sb.append('}');
-        } else if (v instanceof List) {
-            sb.append('[');
-            boolean first = true;
-            for (Object o : (List<?>) v) {
-                if (!first) sb.append(',');
-                first = false;
-                writeJson(sb, o);
-            }
-            sb.append(']');
-        } else if (v instanceof Object[]) {
-            writeJson(sb, java.util.Arrays.asList((Object[]) v));
+            if (!first) newline(sb, depth, depth);
+            sb.append(map ? '}' : ']');
         } else {
             writeString(sb, String.valueOf(v));
         }
+    }
+
+    private static void newline(StringBuilder sb, int indent, int depth) {
+        if (depth < 0) return;
+        sb.append('\n');
+        for (int i = 0; i < indent; i++) sb.append("  ");
     }
 
     private static void writeString(StringBuilder sb, String s) {
@@ -372,56 +393,98 @@ final class DebugServer {
 
     // ====================== Page ======================
 
-    /** Static page: it fetches /stats.json every 1.5 s and renders it, no server templating. */
+    /**
+     * Static page: a header, the links, and the snapshot filling the rest with the text of
+     * each cell drawn over it. It fetches /stats.json every 1.5 s and the snapshot (without
+     * labels) every 3, 5 or 10 s, both only while the tab is visible (#98).
+     */
     private static final String PAGE = "<!doctype html>\n"
             + "<html><head><meta charset=\"utf-8\">"
             + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
             + "<title>OpenIPC Decoder</title><style>"
-            + "body{font:14px/1.4 system-ui,sans-serif;margin:16px;background:#111;color:#ddd}"
-            + "h1{font-size:18px;margin:0 0 8px}h2{font-size:15px;margin:16px 0 6px}"
-            + "table{border-collapse:collapse;width:100%}"
-            + "td,th{border-bottom:1px solid #333;padding:4px 8px;text-align:left;"
-            + "vertical-align:top;word-break:break-all}"
-            + "th{color:#999;font-weight:normal;white-space:nowrap;width:1%}"
-            + "a{color:#8cf}#err{color:#f88}"
-            + "#snap{display:block;max-width:100%;margin:8px 0;background:#000}"
+            + "html,body{height:100%;margin:0}"
+            + "body{display:flex;flex-direction:column;background:#111;color:#ddd;"
+            + "font:14px/1.3 system-ui,sans-serif}"
+            + "header{padding:8px 12px 0}"
+            + "h1{font-size:20px;margin:0;font-weight:600;color:#fff}"
+            + "h1 small{font-size:13px;font-weight:normal;color:#999;margin-left:12px}"
+            + "nav{padding:4px 12px 8px;color:#999}a{color:#8cf}#err{color:#ff5a5a}"
+            + "main{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;"
+            + "padding:0 8px 8px}"
+            + "#wall{position:relative;background:#000}"
+            + "#snap,#cells{position:absolute;top:0;left:0;width:100%;height:100%}"
+            + "#cells{display:grid}"
+            + ".cell{position:relative;border:1px solid #333;overflow:hidden}"
+            + ".top,.bot{position:absolute;left:0;right:0;padding:4px 8px;font-size:13px;"
+            + "color:#fff;text-shadow:0 0 3px #000}"
+            + ".top{top:0;background:linear-gradient(rgba(0,0,0,.65),transparent)}"
+            + ".bot{bottom:0;background:linear-gradient(transparent,rgba(0,0,0,.75))}"
+            + ".slot{font-weight:700;margin-right:6px}.dim{color:#bbb}"
+            + ".bad{color:#ff5a5a;font-weight:700}.warn{color:#ffb84d}"
+            + ".off{position:absolute;top:0;left:0;right:0;bottom:0;display:flex;"
+            + "flex-direction:column;align-items:center;justify-content:center;"
+            + "background:rgba(0,0,0,.85);color:#ff5a5a;text-align:center;padding:8px}"
+            + ".off b{font-size:28px;color:#666}"
             + "</style></head><body>"
-            + "<h1>OpenIPC Decoder</h1>"
-            + "<div><a href=\"/stats.json\">stats.json</a> · <a href=\"/log\">log</a>"
+            + "<header><h1>OpenIPC Decoder<small id=\"ver\"></small><small id=\"clock\"></small>"
+            + "</h1></header>"
+            + "<nav><a href=\"/stats.json\">JSON</a> \u00b7 <a href=\"/log\">LOG</a>"
             + " \u00b7 snapshot every <select id=\"every\"><option value=\"3\">3 s</option>"
             + "<option value=\"5\" selected>5 s</option><option value=\"10\">10 s</option></select>"
-            + " <span id=\"err\"></span></div>"
-            + "<img id=\"snap\" alt=\"snapshot\">"
-            + "<div id=\"out\"></div>"
+            + " <span id=\"err\"></span></nav>"
+            + "<main id=\"main\"><div id=\"wall\"><img id=\"snap\" alt=\"\">"
+            + "<div id=\"cells\"></div></div></main>"
             + "<script>\n"
-            + "function esc(s){return String(s).replace(/[&<>\"]/g,function(c){"
+            + "function $(id){return document.getElementById(id)}\n"
+            + "function esc(s){return String(s==null?'':s).replace(/[&<>\"]/g,function(c){"
             + "return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]})}\n"
-            + "function val(v){if(v===null||v===undefined)return '';"
-            + "if(Array.isArray(v))return v.map(val).join('<br>');"
-            + "if(typeof v==='object')return table(v);return esc(v)}\n"
-            + "function table(o){var h='<table>';for(var k in o){"
-            + "if(k==='cells')continue;h+='<tr><th>'+esc(k)+'</th><td>'+val(o[k])+'</td></tr>'}"
-            + "return h+'</table>'}\n"
-            + "function cells(c){if(!c||!c.length)return '';var keys=[];"
-            + "c.forEach(function(r){for(var k in r)if(keys.indexOf(k)<0)keys.push(k)});"
-            + "var h='<h2>Cells</h2><table><tr>'+keys.map(function(k){return '<th>'+esc(k)+'</th>'})"
-            + ".join('')+'</tr>';c.forEach(function(r){h+='<tr>'+keys.map(function(k){"
-            + "return '<td>'+val(r[k])+'</td>'}).join('')+'</tr>'});return h+'</table>'}\n"
-            // Stats and snapshots are asked for only while the tab is visible (#98)
+            // The wall keeps 16:9 (the snapshot's shape) and fills the space left
+            + "function fit(){var m=$('main'),w=m.clientWidth-16,h=m.clientHeight-8;"
+            + "if(w*9/16>h)w=h*16/9;$('wall').style.width=Math.floor(w)+'px';"
+            + "$('wall').style.height=Math.floor(w*9/16)+'px'}\n"
+            + "window.onresize=fit;fit();\n"
             + "function later(f,ms){setTimeout(function(){if(document.hidden)"
             + "document.addEventListener('visibilitychange',function v(){if(!document.hidden)"
             + "{document.removeEventListener('visibilitychange',v);f()}});else f()},ms)}\n"
-            + "var every=document.getElementById('every');"
+            + "function up(s){var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),"
+            + "m=Math.floor(s%3600/60);return (d?d+'d ':'')+(d||h?h+'h ':'')+m+'m'}\n"
+            + "function host(u){var m=/\\/\\/(?:[^@\\/]*@)?([^\\/:?]*)/.exec(u||'');"
+            + "return m?m[1]:''}\n"
+            + "function num(v){return Math.round(v*10)/10}\n"
+            // One cell: slot, camera and transport on top; size, fps and losses below
+            + "function cell(c){var top='<span class=\"slot\">'+esc(c.slot)+'</span>'"
+            + "+'<span class=\"dim\">'+esc(host(c.url))+(c.transport?' \u00b7 '+esc(c.transport):'')"
+            + "+(c.audio===true?' \u00b7 \u266a':'')+'</span>';"
+            + "if(!c.video)return '<div class=\"cell\"><div class=\"top\">'+top+'</div>"
+            + "<div class=\"off\"><b>'+esc(c.slot)+'</b>'+esc(c.text)+'</div></div>';"
+            + "var t=esc(c.text),r=/(\\d+)\\/(\\d+) fps/.exec(c.text||'');"
+            + "if(r&&+r[1]<0.9*r[2])t=t.replace(r[0],'<span class=\"warn\">'+r[0]+'</span>');"
+            + "if(c.lost_fps>0)t+=' \u00b7 <span class=\"bad\">lost '+num(c.lost_fps)+'/s</span>';"
+            + "if(c.behind_s>0)t+=' \u00b7 <span class=\"bad\">behind '+c.behind_s+' s</span>';"
+            + "return '<div class=\"cell\"><div class=\"top\">'+top+'</div>"
+            + "<div class=\"bot\">'+t+'</div></div>'}\n"
+            + "function render(s){$('ver').textContent='v'+(s.version||'?')+' \u00b7 '+(s.git||'');"
+            + "$('clock').textContent=(s.time||'')+(s.uptime_s!=null?' \u00b7 up '+up(s.uptime_s):'')"
+            + "+(s.ui_thread&&s.ui_thread!=='ok'?' \u00b7 UI '+s.ui_thread:'');"
+            + "var list,side=1;"
+            + "if(s.cells){side=s.cells.length>4?3:2;list=s.cells.slice();"
+            + "while(list.length<side*side)list.push({slot:'U',text:'no receiver yet'})}"
+            + "else if(s.single){var c=s.single;c.slot=s.active_slot;c.text=c.video"
+            + "?(c.size||'')+' '+c.codec:c.status;list=[c]}"
+            + "else list=[s.mode==='udp'?{slot:'U',text:'UDP RTP port '+(s.udp?s.udp.port:'')}"
+            + ":{text:s.mode==='paused'?'App in background':(s.mode||'')}];"
+            + "$('cells').style.gridTemplateColumns='repeat('+side+',1fr)';"
+            + "$('cells').style.gridTemplateRows='repeat('+side+',1fr)';"
+            + "$('cells').innerHTML=list.map(cell).join('')}\n"
+            + "function tick(){fetch('/stats.json',{cache:'no-store'}).then(function(r){return r.json()})"
+            + ".then(function(s){render(s);$('err').textContent=''})"
+            + ".catch(function(e){$('err').textContent='offline: '+e})"
+            + ".finally(function(){later(tick,1500)})}\n"
+            + "var every=$('every');"
             + "try{var e=localStorage.getItem('every');if(e)every.value=e}catch(x){}\n"
             + "every.onchange=function(){try{localStorage.setItem('every',every.value)}catch(x){}};\n"
-            + "var img=document.getElementById('snap');"
-            + "img.onload=img.onerror=function(){later(snap,every.value*1000)};\n"
-            + "function snap(){img.src='/snapshot.jpg?t='+Date.now()}\n"
-            + "function tick(){fetch('/stats.json',{cache:'no-store'}).then(function(r){return r.json()})"
-            + ".then(function(s){document.getElementById('out').innerHTML=table(s)+cells(s.cells);"
-            + "document.getElementById('err').textContent=''})"
-            + ".catch(function(e){document.getElementById('err').textContent='offline: '+e})"
-            + ".finally(function(){later(tick,1500)})}\n"
+            + "var img=$('snap');img.onload=img.onerror=function(){later(snap,every.value*1000)};\n"
+            + "function snap(){img.src='/snapshot.jpg?labels=0&t='+Date.now()}\n"
             + "later(tick,0);later(snap,0);\n"
             + "</script></body></html>\n";
 }

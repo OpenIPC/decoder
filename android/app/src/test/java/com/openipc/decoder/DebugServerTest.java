@@ -117,6 +117,16 @@ public class DebugServerTest {
         assertTrue(text, text.contains("rtsp://***@cam/stream=0\nthree\nfour\n"));
     }
 
+    @Test
+    public void prettyJson() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("app", "OpenIPC Decoder");
+        m.put("addresses", Arrays.asList("a", "b"));
+        m.put("empty", new java.util.ArrayList<>());
+        assertEquals("{\n  \"app\": \"OpenIPC Decoder\",\n  \"addresses\": [\n    \"a\",\n"
+                + "    \"b\"\n  ],\n  \"empty\": []\n}\n", DebugServer.toJson(m, true));
+    }
+
     private static String head(String raw) throws IOException {
         return DebugServer.readRequestHead(
                 new ByteArrayInputStream(raw.getBytes(StandardCharsets.ISO_8859_1)));
