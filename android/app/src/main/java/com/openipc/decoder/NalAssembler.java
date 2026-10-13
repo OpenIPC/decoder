@@ -45,6 +45,13 @@ class NalAssembler {
     /** Of those, dropped because a packet of them was lost (not for size) (#113). */
     private int lostDropped;
     private int gaps;
+    /**
+     * Pass a NAL unit with a lost piece on cut short at the gap instead of dropping it (#133):
+     * for a stream that loses a piece of every key frame, where dropping them leaves nothing to
+     * decode. The decoder conceals the missing part; a damaged picture beats a black one.
+     */
+    private volatile boolean salvage;
+    private int salvaged;
 
     NalAssembler(int bufferSize, Runnable onCodecSwitch, FramePool framePool) {
         this.nalBuffer = new byte[bufferSize];
@@ -65,6 +72,11 @@ class NalAssembler {
     int lossCount() { return lostDropped; }
     /** Gaps in the RTP sequence, any packet lost (#145). */
     int gapCount() { return gaps; }
+
+    void setSalvage(boolean on) { salvage = on; }
+    boolean salvaging() { return salvage; }
+    /** Slices passed on to the sink cut short at a lost piece (#133); the queue may drop some. */
+    int salvagedCount() { return salvaged; }
 
     /**
      * Process one RTP packet ({@code length} bytes at {@code offset}, header included).
@@ -93,7 +105,7 @@ class NalAssembler {
         lastSeq = seq;
         if (gap && inFragment) {
             lostDropped++;
-            drop("packet loss inside a fragmented NAL unit");
+            dropOrSalvage("packet loss inside a fragmented NAL unit", sink);
             orphan = true; // its remaining pieces belong to the unit just counted
         }
 
@@ -108,7 +120,7 @@ class NalAssembler {
         // Any other packet ends a fragmented NAL unit that did not finish; its remaining
         // pieces, if any arrive, belong to the unit counted here
         if (inFragment) {
-            drop("fragmented NAL unit interrupted by another packet");
+            dropOrSalvage("fragmented NAL unit interrupted by another packet", sink);
             orphan = true;
         } else {
             orphan = false;
@@ -135,7 +147,7 @@ class NalAssembler {
         if (first) {
             if (inFragment) {
                 lostDropped++;
-                drop("fragmented NAL unit without its end");
+                dropOrSalvage("fragmented NAL unit without its end", sink);
             }
             orphan = false;
             nalSize = 0;
@@ -203,6 +215,32 @@ class NalAssembler {
         System.arraycopy(buf, pos, d, 4, size);
         out.setLength(size + 4);
         sink.onNal(out);
+    }
+
+    /** The unit collected so far, cut short, when salvaging (#133); dropped otherwise. */
+    private void dropOrSalvage(String reason, Sink sink) {
+        // Start code and NAL header plus some slice data, or there is nothing to decode; only
+        // slices: a cut parameter set would be taken for a valid configuration (Qodo on #146)
+        if (!salvage || nalSize < 16 || !isSlice(nalBuffer[4], lastCodec == 1)) {
+            drop(reason);
+            return;
+        }
+        Frame out = framePool.obtain(nalSize);
+        System.arraycopy(nalBuffer, 0, out.data(), 0, nalSize);
+        out.setLength(nalSize);
+        nalSize = 0;
+        inFragment = false;
+        if (salvaged++ % 100 == 0) {
+            Log.w(TAG, "NAL unit passed on cut short (" + salvaged + "): " + reason);
+        }
+        sink.onNal(out);
+    }
+
+    /** A coded slice (VCL NAL unit): H.264 types 1–5, H.265 types 0–31. */
+    static boolean isSlice(byte nalHeader, boolean h265) {
+        if (h265) return ((nalHeader >> 1) & 0x3F) <= 31;
+        int type = nalHeader & 0x1F;
+        return type >= 1 && type <= 5;
     }
 
     private void drop(String reason) {

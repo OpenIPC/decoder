@@ -15,12 +15,8 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
-import android.graphics.Paint;
-import android.graphics.Rect;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -205,12 +201,11 @@ public class Decoder extends Activity
                     // video decoder must not hold the surface
                     closeDecoder();
                 } else {
-                    jpegCodec.release();
+                    jpegRenderer.release();
                 }
-                if (!jpeg && jpegDrawn) {
+                if (!jpeg && jpegRenderer.takeCanvasDrawn()) {
                     // A surface drawn with lockCanvas() cannot take a decoder any more: no
                     // decoder until the UI thread has put a new one in place (Qodo on #131)
-                    jpegDrawn = false;
                     surfacePending = true;
                     runOnUiThread(() -> {
                         recreateVideoSurface();
@@ -1477,6 +1472,10 @@ public class Decoder extends Activity
                     c.put("lost_fps", cell.lostFps());
                     // NAL units dropped because one of their packets was lost (#113)
                     c.put("nal_dropped", cell.nalDropped());
+                    // Slices passed on cut short at a lost piece (some may still be dropped by
+                    // a full queue); absent while that is off (#133)
+                    int salvaged = cell.nalSalvaged();
+                    if (salvaged >= 0) c.put("nal_damaged", salvaged);
                     // Every frame, or key frames only while the decoder has no room (#85)
                     c.put("decode", cell.isKeyFramesOnly() ? "key frames" : "full");
                     if (cell.knowsLoad()) c.put("load", cell.isKeyFramesOnly()
@@ -1649,7 +1648,7 @@ public class Decoder extends Activity
 
     private void replaceSurface(Surface next) {
         // The MJPEG decoder renders into the old surface: let go of it first (#132)
-        jpegCodec.release();
+        jpegRenderer.release();
         Surface prev = mVideoSurface;
         mVideoSurface = next;
         videoDecoder.setSurface(next);
@@ -1666,77 +1665,22 @@ public class Decoder extends Activity
 
     // ====================== MJPEG (#119) ======================
 
-    /** Hardware MJPEG decoding (#132), unless it failed once in this run. */
-    private final JpegCodec jpegCodec = new JpegCodec();
-    private volatile boolean hwJpegFailed;
-
-    /** Something was drawn into the video surface with lockCanvas(). */
-    private volatile boolean jpegDrawn;
+    /** MJPEG frames onto the video surface: hardware decoder or BitmapFactory (#119, #132). */
+    private final JpegRenderer jpegRenderer = new JpegRenderer();
     /** A new video surface is being made after MJPEG: no decoder until it is there. */
     private volatile boolean surfacePending;
     /** JPEG frames drawn, the MJPEG counterpart of the decoder's output count. */
     private volatile int jpegFramesOut;
     private volatile long lastJpegFrameMs;
-    private Bitmap jpegBitmap;
-    private final Paint jpegPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
 
     /**
-     * One JPEG frame of an MJPEG stream into the single view, on the decode thread: decoded
-     * with BitmapFactory (into the previous bitmap when the size is the same) and drawn over
+     * One JPEG frame of an MJPEG stream into the single view, on the decode thread, drawn over
      * the whole surface; the view's fit transform keeps the aspect ratio, as for video.
      */
     private void drawJpeg(Frame frame, int gen) {
         Surface s = mVideoSurface;
-        if (s == null || !s.isValid() || gen != listenerGen) return;
-        // The hardware JPEG decoder first, where there is one (#132)
-        if (!hwJpegFailed && !jpegDrawn && JpegCodec.candidate() != null) {
-            int[] size = JpegAssembler.size(frame.data(), frame.length());
-            if (size != null) {
-                try {
-                    if (jpegCodec.decode(frame, s, size[0], size[1],
-                            () -> gen == listenerGen && s == mVideoSurface)) {
-                        jpegShown(size[0], size[1]);
-                    }
-                    return;
-                } catch (Exception e) {
-                    jpegCodec.release();
-                    // The surface was replaced meanwhile: not the decoder's fault, try again
-                    if (s != mVideoSurface || gen != listenerGen) return;
-                    Log.w(TAG, "Hardware MJPEG decoder failed, decoding in software", e);
-                    hwJpegFailed = true;
-                }
-            }
-        }
-        BitmapFactory.Options o = new BitmapFactory.Options();
-        o.inMutable = true;
-        Bitmap reuse = jpegBitmap;
-        if (reuse != null) o.inBitmap = reuse;
-        Bitmap b;
-        try {
-            b = BitmapFactory.decodeByteArray(frame.data(), 0, frame.length(), o);
-        } catch (IllegalArgumentException e) {
-            // Another size than the reusable bitmap
-            o.inBitmap = null;
-            b = BitmapFactory.decodeByteArray(frame.data(), 0, frame.length(), o);
-        }
-        if (b == null) return;
-        jpegBitmap = b;
-        final int w = b.getWidth();
-        final int h = b.getHeight();
-        try {
-            Canvas c = s.lockCanvas(null);
-            try {
-                c.drawColor(Color.BLACK);
-                c.drawBitmap(b, null, new Rect(0, 0, c.getWidth(), c.getHeight()), jpegPaint);
-            } finally {
-                s.unlockCanvasAndPost(c);
-            }
-        } catch (RuntimeException e) {
-            // The surface went away meanwhile (view or activity change)
-            return;
-        }
-        jpegDrawn = true;
-        jpegShown(w, h);
+        int[] size = jpegRenderer.render(frame, s, () -> gen == listenerGen && s == mVideoSurface);
+        if (size != null) jpegShown(size[0], size[1]);
     }
 
     /** A JPEG frame is on screen (hardware or software path). */
@@ -1845,13 +1789,20 @@ public class Decoder extends Activity
             int frames = videoDecoder.framesOut() + jpegFramesOut;
             long bytes = client != null ? client.getStreamBytes() : 0;
             boolean stalled = !quadEnabled && !udpViewShown && client != null
-                    && client.playsOverUdp() && "connected".equals(singleState)
+                    && (client.playsOverUdp() || client.listens())
+                    && "connected".equals(singleState)
                     && bytes - lastSingleBytes > 10_000 && frames == lastSingleFrames;
             lastSingleFrames = frames;
             lastSingleBytes = bytes;
             singleStallSeconds = stalled ? singleStallSeconds + 1 : 0;
             if (singleStallSeconds >= UDP_STALL_SECONDS) {
                 singleStallSeconds = 0;
+                // Every key frame loses a piece: decode them damaged rather than not at all;
+                // a pushed stream has no TCP to go to (#133)
+                if (!nalAssembler.salvaging()) {
+                    nalAssembler.setSalvage(true);
+                    Log.w(TAG, "No complete key frame over UDP, decoding damaged ones");
+                }
                 client.reportUdpBroken("packets but no decoded frame for " + UDP_STALL_SECONDS
                         + " s");
             }
@@ -1885,7 +1836,7 @@ public class Decoder extends Activity
         stopExecutor();
         // After the worker's generation is gone: a frame still in flight sees that and can no
         // longer create the JPEG decoder again (Qodo on #135)
-        jpegCodec.release();
+        jpegRenderer.release();
         nalQueue.clear();
     }
 
