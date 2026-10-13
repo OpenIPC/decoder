@@ -22,4 +22,17 @@
         android:textSize="14sp"
         android:visibility="gone" />
 
+    <!-- Debug page addresses, with the debug text on (menu D, #96) -->
+    <TextView
+        android:id="@+id/debug_urls"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="8dp"
+        android:padding="6dp"
+        android:background="#80000000"
+        android:textColor="#FFFFFF"
+        android:textSize="12sp"
+        android:visibility="gone" />
+
 </FrameLayout>

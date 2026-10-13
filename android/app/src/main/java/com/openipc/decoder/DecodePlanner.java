@@ -7,7 +7,10 @@
 
 package com.openipc.decoder;
 
+import java.util.ArrayDeque;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Decides, once per second, which cells decode at full rate and which only key frames, so
@@ -21,16 +24,25 @@ import java.util.List;
  * <p>Cells come in priority order, highest first. Pure logic, no Android types.
  */
 final class DecodePlanner {
-    /** Consecutive lossy samples before a full cell is demoted. */
+    /** Lossy samples within LOSS_WINDOW_MS before a cell is demoted or paused. */
     static final int LOSS_SAMPLES = 3;
+    /**
+     * Key-frame cells lose a frame only now and then (one key frame per GOP), so lossy samples
+     * are counted over a window rather than in a row.
+     */
+    static final long LOSS_WINDOW_MS = 10_000;
+    /** How long a playing cell with an unknown load keeps the lower cells waiting. */
+    static final long UNKNOWN_WAIT_MS = 10_000;
     /** Time after a change before the next one, so the decoder load can settle. */
     static final long SETTLE_MS = 3000;
     /** Quiet time after which a load counts as proven and a promotion beyond capacity is tried. */
     static final long PROBE_QUIET_MS = 30_000;
     /** Longest wait between probes: it doubles after every failure. */
     static final long PROBE_MAX_WAIT_MS = 10 * 60_000;
-    /** Probes stay this far below a load that failed: the load estimates are noisy. */
+    /** Promotions stay this far below a load that failed: the load estimates are noisy. */
     static final double FAILED_MARGIN = 0.9;
+    /** Quiet time after which a load that failed is tried once more: it may have been a fluke. */
+    static final long FAILED_RETRY_MS = 60 * 60_000;
 
     static final class Cell {
         int index;
@@ -74,21 +86,32 @@ final class DecodePlanner {
     private boolean learnt;
     /** Largest full-rate load that played without losses for PROBE_QUIET_MS. */
     private long proven;
-    /** Smallest load at which the decoder lost frames: probes stay below it. */
-    private long failedLoad = Long.MAX_VALUE;
+    /** Smallest load at which the decoder lost frames: promotions stay below it. */
+    private long failedLoad;
     /** Quiet time before the next probe; grows after failures, resets after a success. */
     private long probeWaitMs = PROBE_QUIET_MS;
-    private int lossySamples;
+    /** Times of the recent lossy samples. */
+    private final ArrayDeque<Long> lossyTimes = new ArrayDeque<>();
+    /** Since when a playing cell's load is unknown, by cell index. */
+    private final Map<Integer, Long> unknownSince = new HashMap<>();
     private long quietSinceMs = -1;
     private long lastChangeMs = -1;
 
     DecodePlanner(long capacity, boolean learnt) {
+        this(capacity, learnt, 0);
+    }
+
+    /** With the failed load stored with the learnt capacity (0: none), not tried again. */
+    DecodePlanner(long capacity, boolean learnt, long failedLoad) {
         this.capacity = capacity;
         this.learnt = learnt;
+        this.failedLoad = failedLoad > 0 ? failedLoad : Long.MAX_VALUE;
     }
 
     long capacity() { return capacity; }
     boolean isLearnt() { return learnt; }
+    /** Smallest load that made the decoder lose frames, or 0 if none. */
+    long failedLoad() { return failedLoad == Long.MAX_VALUE ? 0 : failedLoad; }
 
     /** The decoder's declared budget, once known; ignored when a learnt value exists. */
     void offerDeclared(long declared) {
@@ -110,25 +133,27 @@ final class DecodePlanner {
             else if (!c.full) load += c.keyLoad;
             anyLossy |= c.lossy;
         }
+        while (!lossyTimes.isEmpty() && nowMs - lossyTimes.peekFirst() >= LOSS_WINDOW_MS) {
+            lossyTimes.pollFirst();
+        }
         if (anyLossy) {
-            lossySamples++;
+            lossyTimes.addLast(nowMs);
             quietSinceMs = nowMs;
-        } else {
-            lossySamples = 0;
+        } else if (nowMs - quietSinceMs >= PROBE_QUIET_MS && load > proven) {
             // A load that played without losses long enough is within this device's means
-            if (nowMs - quietSinceMs >= PROBE_QUIET_MS && load > proven) {
-                proven = load;
-                probeWaitMs = PROBE_QUIET_MS;
-                if (load > capacity) {
-                    capacity = load;
-                    learnt = true;
-                }
+            proven = load;
+            probeWaitMs = PROBE_QUIET_MS;
+            if (load > capacity) {
+                capacity = load;
+                learnt = true;
             }
+            // A failure at about this load was a fluke: do not hold promotions back by it
+            if (load >= failedLoad * FAILED_MARGIN) failedLoad = Long.MAX_VALUE;
         }
         if (lastChangeMs >= 0 && nowMs - lastChangeMs < SETTLE_MS) return Decision.NONE;
 
-        if (lossySamples >= LOSS_SAMPLES) {
-            lossySamples = 0;
+        if (lossyTimes.size() >= LOSS_SAMPLES) {
+            lossyTimes.clear();
             for (int i = cells.size() - 1; i >= 0; i--) {
                 Cell c = cells.get(i);
                 if (c.full && !c.paused && c.playing && c.known) {
@@ -141,12 +166,12 @@ final class DecodePlanner {
                     return change(nowMs, Action.DEMOTE, c.index);
                 }
             }
-            // Even key frames are too much: pause the lowest-priority cell as a last resort
+            // Even key frames are too much: pause the lowest-priority cell as a last resort, but
+            // never the last one that plays
+            if (countPlaying(cells) < 2) return Decision.NONE;
             for (int i = cells.size() - 1; i >= 0; i--) {
                 Cell c = cells.get(i);
-                if (!c.paused && c.playing && countActive(cells) > 1) {
-                    return change(nowMs, Action.PAUSE, c.index);
-                }
+                if (!c.paused && c.playing) return change(nowMs, Action.PAUSE, c.index);
             }
             return Decision.NONE;
         }
@@ -154,13 +179,27 @@ final class DecodePlanner {
 
         // Promote the highest-priority key-frame cell whose load is known
         for (Cell c : cells) {
-            if (c.full || c.paused) continue;
-            if (!c.known) return Decision.NONE; // keep the priority order: wait for it
+            if (c.full || c.paused || !c.playing) {
+                // Not connected (an offline camera) or paused: nothing to wait for
+                unknownSince.remove(c.index);
+                continue;
+            }
+            if (!c.known) {
+                // Keep the priority order: wait for its load, but not for ever
+                Long since = unknownSince.get(c.index);
+                if (since == null) unknownSince.put(c.index, since = nowMs);
+                if (nowMs - since < UNKNOWN_WAIT_MS) return Decision.NONE;
+                continue;
+            }
+            unknownSince.remove(c.index);
             long after = load - c.keyLoad + c.fullLoad;
+            // Never up to a load that failed, not even within the capacity, unless it has been
+            // quiet for very long
+            if (after >= failedLoad * FAILED_MARGIN
+                    && nowMs - quietSinceMs < FAILED_RETRY_MS) return Decision.NONE;
             boolean fits = after <= capacity;
-            // Beyond the capacity only after a quiet period, and never up to a load that failed
-            boolean probe = nowMs - quietSinceMs >= probeWaitMs
-                    && after < failedLoad * FAILED_MARGIN;
+            // Beyond the capacity only after a quiet period
+            boolean probe = nowMs - quietSinceMs >= probeWaitMs;
             if (fits || probe) {
                 if (!fits) quietSinceMs = nowMs; // a probe starts a new quiet period
                 return change(nowMs, Action.PROMOTE, c.index);
@@ -170,9 +209,9 @@ final class DecodePlanner {
         return Decision.NONE;
     }
 
-    private static int countActive(List<Cell> cells) {
+    private static int countPlaying(List<Cell> cells) {
         int n = 0;
-        for (Cell c : cells) if (!c.paused) n++;
+        for (Cell c : cells) if (!c.paused && c.playing) n++;
         return n;
     }
 

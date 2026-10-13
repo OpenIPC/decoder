@@ -195,4 +195,80 @@ public class DecodePlannerTest {
         q.offerDeclared(5000);
         assertEquals(5000, q.capacity());
     }
+
+    @Test
+    public void anOfflineCameraDoesNotHoldTheLowerCellsBack() {
+        DecodePlanner p = new DecodePlanner(BUDGET, false);
+        List<DecodePlanner.Cell> cells = keyCells(3, P1080_30);
+        cells.get(0).playing = false;
+        cells.get(0).known = false;
+        long t = 0;
+        for (int i = 0; i < 10; i++, t += 1000) apply(cells, p.step(cells, t));
+        assertTrue(cells.get(1).full && cells.get(2).full);
+    }
+
+    @Test
+    public void aPlayingCellWithAnUnknownLoadIsWaitedForOnlyAWhile() {
+        DecodePlanner p = new DecodePlanner(BUDGET, false);
+        List<DecodePlanner.Cell> cells = keyCells(2, P1080_30);
+        cells.get(0).known = false;
+        long t = 0;
+        for (; t < DecodePlanner.UNKNOWN_WAIT_MS; t += 1000) {
+            assertEquals(DecodePlanner.Action.NONE, p.step(cells, t).action);
+        }
+        DecodePlanner.Decision d = p.step(cells, t);
+        assertEquals(DecodePlanner.Action.PROMOTE, d.action);
+        assertEquals(1, d.index);
+    }
+
+    @Test
+    public void aPromotionWithinTheCapacityStaysBelowAFailedLoad() {
+        // Learnt capacity of three cameras, but two already failed (stored with it)
+        DecodePlanner p = new DecodePlanner(3 * P1080_30, true, 2 * P1080_30);
+        List<DecodePlanner.Cell> cells = keyCells(3, P1080_30);
+        long t = 0;
+        for (int i = 0; i < 20; i++, t += 1000) apply(cells, p.step(cells, t));
+        assertEquals(1, full(cells));
+        assertEquals(2 * P1080_30, p.failedLoad());
+    }
+
+    @Test
+    public void aDemotionStoresTheFailedLoad() {
+        DecodePlanner p = new DecodePlanner(BUDGET, false);
+        List<DecodePlanner.Cell> cells = keyCells(2, P1080_30);
+        long t = 0;
+        for (int i = 0; i < 10; i++, t += 1000) apply(cells, p.step(cells, t));
+        assertEquals(0, p.failedLoad());
+        cells.get(0).lossy = true;
+        for (int i = 0; i < DecodePlanner.LOSS_SAMPLES; i++, t += 1000) apply(cells, p.step(cells, t));
+        assertEquals(2 * P1080_30, p.failedLoad());
+        assertEquals(1, full(cells));
+    }
+
+    @Test
+    public void theLastPlayingCellIsNeverPaused() {
+        DecodePlanner p = new DecodePlanner(1, false);
+        List<DecodePlanner.Cell> cells = keyCells(2, P1080_30);
+        cells.get(1).playing = false; // offline
+        cells.get(0).lossy = true;
+        long t = 0;
+        for (int i = 0; i < 10; i++, t += 1000) {
+            assertEquals(DecodePlanner.Action.NONE, p.step(cells, t).action);
+        }
+    }
+
+    @Test
+    public void sparseLossesOfKeyFrameCellsAreDetected() {
+        DecodePlanner p = new DecodePlanner(1, false);
+        List<DecodePlanner.Cell> cells = keyCells(2, P1080_30);
+        DecodePlanner.Decision d = DecodePlanner.Decision.NONE;
+        // One lost key frame every three seconds: never two lossy samples in a row
+        for (long t = 0; t < DecodePlanner.LOSS_WINDOW_MS && d.action == DecodePlanner.Action.NONE;
+                t += 1000) {
+            cells.get(0).lossy = t % 3000 == 0;
+            d = p.step(cells, t);
+        }
+        assertEquals(DecodePlanner.Action.PAUSE, d.action);
+        assertEquals(1, d.index);
+    }
 }
