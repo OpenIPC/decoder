@@ -332,20 +332,13 @@ public class Decoder extends Activity
 
     @Override
     public void onToggleQuad() {
+        // Q switches the view only; the playback mode is S's and stays as it is (#153)
         if (leaveUdpView()) {
-            setSlides(false);
             startQuad();
-            return;
-        }
-        if (quadEnabled && slides) {
-            // From slides back to the adaptive grid; Q again then leaves multi-view
-            setSlides(false);
             return;
         }
         boolean newState = !quadEnabled;
         if (newState) {
-            // Q always opens the adaptive grid; slides only come with S (Qodo on #124)
-            if (slides) setSlides(false);
             startQuad();
         } else {
             stopQuad();
