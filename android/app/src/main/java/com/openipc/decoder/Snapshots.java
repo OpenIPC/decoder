@@ -31,8 +31,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Made only when the debug page asks for it. Cells are copied from their SurfaceViews at
- * the size they have in the picture with PixelCopy (the GPU scales them, no extra decoder, nothing from the
- * camera) and laid out like the screen. A cell that is not playing right now is drawn black
+ * the size they have in the picture with PixelCopy (the GPU scales them, no extra decoder,
+ * nothing from the camera) and laid out like the screen. A cell that is not playing right now is drawn black
  * with its status, never with a stale last frame: the point is to see whether video is there.
  */
 final class Snapshots {
