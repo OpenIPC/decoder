@@ -985,7 +985,7 @@ public class Decoder extends Activity
         if (!quadEnabled) {
             Snapshots.Cell c = new Snapshots.Cell();
             c.slot = mActive + 1;
-            c.live = "connected".equals(singleState)
+            c.live = mResumed && "connected".equals(singleState)
                     && videoDecoder.renderedWithin(SNAPSHOT_LIVE_MS);
             c.label = statusText != null && statusText.getVisibility() == View.VISIBLE
                     ? statusText.getText().toString() : c.live ? "Playing" : "No new frames";
@@ -1087,7 +1087,7 @@ public class Decoder extends Activity
             Map<String, Object> single = new LinkedHashMap<>();
             single.put("url", DebugServer.redact(mHost));
             single.put("transport", mTransports[mActive] != null ? mTransports[mActive].name() : null);
-            single.put("video", "connected".equals(singleState)
+            single.put("video", mResumed && "connected".equals(singleState)
                     && videoDecoder.renderedWithin(SNAPSHOT_LIVE_MS));
             single.put("status", statusText != null && statusText.getVisibility() == View.VISIBLE
                     ? statusText.getText().toString() : singleState);
@@ -1357,6 +1357,8 @@ public class Decoder extends Activity
     }
 
     private void stopStreams() {
+        // The single view's stream ends here: it is no longer "connected" for the debug page
+        singleState = "disconnected";
         if (quadCells != null) {
             for (QuadCell cell : quadCells) {
                 if (cell != null) cell.stop();

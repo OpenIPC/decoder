@@ -86,12 +86,12 @@ final class DebugServer {
     });
     private final LogBuffer log = new LogBuffer(LOG_LINES);
     private final Object snapshotLock = new Object();
-    private byte[] lastSnapshot;
-    private boolean lastSnapshotLabels;
-    private long lastSnapshotMs;
+    /** Index 0: frames only (the page), 1: with labels; reused separately. */
+    private final byte[][] lastSnapshot = new byte[2][];
+    private final long[] lastSnapshotMs = new long[2];
+    private final int[] lastSnapshotGen = new int[2];
     /** Bumped when the source changes: a picture of an earlier source is never served. */
     private volatile int sourceGen;
-    private int lastSnapshotGen;
 
     private DebugServer() {}
 
@@ -223,21 +223,21 @@ final class DebugServer {
 
     /** Captured only when asked for, one capture at a time, reused for a second. */
     private byte[] snapshotJpeg(boolean labels) {
+        int v = labels ? 1 : 0;
         synchronized (snapshotLock) {
             long now = android.os.SystemClock.elapsedRealtime();
             int gen = sourceGen;
-            if (lastSnapshot != null && lastSnapshotGen == gen && lastSnapshotLabels == labels
-                    && now - lastSnapshotMs < SNAPSHOT_REUSE_MS) {
-                return lastSnapshot;
+            if (lastSnapshot[v] != null && lastSnapshotGen[v] == gen
+                    && now - lastSnapshotMs[v] < SNAPSHOT_REUSE_MS) {
+                return lastSnapshot[v];
             }
             Source s = source;
             byte[] jpeg = s != null ? s.snapshotJpeg(labels) : null;
             // The activity was replaced or went away meanwhile: that picture is out of date
             if (gen != sourceGen) jpeg = null;
-            lastSnapshot = jpeg;
-            lastSnapshotGen = gen;
-            lastSnapshotLabels = labels;
-            lastSnapshotMs = android.os.SystemClock.elapsedRealtime();
+            lastSnapshot[v] = jpeg;
+            lastSnapshotGen[v] = gen;
+            lastSnapshotMs[v] = android.os.SystemClock.elapsedRealtime();
             return jpeg;
         }
     }
@@ -423,7 +423,7 @@ final class DebugServer {
             + ".bad{color:#ff5a5a;font-weight:700}.warn{color:#ffb84d}"
             + ".off{position:absolute;top:0;left:0;right:0;bottom:0;display:flex;"
             + "flex-direction:column;align-items:center;justify-content:center;"
-            + "background:rgba(0,0,0,.85);color:#ff5a5a;text-align:center;padding:8px}"
+            + "background:#000;color:#ff5a5a;text-align:center;padding:8px}"
             + ".off b{font-size:28px;color:#666}"
             + "</style></head><body>"
             + "<header><h1>OpenIPC Decoder<small id=\"ver\"></small><small id=\"clock\"></small>"
@@ -448,7 +448,7 @@ final class DebugServer {
             + "{document.removeEventListener('visibilitychange',v);f()}});else f()},ms)}\n"
             + "function up(s){var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),"
             + "m=Math.floor(s%3600/60);return (d?d+'d ':'')+(d||h?h+'h ':'')+m+'m'}\n"
-            + "function host(u){var m=/\\/\\/(?:[^@\\/]*@)?([^\\/:?]*)/.exec(u||'');"
+            + "function host(u){var m=/\\/\\/(?:[^@\\/]*@)?(\\[[^\\]]*\\]|[^\\/:?]*)/.exec(u||'');"
             + "return m?m[1]:''}\n"
             + "function num(v){return Math.round(v*10)/10}\n"
             // One cell: slot, camera and transport on top; size, fps and losses below
@@ -468,12 +468,13 @@ final class DebugServer {
             + "$('clock').textContent=(s.time||'')+(s.uptime_s!=null?' \u00b7 up '+up(s.uptime_s):'')"
             + "+(s.ui_thread&&s.ui_thread!=='ok'?' \u00b7 UI '+s.ui_thread:'');"
             + "var list,side=1;"
-            + "if(s.cells){side=s.cells.length>4?3:2;list=s.cells.slice();"
+            + "if(s.mode==='paused'||s.mode==='udp'||!(s.cells||s.single))"
+            + "list=[s.mode==='udp'?{slot:'U',text:'UDP RTP port '+(s.udp?s.udp.port:'')}"
+            + ":{text:s.mode==='paused'?'App in background':(s.mode||'')}];"
+            + "else if(s.cells){side=s.cells.length>4?3:2;list=s.cells.slice();"
             + "while(list.length<side*side)list.push({slot:'U',text:'no receiver yet'})}"
             + "else if(s.single){var c=s.single;c.slot=s.active_slot;c.text=c.video"
             + "?(c.size||'')+' '+c.codec:c.status;list=[c]}"
-            + "else list=[s.mode==='udp'?{slot:'U',text:'UDP RTP port '+(s.udp?s.udp.port:'')}"
-            + ":{text:s.mode==='paused'?'App in background':(s.mode||'')}];"
             + "$('cells').style.gridTemplateColumns='repeat('+side+',1fr)';"
             + "$('cells').style.gridTemplateRows='repeat('+side+',1fr)';"
             + "$('cells').innerHTML=list.map(cell).join('')}\n"
