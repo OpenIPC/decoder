@@ -220,6 +220,18 @@ final class JpegAssembler {
         }
     }
 
+    /** {width, height} from the SOF0 header of a JPEG, or null (#132). */
+    static int[] size(byte[] d, int length) {
+        for (int i = 2; i + 8 < length; i++) {
+            if ((d[i] & 0xFF) == 0xFF && (d[i + 1] & 0xFF) == 0xC0) {
+                int h = ((d[i + 5] & 0xFF) << 8) | (d[i + 6] & 0xFF);
+                int w = ((d[i + 7] & 0xFF) << 8) | (d[i + 8] & 0xFF);
+                return new int[] {w, h};
+            }
+        }
+        return null;
+    }
+
     /** Quantization tables for Q 1..99 (RFC 2435 Appendix A), luminance then chrominance. */
     static byte[] tables(int q) {
         q = Math.max(1, Math.min(99, q));

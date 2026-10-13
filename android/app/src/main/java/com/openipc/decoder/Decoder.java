@@ -198,9 +198,13 @@ public class Decoder extends Activity
                 audioCodec = audio.codec;
                 boolean jpeg = rtspClient.isJpeg();
                 if (jpeg) {
-                    // MJPEG is drawn by the app (#119): no MediaCodec may hold the surface
+                    // MJPEG has its own decoder or is drawn by the app (#119, #132): the
+                    // video decoder must not hold the surface
                     closeDecoder();
-                } else if (jpegDrawn) {
+                } else {
+                    jpegCodec.release();
+                }
+                if (!jpeg && jpegDrawn) {
                     // A surface drawn with lockCanvas() cannot take a decoder any more: no
                     // decoder until the UI thread has put a new one in place (Qodo on #131)
                     jpegDrawn = false;
@@ -1566,6 +1570,8 @@ public class Decoder extends Activity
     }
 
     private void replaceSurface(Surface next) {
+        // The MJPEG decoder renders into the old surface: let go of it first (#132)
+        jpegCodec.release();
         Surface prev = mVideoSurface;
         mVideoSurface = next;
         videoDecoder.setSurface(next);
@@ -1581,6 +1587,10 @@ public class Decoder extends Activity
     }
 
     // ====================== MJPEG (#119) ======================
+
+    /** Hardware MJPEG decoding (#132), unless it failed once in this run. */
+    private final JpegCodec jpegCodec = new JpegCodec();
+    private volatile boolean hwJpegFailed;
 
     /** Something was drawn into the video surface with lockCanvas(). */
     private volatile boolean jpegDrawn;
@@ -1600,6 +1610,23 @@ public class Decoder extends Activity
     private void drawJpeg(Frame frame) {
         Surface s = mVideoSurface;
         if (s == null || !s.isValid()) return;
+        // The hardware JPEG decoder first, where there is one (#132)
+        if (!hwJpegFailed && !jpegDrawn && JpegCodec.find() != null) {
+            int[] size = JpegAssembler.size(frame.data(), frame.length());
+            if (size != null) {
+                try {
+                    if (jpegCodec.decode(frame, s, size[0], size[1])) {
+                        jpegShown(size[0], size[1]);
+                    }
+                    return;
+                } catch (Exception e) {
+                    Log.w(TAG, "Hardware MJPEG decoder failed, decoding in software: "
+                            + e.getMessage());
+                    jpegCodec.release();
+                    hwJpegFailed = true;
+                }
+            }
+        }
         BitmapFactory.Options o = new BitmapFactory.Options();
         o.inMutable = true;
         Bitmap reuse = jpegBitmap;
@@ -1629,6 +1656,11 @@ public class Decoder extends Activity
             return;
         }
         jpegDrawn = true;
+        jpegShown(w, h);
+    }
+
+    /** A JPEG frame is on screen (hardware or software path). */
+    private void jpegShown(int w, int h) {
         jpegFramesOut++;
         boolean first = lastJpegFrameMs == 0;
         lastJpegFrameMs = SystemClock.elapsedRealtime();
@@ -1749,6 +1781,7 @@ public class Decoder extends Activity
 
     private void stopStreams() {
         lastJpegFrameMs = 0;
+        jpegCodec.release();
         mSurface.removeCallbacks(singleUdpCheck);
         // The single view's stream ends here: it is no longer "connected" for the debug page
         singleState = "disconnected";

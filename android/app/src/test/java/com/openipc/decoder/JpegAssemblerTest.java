@@ -170,4 +170,13 @@ public class JpegAssemblerTest {
         assertEquals(3 + 128, ((h[dqt + 2] & 0xFF) << 8) | (h[dqt + 3] & 0xFF));
         assertEquals(0x10, h[dqt + 4] & 0xFF);
     }
+
+    @Test
+    public void sizeFromTheFrameHeader() throws Exception {
+        byte[] jpeg = resource("jpeg_q50_64x32.jpg");
+        int[] size = JpegAssembler.size(jpeg, jpeg.length);
+        assertNotNull(size);
+        assertEquals(64, size[0]);
+        assertEquals(32, size[1]);
+    }
 }
