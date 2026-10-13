@@ -150,6 +150,33 @@ public class JpegAssemblerTest {
     }
 
     @Test
+    public void aNewStreamDoesNotReuseTheTablesOfTheOldOne() throws Exception {
+        List<byte[]> first = packets("jpeg_q255_64x32.rtp");
+        for (byte[] p : first) p[12 + 5] = (byte) 200;
+        JpegAssembler a = new JpegAssembler(new FramePool(4));
+        List<byte[]> frames = new ArrayList<>();
+        for (byte[] p : first) {
+            a.assemble(p, 0, p.length, f -> frames.add(new byte[f.length()]));
+        }
+        assertEquals(1, frames.size());
+        // A new stream (Qodo on #139): the same frame with "length 0" tables has none to use
+        a.reset();
+        for (int i = 0; i < first.size(); i++) {
+            byte[] p = first.get(i).clone();
+            if (i == 0) {
+                byte[] shorter = new byte[p.length - 128];
+                System.arraycopy(p, 0, shorter, 0, 12 + 8 + 4);
+                System.arraycopy(p, 12 + 8 + 4 + 128, shorter, 12 + 8 + 4, p.length - 12 - 8 - 4 - 128);
+                shorter[12 + 8 + 2] = 0;
+                shorter[12 + 8 + 3] = 0;
+                p = shorter;
+            }
+            a.assemble(p, 0, p.length, f -> frames.add(new byte[f.length()]));
+        }
+        assertEquals(1, frames.size());
+    }
+
+    @Test
     public void zeroSizeMeans2048() throws Exception {
         List<byte[]> p = packets("jpeg_q50_64x32.rtp");
         for (byte[] b : p) b[12 + 6] = 0;

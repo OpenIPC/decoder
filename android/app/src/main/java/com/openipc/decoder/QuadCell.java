@@ -612,6 +612,9 @@ class QuadCell implements RtspSession.Callback {
 
     /** One JPEG frame onto the cell's surface; on key frames only, one per second (#132). */
     private void decodeJpeg(Frame frame) {
+        // A video decoder made from a frame taken just before the switch to MJPEG would hold
+        // the surface: this thread closes it before drawing (Qodo on #139)
+        if (decoder.hasDecoder()) decoder.closeDecoder();
         long now = System.nanoTime() / 1_000_000;
         if (keyFramesOnly && lastJpegDecodeMs > 0 && now - lastJpegDecodeMs < JPEG_REDUCED_MS) {
             return;
