@@ -504,8 +504,10 @@ final class DebugServer {
             + "$('ver').textContent='v'+(s.version||'?')+' \u00b7 '+(s.git||'');\n"
             + "$('clock').textContent=s.time||'';$('up').textContent=s.uptime_s!=null?'up '+"
             + "up(s.uptime_s):'';\n"
-            + "var ui=s.ui_thread&&s.ui_thread!=='ok';$('err').textContent=ui?'UI '+"
-            + "s.ui_thread:'';$('dot').className='dot '+(ui?'warn':'ok');\n"
+            // Orange: the UI thread is stuck, or there is no activity behind the server at all
+            + "var ui=s.ui_thread&&s.ui_thread!=='ok',none=!s.ui_thread;\n"
+            + "$('err').textContent=ui?'UI '+s.ui_thread:none?(s.mode||'no data'):'';\n"
+            + "$('dot').className='dot '+(ui||none?'warn':'ok');\n"
             + "var list,side=1;\n"
             + "if(s.mode==='paused'||s.mode==='udp'||!(s.cells||s.single))list=[s.mode==='udp'?{s"
             + "lot:'U',text:'UDP RTP port '+(s.udp?s.udp.port:'')}:{text:s.mode==='paused'?'App"

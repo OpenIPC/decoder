@@ -64,6 +64,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class Decoder extends Activity
@@ -953,23 +954,43 @@ public class Decoder extends Activity
     /** Called on a server thread (#98): the cells are chosen on the UI thread, copied here. */
     private byte[] debugSnapshotJpeg(boolean labels) {
         AtomicReference<List<Snapshots.Cell>> ref = new AtomicReference<>();
+        AtomicBoolean abandoned = new AtomicBoolean();
         int[] side = new int[2];
         CountDownLatch done = new CountDownLatch(1);
-        new Handler(Looper.getMainLooper()).post(() -> {
+        Handler main = new Handler(Looper.getMainLooper());
+        Runnable pick = () -> {
             try {
+                // The request may have given up already: then no capture at all (#103)
+                if (abandoned.get()) return;
                 ref.set(snapshotCells(side));
+                if (abandoned.get()) recycleFrames(ref.getAndSet(null));
             } finally {
                 done.countDown();
             }
-        });
+        };
+        main.post(pick);
+        boolean inTime = false;
         try {
-            if (!done.await(DEBUG_UI_TIMEOUT_MS, TimeUnit.MILLISECONDS)) return null;
+            inTime = done.await(DEBUG_UI_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        }
+        if (!inTime) {
+            abandoned.set(true);
+            main.removeCallbacks(pick);
+            recycleFrames(ref.getAndSet(null));
             return null;
         }
         List<Snapshots.Cell> cells = ref.get();
         return cells != null ? Snapshots.render(cells, side[0], side[1], labels) : null;
+    }
+
+    /** Frames taken for a snapshot that will not be drawn. */
+    private static void recycleFrames(List<Snapshots.Cell> cells) {
+        if (cells == null) return;
+        for (Snapshots.Cell c : cells) {
+            if (c.frame != null) c.frame.recycle();
+        }
     }
 
     /**

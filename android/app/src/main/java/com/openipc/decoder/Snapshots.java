@@ -16,6 +16,8 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.SystemClock;
+import android.text.TextPaint;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.PixelCopy;
 import android.view.SurfaceView;
@@ -32,8 +34,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Made only when the debug page asks for it. Cells are copied from their SurfaceViews at
  * the size they have in the picture with PixelCopy (the GPU scales them, no extra decoder,
- * nothing from the camera) and laid out like the screen. A cell that is not playing right now is drawn black
- * with its status, never with a stale last frame: the point is to see whether video is there.
+ * nothing from the camera) and laid out like the screen. A cell that is not playing right now
+ * is drawn black with its status, never with a stale last frame: the point is to see whether
+ * video is there.
  */
 final class Snapshots {
     private static final String TAG = "OpenIPCDecoder";
@@ -86,24 +89,30 @@ final class Snapshots {
      */
     static byte[] render(List<Cell> cells, int side, int width, boolean labels) {
         long t0 = SystemClock.elapsedRealtime();
-        int cw = width / side;
-        int ch = height(width) / side;
+        int height = height(width);
         int n = Math.min(cells.size(), side * side);
+        // Cell edges at i * size / side: the cells differ by at most a pixel and fill the picture
+        Rect[] rects = new Rect[n];
+        for (int i = 0; i < n; i++) {
+            int col = i % side, row = i / side;
+            rects[i] = new Rect(col * width / side, row * height / side,
+                    (col + 1) * width / side, (row + 1) * height / side);
+        }
         // All copies are requested at once and run side by side, then awaited together
         Copy[] copies = new Copy[n];
         for (int i = 0; i < n; i++) {
             Cell c = cells.get(i);
             if (c != null && c.frame == null && c.live && c.view != null) {
-                copies[i] = Copy.start(c.view, cw, ch);
+                copies[i] = Copy.start(c.view, rects[i].width(), rects[i].height());
             }
         }
         long deadline = SystemClock.elapsedRealtime() + COPY_TIMEOUT_MS;
-        Bitmap out = Bitmap.createBitmap(cw * side, ch * side, Bitmap.Config.ARGB_8888);
+        Bitmap out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(out);
         canvas.drawColor(Color.BLACK);
-        Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
+        TextPaint text = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         // As large compared with the cell as the 14 px on the former 256×144 cells
-        float textSize = Math.max(14, ch / 10f);
+        float textSize = Math.max(14, height / side / 10f);
         text.setTextSize(textSize);
         int bandH = Math.round(textSize + 6);
         Paint band = new Paint();
@@ -115,13 +124,13 @@ final class Snapshots {
         for (int i = 0; i < n; i++) {
             Cell c = cells.get(i);
             if (c == null) continue;
-            int x = (i % side) * cw;
-            int y = (i / side) * ch;
+            Rect r = rects[i];
+            int x = r.left, y = r.top, cw = r.width(), ch = r.height();
             Bitmap frame = copies[i] != null ? copies[i].await(deadline) : c.frame;
             if (copies[i] != null && frame != null) copied++;
             boolean shown = c.live && frame != null;
             if (shown) {
-                canvas.drawBitmap(frame, null, new Rect(x, y, x + cw, y + ch), frames);
+                canvas.drawBitmap(frame, null, r, frames);
             }
             if (frame != null) frame.recycle();
             if (labels) {
@@ -148,9 +157,11 @@ final class Snapshots {
     }
 
     private static void drawLabel(Canvas canvas, Cell c, boolean shown, int x, int y, int cw,
-                                  int ch, int bandH, Paint text, Paint band) {
-        String label = (c.slot > 0 ? c.slot + " \u00b7 " : "") + (c.label != null ? c.label : "");
-        if (c.live && !shown) label += " \u00b7 no picture";
+                                  int ch, int bandH, TextPaint text, Paint band) {
+        String full = (c.slot > 0 ? c.slot + " \u00b7 " : "") + (c.label != null ? c.label : "");
+        if (c.live && !shown) full += " \u00b7 no picture";
+        // Cut to the cell with an ellipsis rather than run into the next one
+        String label = TextUtils.ellipsize(full, text, cw - 8, TextUtils.TruncateAt.END).toString();
         if (shown) {
             canvas.drawRect(x, y + ch - bandH, x + cw, y + ch, band);
             text.setColor(Color.WHITE);
@@ -159,7 +170,8 @@ final class Snapshots {
             // No video: slot number and status in the middle, in red
             text.setColor(0xFFFF6060);
             float w = text.measureText(label);
-            canvas.drawText(label, x + Math.max(4, (cw - w) / 2), y + (ch + text.getTextSize()) / 2f, text);
+            canvas.drawText(label, x + Math.max(4, (cw - w) / 2),
+                    y + (ch + text.getTextSize()) / 2f, text);
         }
     }
 
