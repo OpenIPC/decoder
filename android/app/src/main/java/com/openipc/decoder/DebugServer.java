@@ -42,9 +42,10 @@ final class DebugServer {
     private static final int SOCKET_TIMEOUT_MS = 3000;
     /**
      * Whole request, writing included: a client that stops reading cannot hold a worker.
-     * Long enough for a snapshot on a box that is busy decoding (#98).
+     * Long enough for a snapshot on a box busy decoding: at background priority it took up
+     * to ~10 s right after start with 6 streams on the AG-216 (#98).
      */
-    private static final long REQUEST_DEADLINE_MS = 10_000;
+    private static final long REQUEST_DEADLINE_MS = 20_000;
     private static final int MAX_HEADER_BYTES = 8192;
     private static final long REBIND_DELAY_MS = 10_000;
     /** A snapshot this young is served again: several viewers cost one capture (#98). */
