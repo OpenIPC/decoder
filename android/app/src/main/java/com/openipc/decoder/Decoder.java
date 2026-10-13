@@ -103,7 +103,7 @@ public class Decoder extends Activity
     private final TextView[] quadStats = new TextView[CELL_COUNT];
     /** Debug text in every cell (menu D), or in none (#92). */
     private boolean showStats;
-    /** Slide mode (#108): multi-view, every cell on key frames only; saved as "slides". */
+    /** S (#108, #153): key frames only, in every view; saved as "slides". */
     /** Read by the single view's decode thread too (Qodo on #155). */
     private volatile boolean slides;
     /** With the debug text on: where the debug page is (#96). */
