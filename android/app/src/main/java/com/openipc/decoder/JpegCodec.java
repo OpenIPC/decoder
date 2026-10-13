@@ -40,7 +40,7 @@ final class JpegCodec {
         if (f != null) return f.length == 0 ? null : f;
         String[] result = new String[0];
         try {
-            for (MediaCodecInfo ci : new MediaCodecList(MediaCodecList.REGULAR_CODECS)
+            for (MediaCodecInfo ci : new MediaCodecList(MediaCodecList.ALL_CODECS)
                     .getCodecInfos()) {
                 if (ci.isEncoder()) continue;
                 for (String type : ci.getSupportedTypes()) {
@@ -55,7 +55,24 @@ final class JpegCodec {
             Log.w(TAG, "Codec list: " + e.getMessage());
         }
         found = result;
-        if (result.length > 0) Log.i(TAG, "MJPEG decoder: " + result[0] + " (" + result[1] + ")");
+        if (result.length > 0) {
+            Log.i(TAG, "MJPEG decoder: " + result[0] + " (" + result[1] + ")");
+        } else {
+            // Which video decoders the codec list offers instead (the vendor list may name a
+            // JPEG decoder that the platform does not expose)
+            StringBuilder all = new StringBuilder();
+            try {
+                for (MediaCodecInfo ci : new MediaCodecList(MediaCodecList.ALL_CODECS)
+                        .getCodecInfos()) {
+                    if (ci.isEncoder()) continue;
+                    for (String type : ci.getSupportedTypes()) {
+                        if (type.startsWith("video/")) all.append(' ').append(type);
+                    }
+                }
+            } catch (RuntimeException ignored) {
+            }
+            Log.i(TAG, "No MJPEG decoder; video decoders:" + all);
+        }
         return result.length == 0 ? null : result;
     }
 
