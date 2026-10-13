@@ -55,7 +55,9 @@ Common to both:
 | Android | 10 (API 29), `armeabi-v7a` (32-bit userspace on a 64-bit CPU) |
 | RAM / storage | 2 GB / `/data` 11 GB |
 | Screen | 1280×720 (16:9), 60 Hz, 160 dpi, `television` UI mode, no touch |
-| HW video decoder | `OMX.allwinner.video.decoder.avc`; H.265 is decoded as `video/hevc` |
+| HW video decoder | `OMX.allwinner.video.decoder.avc` (16 instances), `…hevc` (**4** instances); beyond that, key-frame cells use `c2.android.*` software decoders (#138) |
+| JPEG decoder | `OMX.allwinner.video.decoder.mjpeg` is declared in `/vendor/etc/media_codecs.xml` but not listed by Android, and creating it fails (`0xfffffffe`): MJPEG always runs on the software path here |
+| Decoder hang | Once (2026-10-13, after a long test session) every cell received but nothing decoded until `adb reboot`; the app now says so (#145, #147). In tests: all cells `0.0 fps` with `in_fps` > 0 → reboot the box first |
 | Quirks | The vendor firmware sometimes shows its own "Update Alert!!" dialog after screen off/on; unrelated to the app |
 
 Check the firmware of a box: `$ADB shell getprop ro.build.description`. If it changes, update the table above.
@@ -111,6 +113,7 @@ Only for filling grid cells (Quad 2×2, 3×3) and screenshots; not used in strea
 ### URLs
 
 - OpenIPC cameras: `rtsp://<user>:<password>@<ip>/stream=0` (main), `/stream=1` (substream).
+- MJPEG (Majestic): RTSP `rtsp://<user>:<password>@<ip>/stream=2` (RTP/JPEG, `.133`: 1280×720, 5 fps), HTTP `http://<user>:<password>@<ip>/mjpeg` (`multipart/x-mixed-replace`, chunked, Basic auth).
 - XM: `rtsp://<ip>:554/user=<user>_password=<password>_channel=1_stream=0.sdp?real_stream`. The password is in the path, so it also appears in the `Content-Base` header; the app redacts it in logs (#55).
 
 ### 3×3 layout (README screenshots, 8-slot tests)

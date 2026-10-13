@@ -28,9 +28,9 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 
 ## Features
 
-- **Video:** RTSP playback, hardware H.264/H.265 decoding via MediaCodec, MJPEG over RTSP (RTP/JPEG, single view), automatic decoder recovery, picture fitted to any screen shape
+- **Video:** RTSP playback, hardware H.264/H.265 decoding via MediaCodec, MJPEG over RTSP (RTP/JPEG) and over HTTP (`multipart/x-mixed-replace`) in the single view and in multi-view, automatic decoder recovery, a lossy UDP stream shown with concealed damage instead of a black picture, a warning when the device's video decoder stops responding, picture fitted to any screen shape
 - **Audio:** AAC (RFC 3640 `mpeg4-generic`, ADTS, MP4A-LATM), Opus, G.711 μ-law/A-law, L16 PCM (mono/stereo); in multi-view, the sound of the selected cell
-- **Display:** single camera, or multi-view (Quad) with up to 8 cameras plus the U cell (a camera that pushes RTP) in a 2×2 or 3×3 grid; adaptive decoding (full rate or key frames per cell, learnt per device); slides (S): every camera on key frames only
+- **Display:** single camera, or multi-view (Quad) with up to 8 cameras plus the U cell (a camera that pushes RTP) in a 2×2 or 3×3 grid; adaptive decoding (full rate or key frames per cell, learnt per device); S: key frames only, in multi-view and in the single view
 - **Controls:** pinch-to-zoom, pan, double-tap to reset, Android TV remote (Leanback launcher)
 - **Network:** RTSP over TCP or UDP (Auto, the default, falls back to TCP when UDP is refused, brings no video or keeps losing key frames), the transport in use shown on connect, RTSP multicast, plain RTP pushed over UDP by the camera (unicast or multicast), Basic and Digest authentication, RTSP keepalive, automatic reconnection with exponential back-off, connection-quality indicator
 - **WebUI:** built-in browser for the camera's web interface
@@ -61,12 +61,14 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 |--------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **1**–**8**  | Switch to a camera slot. The active slot's number shows the connection quality: green under 100 ms of jitter, yellow 100–300 ms, red above 300 ms. A grey number is an empty slot. |
 | **U**        | The U cell full-screen: the camera that pushes RTP over UDP to port 5600                                                                                                           |
-| **D**        | Text in the corner of every multi-view cell (resolution, codec, decoded/received fps, key frames, status), or in none                                                        |
-| **Q**        | Turn multi-view (Quad) on or off                                                                                                                                                   |
-| **S**        | Slides: multi-view with every camera on key frames only (the picture updates once per key frame interval), the lowest decoder load; S or Q goes back to the adaptive grid          |
+| **D**        | Text in the corner of every multi-view cell (resolution, codec, decoded/received fps, key frames, status), or in none                                                              |
+| **Q**        | The view: multi-view (Quad) or the single camera. Q does not change the playback mode (S)                                                                                         |
+| **S**        | The playback mode: every frame, or key frames only (the picture updates once per key frame interval, MJPEG once a second), the lowest decoder load. Works in multi-view and in the single view and never changes the view |
 | **Settings** | Edit the URL and the transport of the active slot (single-camera mode only)                                                                                                        |
 | **WebUI**    | Open the camera's web interface; credentials come from the RTSP URL (single-camera mode only)                                                                                      |
 | **Exit**     | Close the app. The small text next to it is the app version and build hash.                                                                                                        |
+
+Items that are on — D, Q, S, U and the active slot — have an orange fill; the item the remote is on has a light blue frame.
 
 ### Gestures and keys
 
@@ -80,7 +82,7 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 
 ### Opening a camera from another app
 
-The app accepts plain-text shares (`ACTION_SEND`, `text/plain`). Sharing an `rtsp://` or `udp://` URL from another app, for example OpenIPC Network, puts it into the active slot. An optional `transport` extra (`tcp`, `udp`, `auto`, `multicast`) sets the slot's transport:
+The app accepts plain-text shares (`ACTION_SEND`, `text/plain`). Sharing an `rtsp://`, `udp://` or `http://` URL from another app, for example OpenIPC Network, puts it into the active slot. An optional `transport` extra (`tcp`, `udp`, `auto`, `multicast`) sets the slot's transport:
 
 ```sh
 adb shell am start -a android.intent.action.SEND -t text/plain \
@@ -90,7 +92,7 @@ adb shell am start -a android.intent.action.SEND -t text/plain \
 
 ### Multi-view (Quad)
 
-Shows the configured slots in a 2×2 grid, or in a 3×3 grid once any of slots 5–8 is used. The ninth cell of the 3×3 grid, the **U** cell, plays a camera that pushes RTP over UDP to port 5600 of the device (`udp://@:5600`, see [udp:// slots](#udp-slots-majestic-outgoing)); until a stream arrives it shows every address of the device to send to. **U** in the menu opens it full-screen. Other ports or multicast groups go into a slot as a `udp://` URL. Each cell has its own connection and decoder, and the device's video decoder has a fixed budget: the AG-216 test box, for example, decodes about two 1080p30 streams at full rate. So the grid adapts: cells start on key frames only, then decode every frame in priority order (the U cell while it receives a stream, the cell whose sound plays, then slot order) while the decoder keeps up. Cells beyond that stay on key frames, with the picture updated once per key frame interval (`key frames` in the corner text, menu **D**). The limit is learnt on each device by measurement. Substreams of the cameras, where available, let more cells play at full rate. A cell over the decoder's instance limit shows `Decoder limit: N × H.265`. Some cameras accept only one RTSP client at a time. Long-press a cell to play its audio (long-press it again to mute); the selected cell shows an AUDIO badge and is remembered. Tap any cell to open the menu.
+Shows the configured slots in a 2×2 grid, or in a 3×3 grid once any of slots 5–8 is used. The ninth cell of the 3×3 grid, the **U** cell, plays a camera that pushes RTP over UDP to port 5600 of the device (`udp://@:5600`, see [udp:// slots](#udp-slots-majestic-outgoing)); until a stream arrives it shows every address of the device to send to. **U** in the menu opens it full-screen. Other ports or multicast groups go into a slot as a `udp://` URL. Each cell has its own connection and decoder, and the device's video decoder has a fixed budget: the AG-216 test box, for example, decodes about two 1080p30 streams at full rate. So the grid adapts: cells start on key frames only, then decode every frame in priority order (the U cell while it receives a stream, the cell whose sound plays, then slot order) while the decoder keeps up. Cells beyond that stay on key frames, with the picture updated once per key frame interval (`key frames` in the corner text, menu **D**). The limit is learnt on each device by measurement. Substreams of the cameras, where available, let more cells play at full rate. A key-frame cell over the hardware decoder's instance limit (the AG-216 has 4 × H.265) uses a software decoder instead (`· software` in the corner); only beyond that budget too does it show `Decoder limit: N × H.265`. When even key frames are too much, the lowest-priority cell is paused (`Paused: decoder overloaded`) and tried again after a quiet period; losses in the first seconds after the grid starts, when every decoder starts at once, do not count. A cell whose UDP stream loses a piece of every key frame shows the frames with the damage concealed (`· damaged`) rather than a black picture. Some cameras accept only one RTSP client at a time. Long-press a cell to play its audio (long-press it again to mute); the selected cell shows an AUDIO badge and is remembered. Tap any cell to open the menu.
 
 ## Transports
 
@@ -132,11 +134,15 @@ outgoing:
 
 `/api/v1/outgoing.json` on the camera shows whether the destination is live. Majestic can also send to a multicast group (`udp://239.1.2.3:5600`), so several devices can watch one camera. On Wi‑Fi the app holds a multicast lock while it is in a group.
 
+### HTTP MJPEG slots
+
+A slot also takes an HTTP MJPEG URL, such as Majestic's `http://user:password@<camera>/mjpeg`: a `multipart/x-mixed-replace` stream with one JPEG per part, chunked or not. Basic credentials are sent with the request, Digest after the camera asks for it; the stream reconnects like RTSP. It plays in the single view and in multi-view; the transport shows as `HTTP`. There is no audio on this path.
+
 ## Debug page (port 8085)
 
 While the app runs it serves its debug information over HTTP on port **8085**, for a browser or `curl` on the same network:
 
-- `http://<device>:8085/` — the snapshot fills the page, with each cell's camera, size, fps and losses (in red) drawn over it; the header shows the version, the device time and uptime;
+- `http://<device>:8085/` — the snapshot fills the page, with each cell's camera, size, fps and losses (in red) drawn over it; the header shows the version, the device time and uptime. **Info On / Off** in the header hides the text over the cells (and the list below them on a narrow screen), leaving only the picture; the choice is remembered in the browser. A red note in the header says when the device's video decoder stopped responding (`decoder_stuck`);
 - `http://<device>:8085/snapshot.jpg` (`?labels=0`: frames only) — a picture laid out like the screen, at the screen's resolution (at most 1920×1080), made from the frames the app shows right now; a cell without video is black with its status. Taken only when asked for; the page refreshes it every 3, 5 or 10 s while the tab is visible;
 - `http://<device>:8085/stats.json` — the same as JSON, for scripts;
 - `http://<device>:8085/log` — the last 500 lines of the app's log.
@@ -156,7 +162,8 @@ Only clients on the local network are answered (loopback, 10/8, 172.16/12, 192.1
 >
 > - **RTSP multicast needs Android 8.0+** and a server that offers it; OpenIPC cameras do not — [#69](https://github.com/OpenIPC/decoder/issues/69)
 > - **G.726 audio and MP4A-LATM with in-band configuration (`cpresent=1`) are not supported.** OpenIPC Majestic does not use them, and cameras that offer G.726 can usually send G.711 or AAC instead — [#14](https://github.com/OpenIPC/decoder/issues/14)
-> - **MJPEG plays in the single view only and is decoded in software**; hardware decoding and multi-view — [#132](https://github.com/OpenIPC/decoder/issues/132)
+> - **MJPEG is decoded in software on devices without a usable JPEG decoder** (the AG-216 lists one but cannot create it); hardware decoding is used where the device offers `video/jpeg` — [#132](https://github.com/OpenIPC/decoder/issues/132)
+> - **The video decoder of the AG-216 can stop responding until the device is restarted**: frames arrive, none is decoded; the app says so on the screen and on the debug page, the cause is not known yet — [#145](https://github.com/OpenIPC/decoder/issues/145)
 > - **Switching between multi-view and the single view can freeze the picture for seconds** on some TV boxes (seen on the AG-216) — [#76](https://github.com/OpenIPC/decoder/issues/76)
 > - **Credentials are sent in clear text** over plain RTSP/HTTP (Basic auth unless the camera asks for Digest); RTSPS is not supported and not planned — [#16](https://github.com/OpenIPC/decoder/issues/16)
 >
@@ -204,8 +211,10 @@ Debug and release builds are signed with different keys. To switch from one to t
 | `RtspAuth`, `Sdp`                        | Basic and Digest authentication; parsing of the camera's session description                                      |
 | `Transport`, `UdpReceiver`, `RtpReorder` | Transport negotiation; UDP and multicast receive with a sender filter; packet reordering                          |
 | `RtpListener`                            | `udp://` slots: plain RTP pushed by the camera                                                                    |
+| `HttpMjpeg`                              | `http://` slots: MJPEG over HTTP (`multipart/x-mixed-replace`, chunked or not)                                    |
 | `NalAssembler`                           | Rebuilds H.264/H.265 NAL units from RTP packets, drops units damaged by packet loss                               |
 | `JpegAssembler`                          | MJPEG: rebuilds whole JPEG frames from RTP/JPEG (RFC 2435)                                                        |
+| `JpegCodec`, `JpegRenderer`              | MJPEG on screen: the device's JPEG decoder where there is one, otherwise BitmapFactory                            |
 | `DecodePlanner`                          | Multi-view: which cells decode every frame and which only key frames, within the learnt decoder capacity          |
 | `MediaCodecManager`, `DecoderRetry`      | Hardware video decoder lifecycle and recovery after decoder errors                                                |
 | `AudioManager`, `AudioConfig`            | Audio pipeline: G.711/L16 conversion, AAC/Opus decoding, AudioTrack playback                                      |
