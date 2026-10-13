@@ -398,7 +398,8 @@ final class DebugServer {
      * and the snapshot filling the rest with the text of each cell drawn over it; on a narrow
      * screen the snapshot takes the full width and the cells are listed below it (#103). It
      * fetches /stats.json every 1.5 s and the snapshot (without labels) every 3, 5 or 10 s,
-     * both only while the tab is visible (#98).
+     * both only while the tab is visible (#98). The Info switch hides the text over the cells
+     * and the list, leaving the header and the snapshot (#141).
      */
     private static final String PAGE = "<!doctype html>\n"
             + "<html><head><meta charset=\"utf-8\"><meta name=\"viewport\""
@@ -416,8 +417,9 @@ final class DebugServer {
             + ".meta{display:flex;flex-wrap:wrap;gap:4px 14px;color:#999;font-size:13px;"
             + "font-variant-numeric:tabular-nums}"
             + ".meta span{white-space:nowrap}#err{color:#ff5a5a}"
-            + "nav{display:flex;align-items:center;gap:6px;margin-left:auto;white-space:nowrap;"
-            + "font-size:13px;color:#999}"
+            // The controls wrap as groups on a narrow screen, none goes off it (Qodo on #142)
+            + "nav{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-left:auto;"
+            + "font-size:13px;color:#999}nav>*{white-space:nowrap}"
             + ".btn,.seg button{font:inherit;color:#cde;background:#222;border:1px solid #363636;"
             + "border-radius:6px;padding:3px 10px;text-decoration:none;cursor:pointer}"
             + ".btn:hover,.seg button:hover{background:#2c2c2c}"
@@ -449,6 +451,9 @@ final class DebugServer {
             + "#list .h{color:#bbb}"
             + "body.small #list{display:table}"
             + "body.small .cell .top .dim,body.small .cell .bot,body.small .off span{display:none}"
+            // Info off (#141): the snapshot's cells alone, no text over them, no list below
+            + "body.clean .cell>*,body.clean #list{display:none!important}"
+            + "body.clean .cell{border-color:transparent}"
             + "</style></head><body>"
             + "<header>"
             + "<div class=\"brand\"><span id=\"dot\" class=\"dot\"></span><b>OpenIPC Decoder</b>"
@@ -457,6 +462,8 @@ final class DebugServer {
             + " id=\"up\"></span><span id=\"err\"></span></div>"
             + "<nav><a class=\"btn\" href=\"/stats.json\">JSON</a><a class=\"btn\" href=\"/log\">"
             + "Log</a>"
+            + "<span>Info<span class=\"seg\" id=\"info\"><button value=\"1\">On</button>"
+            + "<button value=\"0\">Off</button></span></span>"
             + "<span>Snapshot<span class=\"seg\" id=\"every\"><button value=\"3\">3 s</button>"
             + "<button value=\"5\">5 s</button><button value=\"10\">10 s</button></span></span>"
             + "</nav>"
@@ -530,6 +537,12 @@ final class DebugServer {
             + "try{localStorage.setItem('every',every)}catch(x){}};mark();\n"
             + "var img=$('snap');img.onload=img.onerror=function(){later(snap,every*1000)};\n"
             + "function snap(){img.src='/snapshot.jpg?labels=0&t='+Date.now()}\n"
+            // Info on or off (#141), remembered like the interval
+            + "var shown=1,iseg=$('info');try{shown=localStorage.getItem('info')==='0'?0:1}catch(x){}\n"
+            + "function imark(){[].forEach.call(iseg.children,function(b){b.className=+b.value===sh"
+            + "own?'on':''});document.body.classList.toggle('clean',!shown)}\n"
+            + "iseg.onclick=function(e){if(!e.target.value)return;shown=+e.target.value;imark();"
+            + "try{localStorage.setItem('info',shown)}catch(x){}};imark();\n"
             + "later(tick,0);later(snap,0);\n"
             + "</script></body></html>\n";
 }
