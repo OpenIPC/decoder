@@ -44,7 +44,8 @@ class NalAssembler {
     private int dropped;
     /** Of those, dropped because a packet of them was lost (not for size) (#113). */
     private int lostDropped;
-    private int gaps;
+    /** Written by the receive thread, read by the UI thread (Qodo on #147). */
+    private volatile int gaps;
     /**
      * Pass a NAL unit with a lost piece on cut short at the gap instead of dropping it (#133):
      * for a stream that loses a piece of every key frame, where dropping them leaves nothing to

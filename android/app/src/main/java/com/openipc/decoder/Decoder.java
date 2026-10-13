@@ -1029,17 +1029,27 @@ public class Decoder extends Activity
 
     // ====================== The device's decoder stands still (#145) ======================
 
-    /** Seconds with frames arriving in several cells and none decoded: the device is stuck. */
-    static final int STUCK_SECONDS = 20;
-    private int stuckSeconds;
+    /** Time with frames arriving in several cells and none decoded: the device is stuck. */
+    static final long STUCK_MS = 20_000;
+    /** Since when the condition holds, or -1 (monotonic ms; Qodo on #147: time, not ticks). */
+    private long stuckSinceMs = -1;
     private TextView stuckBanner;
 
     /**
-     * One second of the detector: the seconds in a row in which at least two cells received
-     * whole frames and no cell at all decoded one (#145).
+     * One observation of the detector: since when at least two cells have received whole
+     * frames and no cell at all decoded one (#145), or -1 when that does not hold now.
      */
-    static int stuckStep(int seconds, int receiving, boolean anyOutput) {
-        return receiving >= 2 && !anyOutput ? seconds + 1 : 0;
+    static long stuckSince(long sinceMs, long nowMs, int receiving, boolean anyOutput) {
+        if (receiving < 2 || anyOutput) return -1;
+        return sinceMs >= 0 ? sinceMs : nowMs;
+    }
+
+    static boolean isStuck(long sinceMs, long nowMs) {
+        return sinceMs >= 0 && nowMs - sinceMs >= STUCK_MS;
+    }
+
+    private boolean decoderStuck() {
+        return isStuck(stuckSinceMs, System.nanoTime() / 1_000_000);
     }
 
     /**
@@ -1055,13 +1065,14 @@ public class Decoder extends Activity
             if (c.outFps() > 0) anyOutput = true;
             if (c.isReceiving()) receiving++;
         }
-        stuckSeconds = stuckStep(stuckSeconds, receiving, anyOutput);
-        showDecoderStuck(stuckSeconds >= STUCK_SECONDS);
+        long now = System.nanoTime() / 1_000_000;
+        stuckSinceMs = stuckSince(stuckSinceMs, now, receiving, anyOutput);
+        showDecoderStuck(isStuck(stuckSinceMs, now));
     }
 
     /** Leaving or rebuilding the grid: a fresh count, no banner (Qodo on #147). */
     private void resetDecoderStuck() {
-        stuckSeconds = 0;
+        stuckSinceMs = -1;
         showDecoderStuck(false);
     }
 
@@ -1421,7 +1432,7 @@ public class Decoder extends Activity
             dec.put("failed_load", planner.failedLoad());
             m.put("decoder", dec);
             // Frames arrive in several cells, none decodes: restart the device (#145)
-            m.put("decoder_stuck", stuckSeconds >= STUCK_SECONDS);
+            m.put("decoder_stuck", decoderStuck());
         }
         if (udpViewShown) {
             Map<String, Object> udp = new LinkedHashMap<>();

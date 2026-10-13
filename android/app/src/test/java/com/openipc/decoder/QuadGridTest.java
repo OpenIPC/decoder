@@ -78,19 +78,21 @@ public class QuadGridTest {
     }
 
     @Test
-    public void decoderStuckIsReportedAfterTwentyQuietSeconds() {
-        int s = 0;
-        for (int i = 1; i < Decoder.STUCK_SECONDS; i++) {
-            s = Decoder.stuckStep(s, 9, false);
-            assertEquals(i, s);
+    public void decoderStuckIsReportedAfterTwentySecondsOfTime() {
+        long since = -1;
+        // Ticks a little late: the time counts, not the ticks (Qodo on #147)
+        long t = 1000;
+        for (; t < 1000 + Decoder.STUCK_MS; t += 1300) {
+            since = Decoder.stuckSince(since, t, 9, false);
+            assertEquals(1000, since);
+            assertFalse(Decoder.isStuck(since, t));
         }
-        assertTrue(s < Decoder.STUCK_SECONDS);
-        s = Decoder.stuckStep(s, 9, false);
-        assertTrue(s >= Decoder.STUCK_SECONDS);
-        // Any output, from any cell, starts the count again (Qodo on #147)
-        assertEquals(0, Decoder.stuckStep(s, 9, true));
+        since = Decoder.stuckSince(since, t, 9, false);
+        assertTrue(Decoder.isStuck(since, t));
+        // Any output, from any cell, ends it
+        assertEquals(-1, Decoder.stuckSince(since, t, 9, true));
         // One camera alone may just wait for a key frame
-        assertEquals(0, Decoder.stuckStep(5, 1, false));
-        assertEquals(0, Decoder.stuckStep(5, 0, false));
+        assertEquals(-1, Decoder.stuckSince(-1, t, 1, false));
+        assertFalse(Decoder.isStuck(-1, t));
     }
 }
