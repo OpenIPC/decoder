@@ -129,7 +129,7 @@ outgoing:
 While the app runs it serves its debug information over HTTP on port **8085**, for a browser or `curl` on the same network:
 
 - `http://<device>:8085/` — the snapshot fills the page, with each cell's camera, size, fps and losses (in red) drawn over it; the header shows the version, the device time and uptime;
-- `http://<device>:8085/snapshot.jpg` (`?labels=0`: frames only) — a small picture laid out like the screen, made from the frames the app shows right now; a cell without video is black with its status. Taken only when asked for; the page refreshes it every 3, 5 or 10 s while the tab is visible;
+- `http://<device>:8085/snapshot.jpg` (`?labels=0`: frames only) — a picture laid out like the screen, at the screen's resolution (at most 1920×1080), made from the frames the app shows right now; a cell without video is black with its status. Taken only when asked for; the page refreshes it every 3, 5 or 10 s while the tab is visible;
 - `http://<device>:8085/stats.json` — the same as JSON, for scripts;
 - `http://<device>:8085/log` — the last 500 lines of the app's log.
 
