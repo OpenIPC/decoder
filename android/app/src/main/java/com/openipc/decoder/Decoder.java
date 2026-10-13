@@ -102,6 +102,8 @@ public class Decoder extends Activity
     private final TextView[] quadStats = new TextView[CELL_COUNT];
     /** Debug text in every cell (menu D), or in none (#92). */
     private boolean showStats;
+    /** Slide mode (#108): multi-view, every cell on key frames only; saved as "slides". */
+    private boolean slides;
     /** With the debug text on: where the debug page is (#96). */
     private TextView debugUrls;
     private volatile int quadAudioGen;
@@ -311,11 +313,21 @@ public class Decoder extends Activity
     @Override
     public void onToggleQuad() {
         if (leaveUdpView()) {
+            setSlides(false);
             startQuad();
             return;
         }
+        if (quadEnabled && slides) {
+            // From slides back to the adaptive grid; Q again then leaves multi-view
+            setSlides(false);
+            return;
+        }
         boolean newState = !quadEnabled;
-        if (newState) startQuad(); else {
+        if (newState) {
+            // Q always opens the adaptive grid; slides only come with S (Qodo on #124)
+            if (slides) setSlides(false);
+            startQuad();
+        } else {
             stopQuad();
             boolean configured = mHost != null && !mHost.isEmpty() && !mHost.equals(DEFAULT_URL);
             if (configured) {
@@ -324,6 +336,41 @@ public class Decoder extends Activity
                 rtspClient.start();
             }
         }
+    }
+
+    /**
+     * S (#108): multi-view with every cell on key frames only, the lowest decoder load. From
+     * the single or U view it starts multi-view in this mode; in multi-view it toggles.
+     */
+    @Override
+    public void onToggleSlides() {
+        if (leaveUdpView()) {
+            setSlides(true);
+            startQuad();
+            return;
+        }
+        if (!quadEnabled) {
+            setSlides(true);
+            startQuad();
+            return;
+        }
+        setSlides(!slides);
+    }
+
+    private void setSlides(boolean on) {
+        boolean changed = slides != on;
+        slides = on;
+        menuManager.setSlidesShown(on);
+        getSharedPreferences("settings", MODE_PRIVATE).edit().putBoolean("slides", on).apply();
+        if (!changed) return;
+        QuadCell[] cells = quadCells;
+        if (on && cells != null) {
+            for (QuadCell c : cells) if (c != null) c.setKeyFramesOnly(true);
+        }
+        // Back to adaptive: plan from scratch, cells are promoted again where they fit
+        if (!on && quadEnabled) decodePlanner = newPlanner();
+        Toast.makeText(this, on ? "Slides: key frames only" : "Multi-view",
+                Toast.LENGTH_SHORT).show();
     }
 
     @Override
@@ -459,6 +506,8 @@ public class Decoder extends Activity
         mActive = clampSlot(pref.getInt("active", 0));
         quadEnabled = pref.getBoolean("quad_enabled", false);
         showStats = pref.getBoolean("show_stats", false);
+        slides = pref.getBoolean("slides", false);
+        if (menuManager != null) menuManager.setSlidesShown(slides);
         if (menuManager != null) menuManager.setStatsShown(showStats);
         SharedPreferences.Editor migrate = null;
         for (int i = 0; i < CAM_COUNT; i++) {
@@ -986,6 +1035,11 @@ public class Decoder extends Activity
      * for this device (#83, #85).
      */
     private void planDecoding(QuadCell[] cells, long now) {
+        if (slides) {
+            // Slides (#108): nothing is promoted; a cell that was at full rate goes back
+            for (QuadCell c : cells) if (c != null) c.setKeyFramesOnly(true);
+            return;
+        }
         DecodePlanner planner = decodePlanner;
         if (planner == null) return;
         planner.offerDeclared(MediaCodecManager.declaredBlocksPerSec);
@@ -1234,7 +1288,7 @@ public class Decoder extends Activity
         Map<String, Object> m = debugDevice();
         m.put("ui_thread", "ok");
         m.put("mode", !mResumed ? "paused" : udpViewShown ? "udp"
-                : quadEnabled ? "multi-view" : "single");
+                : quadEnabled ? (slides ? "slides" : "multi-view") : "single");
         m.put("active_slot", mActive + 1);
         DecodePlanner planner = decodePlanner;
         if (quadEnabled && planner != null) {
