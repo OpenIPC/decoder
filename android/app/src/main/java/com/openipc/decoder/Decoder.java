@@ -940,7 +940,85 @@ public class Decoder extends Activity
 
     /** How long a request waits for the UI thread before it reports it as not responding. */
     private static final long DEBUG_UI_TIMEOUT_MS = 1000;
-    private final DebugServer.Source debugSource = this::debugSnapshot;
+    private final DebugServer.Source debugSource = new DebugServer.Source() {
+        @Override public Map<String, Object> snapshot() { return debugSnapshot(); }
+        @Override public byte[] snapshotJpeg() { return debugSnapshotJpeg(); }
+    };
+    /** Decoded frames of the single view at the previous snapshot: did any come since? */
+    private int snapshotFramesOut = -1;
+
+    /** Called on a server thread (#98): the cells are chosen on the UI thread, copied here. */
+    private byte[] debugSnapshotJpeg() {
+        AtomicReference<List<Snapshots.Cell>> ref = new AtomicReference<>();
+        int[] side = new int[1];
+        CountDownLatch done = new CountDownLatch(1);
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try {
+                ref.set(snapshotCells(side));
+            } finally {
+                done.countDown();
+            }
+        });
+        try {
+            if (!done.await(DEBUG_UI_TIMEOUT_MS, TimeUnit.MILLISECONDS)) return null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+        List<Snapshots.Cell> cells = ref.get();
+        return cells != null ? Snapshots.render(cells, side[0]) : null;
+    }
+
+    /** What to draw, UI thread only; side[0] gets the grid side (1 for a single picture). */
+    private List<Snapshots.Cell> snapshotCells(int[] side) {
+        List<Snapshots.Cell> cells = new ArrayList<>();
+        if (!mResumed || udpViewShown) {
+            Snapshots.Cell c = new Snapshots.Cell();
+            c.label = !mResumed ? "App in background" : "U \u00b7 UDP RTP port " + UDP_RTP_PORT;
+            cells.add(c);
+            side[0] = 1;
+            return cells;
+        }
+        if (!quadEnabled) {
+            Snapshots.Cell c = new Snapshots.Cell();
+            c.slot = mActive + 1;
+            int out = videoDecoder.framesOut();
+            // Live when frames were decoded since the previous snapshot
+            c.live = out > 0 && out != snapshotFramesOut;
+            snapshotFramesOut = out;
+            c.label = statusText != null && statusText.getVisibility() == View.VISIBLE
+                    ? statusText.getText().toString() : c.live ? "Playing" : "No new frames";
+            if (c.live) {
+                c.frame = mSurface.getBitmap(Snapshots.CELL_W * 2, Snapshots.CELL_H * 2);
+            }
+            cells.add(c);
+            side[0] = 1;
+            return cells;
+        }
+        int size = quadGridSize(mHosts, DEFAULT_URL);
+        QuadCell[] quad = quadCells;
+        for (int i = 0; i < size * size; i++) {
+            Snapshots.Cell c = new Snapshots.Cell();
+            if (i >= CAM_COUNT) {
+                c.label = "U \u00b7 no receiver yet";
+                cells.add(c);
+                continue;
+            }
+            c.slot = i + 1;
+            QuadCell cell = quad != null ? quad[i] : null;
+            TextView stats = quadStats[i];
+            if (cell == null) {
+                c.label = "not configured";
+            } else {
+                c.label = stats != null ? stats.getText().toString() : "";
+                c.live = !cell.isPaused() && cell.outFps() > 0;
+                c.view = quadViews[i];
+            }
+            cells.add(c);
+        }
+        side[0] = size;
+        return cells;
+    }
 
     /** Called on a server thread: the state is read on the UI thread, which owns it. */
     private Map<String, Object> debugSnapshot() {

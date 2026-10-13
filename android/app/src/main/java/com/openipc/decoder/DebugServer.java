@@ -44,11 +44,16 @@ final class DebugServer {
     private static final long REQUEST_DEADLINE_MS = 5000;
     private static final int MAX_HEADER_BYTES = 8192;
     private static final long REBIND_DELAY_MS = 10_000;
+    /** A snapshot this young is served again: several viewers cost one capture (#98). */
+    private static final long SNAPSHOT_REUSE_MS = 1000;
 
     /** What the server reports; called on a server thread. */
     interface Source {
         /** State as nested Map / List / String / Number / Boolean, see {@link #toJson}. */
         Map<String, Object> snapshot();
+
+        /** JPEG of what the screen shows (#98), or null when there is nothing to show. */
+        byte[] snapshotJpeg();
     }
 
     private static DebugServer instance;
@@ -68,6 +73,9 @@ final class DebugServer {
         return t;
     });
     private final LogBuffer log = new LogBuffer(LOG_LINES);
+    private final Object snapshotLock = new Object();
+    private byte[] lastSnapshot;
+    private long lastSnapshotMs;
 
     private DebugServer() {}
 
@@ -152,6 +160,11 @@ final class DebugServer {
                 case "/stats.json":
                     reply(out, 200, "application/json; charset=utf-8", toJson(snapshot()));
                     break;
+                case "/snapshot.jpg":
+                    byte[] jpeg = snapshotJpeg();
+                    if (jpeg != null) reply(out, 200, "image/jpeg", jpeg);
+                    else reply(out, 503, "text/plain", "No picture\n");
+                    break;
                 case "/log":
                     reply(out, 200, "text/plain; charset=utf-8", log.text());
                     break;
@@ -180,6 +193,18 @@ final class DebugServer {
         return m;
     }
 
+    /** Captured only when asked for, one capture at a time, reused for a second. */
+    private byte[] snapshotJpeg() {
+        synchronized (snapshotLock) {
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (lastSnapshot != null && now - lastSnapshotMs < SNAPSHOT_REUSE_MS) return lastSnapshot;
+            Source s = source;
+            lastSnapshot = s != null ? s.snapshotJpeg() : null;
+            lastSnapshotMs = android.os.SystemClock.elapsedRealtime();
+            return lastSnapshot;
+        }
+    }
+
     /** The request line; the headers are read and dropped. Null on a closed connection. */
     static String readRequestHead(InputStream in) throws IOException {
         ByteArrayOutputStream head = new ByteArrayOutputStream();
@@ -203,7 +228,11 @@ final class DebugServer {
 
     private static void reply(OutputStream out, int code, String type, String body)
             throws IOException {
-        byte[] data = body.getBytes(StandardCharsets.UTF_8);
+        reply(out, code, type, body.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void reply(OutputStream out, int code, String type, byte[] data)
+            throws IOException {
         String head = "HTTP/1.1 " + code + " " + reason(code) + "\r\n"
                 + "Content-Type: " + type + "\r\n"
                 + "Content-Length: " + data.length + "\r\n"
@@ -222,6 +251,7 @@ final class DebugServer {
             case 403: return "Forbidden";
             case 404: return "Not Found";
             case 405: return "Method Not Allowed";
+            case 503: return "Service Unavailable";
             default:  return "Error";
         }
     }
@@ -327,10 +357,14 @@ final class DebugServer {
             + "vertical-align:top;word-break:break-all}"
             + "th{color:#999;font-weight:normal;white-space:nowrap;width:1%}"
             + "a{color:#8cf}#err{color:#f88}"
+            + "#snap{display:block;max-width:100%;margin:8px 0;background:#000}"
             + "</style></head><body>"
             + "<h1>OpenIPC Decoder</h1>"
             + "<div><a href=\"/stats.json\">stats.json</a> · <a href=\"/log\">log</a>"
+            + " \u00b7 snapshot every <select id=\"every\"><option value=\"3\">3 s</option>"
+            + "<option value=\"5\" selected>5 s</option><option value=\"10\">10 s</option></select>"
             + " <span id=\"err\"></span></div>"
+            + "<img id=\"snap\" alt=\"snapshot\">"
             + "<div id=\"out\"></div>"
             + "<script>\n"
             + "function esc(s){return String(s).replace(/[&<>\"]/g,function(c){"
@@ -346,11 +380,21 @@ final class DebugServer {
             + "var h='<h2>Cells</h2><table><tr>'+keys.map(function(k){return '<th>'+esc(k)+'</th>'})"
             + ".join('')+'</tr>';c.forEach(function(r){h+='<tr>'+keys.map(function(k){"
             + "return '<td>'+val(r[k])+'</td>'}).join('')+'</tr>'});return h+'</table>'}\n"
+            // Stats and snapshots are asked for only while the tab is visible (#98)
+            + "function later(f,ms){setTimeout(function(){if(document.hidden)"
+            + "document.addEventListener('visibilitychange',function v(){if(!document.hidden)"
+            + "{document.removeEventListener('visibilitychange',v);f()}});else f()},ms)}\n"
+            + "var every=document.getElementById('every');"
+            + "try{var e=localStorage.getItem('every');if(e)every.value=e}catch(x){}\n"
+            + "every.onchange=function(){try{localStorage.setItem('every',every.value)}catch(x){}};\n"
+            + "var img=document.getElementById('snap');"
+            + "img.onload=img.onerror=function(){later(snap,every.value*1000)};\n"
+            + "function snap(){img.src='/snapshot.jpg?t='+Date.now()}\n"
             + "function tick(){fetch('/stats.json',{cache:'no-store'}).then(function(r){return r.json()})"
             + ".then(function(s){document.getElementById('out').innerHTML=table(s)+cells(s.cells);"
             + "document.getElementById('err').textContent=''})"
             + ".catch(function(e){document.getElementById('err').textContent='offline: '+e})"
-            + ".finally(function(){setTimeout(tick,1500)})}\n"
-            + "tick();\n"
+            + ".finally(function(){later(tick,1500)})}\n"
+            + "tick();snap();\n"
             + "</script></body></html>\n";
 }
