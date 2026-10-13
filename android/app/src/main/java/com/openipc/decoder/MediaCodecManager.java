@@ -257,6 +257,11 @@ class MediaCodecManager {
         return System.nanoTime() / 1_000_000;
     }
 
+    /** Decoders are set up one after another, at least CREATE_GAP_MS apart (#76). */
+    private static final Object CREATE_LOCK = new Object();
+    static final long CREATE_GAP_MS = 250;
+    private static long lastCreateMs;
+
     void createDecoder(boolean codecH265) {
         final int gen;
         synchronized (decoderLock) {
@@ -290,17 +295,30 @@ class MediaCodecManager {
 
         MediaCodec local;
         try {
-            Log.i(TAG, "Start video decoder (" + type + ")");
-            local = MediaCodec.createDecoderByType(type);
-            learnLimits(local, type);
-            try {
-                local.configure(format, s, null, 0);
-                local.start();
-                if (listener != null) listener.onDecoderStarted();
-            } catch (Exception e) {
-                local.release();
-                throw e;
+            // One decoder set up at a time, with a gap: the 3x3 grid used to start up to nine
+            // at once, and on the AG-216 that stalled SurfaceFlinger for tens of seconds (#76)
+            synchronized (CREATE_LOCK) {
+                long wait = lastCreateMs + CREATE_GAP_MS - nowMs();
+                if (wait > 0) Thread.sleep(wait);
+                Log.i(TAG, "Start video decoder (" + type + ")");
+                local = MediaCodec.createDecoderByType(type);
+                learnLimits(local, type);
+                try {
+                    local.configure(format, s, null, 0);
+                    local.start();
+                } catch (Exception e) {
+                    local.release();
+                    throw e;
+                } finally {
+                    lastCreateMs = nowMs();
+                }
             }
+            if (listener != null) listener.onDecoderStarted();
+        } catch (InterruptedException e) {
+            // The cell stopped while waiting for its turn: nothing was created
+            Thread.currentThread().interrupt();
+            InstanceBudget.release(type);
+            return;
         } catch (Exception e) {
             InstanceBudget.release(type);
             synchronized (decoderLock) {
