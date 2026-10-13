@@ -84,6 +84,9 @@ final class DebugServer {
     private final Object snapshotLock = new Object();
     private byte[] lastSnapshot;
     private long lastSnapshotMs;
+    /** Bumped when the source changes: a picture of an earlier source is never served. */
+    private volatile int sourceGen;
+    private int lastSnapshotGen;
 
     private DebugServer() {}
 
@@ -99,11 +102,18 @@ final class DebugServer {
         return instance;
     }
 
-    void setSource(Source s) { source = s; }
+    // No lock here: these run on the UI thread, which a snapshot in progress may be waiting for
+
+    void setSource(Source s) {
+        source = s;
+        sourceGen++;
+    }
 
     /** Clears the source only if it is still the given one (an old activity going away). */
     void clearSource(Source s) {
-        if (source == s) source = null;
+        if (source != s) return;
+        source = null;
+        sourceGen++;
     }
 
     String state() { return state; }
@@ -205,11 +215,19 @@ final class DebugServer {
     private byte[] snapshotJpeg() {
         synchronized (snapshotLock) {
             long now = android.os.SystemClock.elapsedRealtime();
-            if (lastSnapshot != null && now - lastSnapshotMs < SNAPSHOT_REUSE_MS) return lastSnapshot;
+            int gen = sourceGen;
+            if (lastSnapshot != null && lastSnapshotGen == gen
+                    && now - lastSnapshotMs < SNAPSHOT_REUSE_MS) {
+                return lastSnapshot;
+            }
             Source s = source;
-            lastSnapshot = s != null ? s.snapshotJpeg() : null;
+            byte[] jpeg = s != null ? s.snapshotJpeg() : null;
+            // The activity was replaced or went away meanwhile: that picture is out of date
+            if (gen != sourceGen) jpeg = null;
+            lastSnapshot = jpeg;
+            lastSnapshotGen = gen;
             lastSnapshotMs = android.os.SystemClock.elapsedRealtime();
-            return lastSnapshot;
+            return jpeg;
         }
     }
 
@@ -403,6 +421,6 @@ final class DebugServer {
             + "document.getElementById('err').textContent=''})"
             + ".catch(function(e){document.getElementById('err').textContent='offline: '+e})"
             + ".finally(function(){later(tick,1500)})}\n"
-            + "tick();snap();\n"
+            + "later(tick,0);later(snap,0);\n"
             + "</script></body></html>\n";
 }

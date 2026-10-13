@@ -287,6 +287,11 @@ class QuadCell implements RtspSession.Callback {
     float lostFps() { return lostFps; }
     boolean isPaused() { return pausedReason != null; }
 
+    /** Connected, not paused and a frame shown within the last {@code ms} milliseconds (#98). */
+    boolean showsVideo(long ms) {
+        return pausedReason == null && "connected".equals(state) && decoder.renderedWithin(ms);
+    }
+
     /** Playing long enough for its decode rate to mean something (#83). */
     boolean isSettled(long nowMs) {
         long started = decoderStartedMs;

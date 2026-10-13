@@ -526,6 +526,7 @@ public class Decoder extends Activity
     }
 
     private void updateStatus(String status) {
+        singleState = status;
         runOnUiThread(() -> {
             if (statusText == null) return;
             // A stale timer from an earlier "connected" must not overwrite or hide this status
@@ -944,8 +945,10 @@ public class Decoder extends Activity
         @Override public Map<String, Object> snapshot() { return debugSnapshot(); }
         @Override public byte[] snapshotJpeg() { return debugSnapshotJpeg(); }
     };
-    /** Decoded frames of the single view at the previous snapshot: did any come since? */
-    private int snapshotFramesOut = -1;
+    /** A cell counts as playing in a snapshot when it showed a frame this recently (#98). */
+    private static final long SNAPSHOT_LIVE_MS = 2000;
+    /** Last status of the single view, from updateStatus(). */
+    private volatile String singleState = "disconnected";
 
     /** Called on a server thread (#98): the cells are chosen on the UI thread, copied here. */
     private byte[] debugSnapshotJpeg() {
@@ -982,10 +985,8 @@ public class Decoder extends Activity
         if (!quadEnabled) {
             Snapshots.Cell c = new Snapshots.Cell();
             c.slot = mActive + 1;
-            int out = videoDecoder.framesOut();
-            // Live when frames were decoded since the previous snapshot
-            c.live = out > 0 && out != snapshotFramesOut;
-            snapshotFramesOut = out;
+            c.live = "connected".equals(singleState)
+                    && videoDecoder.renderedWithin(SNAPSHOT_LIVE_MS);
             c.label = statusText != null && statusText.getVisibility() == View.VISIBLE
                     ? statusText.getText().toString() : c.live ? "Playing" : "No new frames";
             if (c.live) {
@@ -1011,7 +1012,7 @@ public class Decoder extends Activity
                 c.label = "not configured";
             } else {
                 c.label = stats != null ? stats.getText().toString() : "";
-                c.live = !cell.isPaused() && cell.outFps() > 0;
+                c.live = cell.showsVideo(SNAPSHOT_LIVE_MS);
                 c.view = quadViews[i];
             }
             cells.add(c);
