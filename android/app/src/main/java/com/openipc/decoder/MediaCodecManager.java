@@ -354,7 +354,8 @@ class MediaCodecManager {
                             codec.queueInputBuffer(inputBufferId, 0,
                                     buffer.length(), System.nanoTime() / 1000, flag);
                         }
-                    } else {
+                    } else if (enabled && closeWaiting.get() == 0) {
+                        // Only a full wait is a decoder loss; a close or pause cut it short
                         inputDropped++;
                     }
                     drainOutput(codec);
