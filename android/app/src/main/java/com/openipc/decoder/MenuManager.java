@@ -260,7 +260,8 @@ class MenuManager {
         camRow.addView(quadBtn, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
-        if (quadEnabled && !slidesShown) highlightItem(quadBtn);
+        // Q is the view, S the playback mode: both may be on (#153)
+        if (quadEnabled) highlightItem(quadBtn);
         mCachedQuadBtn = quadBtn;
         quadBtn.setOnClickListener(v -> {
             PopupWindow p = mMenuPopup;
@@ -274,7 +275,7 @@ class MenuManager {
         camRow.addView(slidesBtn, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
-        if (quadEnabled && slidesShown) highlightItem(slidesBtn);
+        if (slidesShown) highlightItem(slidesBtn);
         mCachedSlidesBtn = slidesBtn;
         slidesBtn.setOnClickListener(v -> {
             PopupWindow p = mMenuPopup;
@@ -326,11 +327,11 @@ class MenuManager {
             mWebUiBtn.setVisibility(single ? View.VISIBLE : View.GONE);
         }
         if (mCachedQuadBtn != null) {
-            if (quadEnabled && !slidesShown) highlightItem(mCachedQuadBtn);
+            if (quadEnabled) highlightItem(mCachedQuadBtn);
             else resetItem(mCachedQuadBtn);
         }
         if (mCachedSlidesBtn != null) {
-            if (quadEnabled && slidesShown) highlightItem(mCachedSlidesBtn);
+            if (slidesShown) highlightItem(mCachedSlidesBtn);
             else resetItem(mCachedSlidesBtn);
         }
         if (mCachedUdpBtn != null) {
@@ -368,7 +369,6 @@ class MenuManager {
     /** The highlighted item of the slot row: the active slot, Q in multi-view, U. */
     private TextView focusItem(boolean quadEnabled, int mActive) {
         if (udpShown && mCachedUdpBtn != null) return mCachedUdpBtn;
-        if (quadEnabled && slidesShown && mCachedSlidesBtn != null) return mCachedSlidesBtn;
         if (quadEnabled && mCachedQuadBtn != null) return mCachedQuadBtn;
         if (camButtons != null && mActive >= 0 && mActive < camButtons.length) {
             return camButtons[mActive];

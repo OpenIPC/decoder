@@ -359,21 +359,12 @@ public class Decoder extends Activity
     }
 
     /**
-     * S (#108): multi-view with every cell on key frames only, the lowest decoder load. From
-     * the single or U view it starts multi-view in this mode; in multi-view it toggles.
+     * S (#108, #153): the playback mode only — every frame, or key frames only (the lowest
+     * decoder load) — in whatever view is shown: multi-view, U or a single camera. It never
+     * switches the view; Q does that.
      */
     @Override
     public void onToggleSlides() {
-        if (leaveUdpView()) {
-            setSlides(true);
-            startQuad();
-            return;
-        }
-        if (!quadEnabled) {
-            setSlides(true);
-            startQuad();
-            return;
-        }
         setSlides(!slides);
     }
 
@@ -390,8 +381,9 @@ public class Decoder extends Activity
         // Back to adaptive: plan from scratch, cells are promoted again where they fit
         // The decoders keep running: no warm-up (Qodo on #149)
         if (!on && quadEnabled) decodePlanner = newPlanner(false);
-        Toast.makeText(this, on ? "Slides: key frames only" : "Multi-view",
-                Toast.LENGTH_SHORT).show();
+        // The single view: back to every frame from the next key frame on (#153)
+        if (!on) singleWaitKey = true;
+        Toast.makeText(this, on ? "Key frames only" : "Full stream", Toast.LENGTH_SHORT).show();
     }
 
     @Override
@@ -1751,7 +1743,14 @@ public class Decoder extends Activity
                 try {
                     Frame buffer = nalQueue.poll(5, TimeUnit.MILLISECONDS);
                     if (buffer != null && rtspClient.isJpeg()) {
-                        drawJpeg(buffer, gen);
+                        // S: MJPEG has no key frames, one frame per second instead (#153)
+                        long now = System.nanoTime() / 1_000_000;
+                        if (!slides || now - lastSlideJpegMs >= QuadCell.JPEG_REDUCED_MS) {
+                            lastSlideJpegMs = now;
+                            drawJpeg(buffer, gen);
+                        }
+                        framePool.recycle(buffer);
+                    } else if (buffer != null && skipForKeyFrames(buffer)) {
                         framePool.recycle(buffer);
                     } else if (buffer != null && surfacePending) {
                         // Waiting for a fresh surface after MJPEG; the next key frame follows
@@ -1780,6 +1779,24 @@ public class Decoder extends Activity
                 audioManager.playPcmFrame();
             }
         });
+    }
+
+    /** S in the single view: the last MJPEG frame drawn (#153). */
+    private long lastSlideJpegMs;
+    /** Back from key frames only: P frames wait for the next key frame (#153). */
+    private volatile boolean singleWaitKey;
+
+    /**
+     * Key frames only in the single view (S, #153): parameter sets and key frames go to the
+     * decoder, the rest is dropped; after S is turned off, until the next key frame.
+     */
+    private boolean skipForKeyFrames(Frame buffer) {
+        if (!slides && !singleWaitKey) return false;
+        if (buffer.length() < 5) return true;
+        int type = NalAssembler.fragment(buffer.data()[4], codecH265);
+        if (!QuadCell.isKeyNal(type, codecH265)) return true;
+        if (!slides && QuadCell.isKeyFrameNal(type, codecH265)) singleWaitKey = false;
+        return false;
     }
 
     // ====================== Lifecycle ======================
