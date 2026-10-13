@@ -512,6 +512,15 @@ class QuadCell implements RtspSession.Callback {
         stop();
     }
 
+    /** Back after a pause by the planner (#148): on key frames, as a cell starts. */
+    void resume() {
+        if (pausedReason == null) return;
+        pausedReason = null;
+        problem = null;
+        setKeyFramesOnly(true);
+        start();
+    }
+
     @Override
     public void onSdp(Sdp sdp) {
         // First the path, so a JPEG frame still being drawn no longer counts as current
