@@ -49,11 +49,12 @@ public class QuadGridTest {
 
     @Test
     public void udpCellHintNamesPortAndAddress() {
-        String t = Decoder.udpHintText("192.168.1.20", 5600);
+        String t = Decoder.udpHintText(java.util.Arrays.asList("192.168.1.20"), 5600);
         assertTrue(t.contains("UDP RTP"));
         assertTrue(t.contains("192.168.1.20:5600"));
         // Without a known address the hint still tells where to send the stream
-        assertTrue(Decoder.udpHintText(null, 5600).contains("this device:5600"));
+        assertTrue(Decoder.udpHintText(java.util.Collections.emptyList(), 5600)
+                .contains("this device:5600"));
     }
 
     @Test
