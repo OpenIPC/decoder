@@ -65,6 +65,12 @@ class RtspSession {
          * Returns true if a video packet was usable; only those feed the watchdog.
          */
         boolean onPacket(int channel, byte[] buf, int offset, int length);
+
+        /**
+         * One whole JPEG frame of an http:// MJPEG slot (#121), after onSdp with videoJpeg.
+         * Returns true if it was usable; only those feed the watchdog.
+         */
+        default boolean onJpegFrame(byte[] buf, int offset, int length) { return false; }
     }
 
     private final String tag;
@@ -286,6 +292,7 @@ class RtspSession {
     /** One session from connect to disconnect. Returns true if PLAY succeeded. */
     private boolean connect(int gen) throws IOException {
         if (RtpListener.Url.matches(url)) return listen(gen, RtpListener.Url.parse(url));
+        if (HttpMjpeg.matches(url)) return httpMjpeg(gen, HttpMjpeg.Url.parse(url));
         Url u = Url.parse(url);
         Socket s = new Socket();
         synchronized (lock) {
@@ -497,6 +504,91 @@ class RtspSession {
      * forces one: 96 is H.264 and 97 H.265, and a switch between them on the camera is
      * followed. Returns true once listening, like a PLAY that succeeded.
      */
+    /**
+     * An http:// slot (#121): GET the URL and read its multipart/x-mixed-replace body, one
+     * JPEG per part. Basic credentials go with the first request, Digest after a challenge.
+     * Returns true once the stream was playing, like a PLAY that succeeded.
+     */
+    private boolean httpMjpeg(int gen, HttpMjpeg.Url u) throws IOException {
+        RtspAuth auth = new RtspAuth(u.userInfo);
+        for (int attempt = 0; attempt < 3; attempt++) {
+            Socket s = new Socket();
+            synchronized (lock) {
+                if (gen != generation) return false;
+                socket = s;
+            }
+            try {
+                s.connect(new InetSocketAddress(u.host, u.port), CONNECT_TIMEOUT_MS);
+                s.setSoTimeout(CONNECT_TIMEOUT_MS);
+                String host = (u.host.indexOf(':') >= 0 ? "[" + u.host + "]" : u.host)
+                        + (u.port == 80 ? "" : ":" + u.port);
+                String request = "GET " + u.path + " HTTP/1.1\r\n"
+                        + "Host: " + host + "\r\n"
+                        // userAgent is the whole header line already, CRLF included
+                        + userAgent
+                        + auth.header("GET", u.path)
+                        + "Connection: close\r\n\r\n";
+                OutputStream out = s.getOutputStream();
+                out.write(request.getBytes(StandardCharsets.ISO_8859_1));
+                out.flush();
+                InputStream in = new BufferedInputStream(s.getInputStream(), 64 * 1024);
+                HttpMjpeg.Response r = HttpMjpeg.readResponse(in);
+                if (r.status == 401) {
+                    if (auth.onUnauthorized(r.challenges)) continue;
+                    throw new IOException("401 Unauthorized");
+                }
+                if (r.status != 200) throw new IOException("HTTP " + r.status);
+                String boundary = r.boundary();
+                if (boundary == null) {
+                    throw new IOException("Not an MJPEG stream (" + r.contentType + ")");
+                }
+                InputStream body = r.chunked ? new HttpMjpeg.Chunked(in) : in;
+                synchronized (lock) {
+                    if (gen != generation) return false;
+                    lastPacketMs = System.nanoTime() / 1_000_000;
+                    streamBytes = 0;
+                    bitrateMarkNs = System.nanoTime();
+                    active = true;
+                    inUse = "HTTP";
+                }
+                Log.i(TAG, tag + ": MJPEG over HTTP from " + u.host + ":" + u.port);
+                status(gen, "buffering");
+                Sdp sdp = new Sdp();
+                sdp.videoJpeg = true;
+                sdp.videoPt = Sdp.PT_JPEG;
+                callback.onSdp(sdp);
+                // The watchdog handles silence from here on
+                s.setSoTimeout(0);
+                final boolean[] first = {true};
+                HttpMjpeg.readParts(body, boundary, (buf, offset, length) -> {
+                    if (gen != generation) return false;
+                    streamBytes += length;
+                    if (callback.onJpegFrame(buf, offset, length)) {
+                        lastPacketMs = System.nanoTime() / 1_000_000;
+                        if (first[0]) {
+                            first[0] = false;
+                            status(gen, "connected");
+                        }
+                    }
+                    return true;
+                });
+                return true;
+            } finally {
+                synchronized (lock) {
+                    if (socket == s) {
+                        socket = null;
+                        inUse = null;
+                    }
+                }
+                try {
+                    s.close();
+                } catch (IOException ignored) {
+                }
+            }
+        }
+        throw new IOException("401 Unauthorized");
+    }
+
     private boolean listen(int gen, RtpListener.Url u) throws IOException {
         RtpListener l = new RtpListener(tag, u);
         synchronized (lock) {
@@ -1078,7 +1170,7 @@ class RtspSession {
             throw new IOException("Invalid port in URL: " + redact(url));
         }
 
-        private static String percentDecode(String s) {
+        static String percentDecode(String s) {
             if (s.indexOf('%') < 0) return s;
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             for (int i = 0; i < s.length(); i++) {
