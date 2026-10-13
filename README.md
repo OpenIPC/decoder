@@ -50,7 +50,7 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
    ```
    rtsp://username:password@ip_address:554/stream=0
    ```
-   Under the URL you can choose the [transport](#transports); TCP is the default.
+   Under the URL you can choose the [transport](#transports); Auto (UDP, falling back to TCP) is the default for a new slot.
 4. Press **Save**. The app connects straight away and reconnects automatically if the stream drops.
 
 ## Controls
@@ -98,9 +98,9 @@ Each slot has its own transport, chosen under the URL in **Settings** (or with t
 
 | Transport         | How the video arrives                                    | Notes                                                                                                                                                    |
 |-------------------|----------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **TCP** (default) | RTP inside the RTSP connection                           | Works everywhere, also through NAT and firewalls                                                                                                         |
+| **TCP**           | RTP inside the RTSP connection                           | Works everywhere, also through NAT and firewalls                                                                                                         |
 | **UDP**           | RTP over UDP, a port pair per track                      | Lower latency on a LAN. Lost packets are skipped, not resent. Never falls back                                                                           |
-| **Auto**          | UDP, or TCP when UDP does not work                       | Falls back to TCP when the camera refuses UDP or no video arrives within 3 s, then stays on TCP until the slot is changed                                |
+| **Auto** (default) | UDP, or TCP when UDP does not work                       | Falls back to TCP when the camera refuses UDP or no video arrives within 3 s, then stays on TCP until the slot is changed                                |
 | **Multicast**     | RTSP multicast (Android 8.0+), or TCP when it is refused | For servers that offer RTSP multicast. OpenIPC Majestic and XM cameras do not: they reply 400 or 451, and the slot plays over TCP in the same connection |
 
 The transport actually in use is shown when a stream starts in single view (`Connected • UDP • H.265 …`), on the debug page and in `/stats.json` (`transport`; the slot's setting is `transport_mode`). After a fallback it reads, for example, `TCP (auto)`.

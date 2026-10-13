@@ -515,7 +515,8 @@ public class Decoder extends Activity
             String url = credentials.open(stored);
             mHosts[i] = url != null ? url : DEFAULT_URL;
             mUnreadable[i] = url == null && stored != null ? stored : null;
-            mTransports[i] = Transport.Mode.parse(pref.getString("transport_" + i, null));
+            // Auto for a slot that has never stored one (#112)
+            mTransports[i] = Transport.Mode.stored(pref.getString("transport_" + i, null));
             // Plain URLs from older versions are re-saved encrypted right away
             if (credentials.needsMigration(stored)) {
                 if (migrate == null) migrate = pref.edit();
