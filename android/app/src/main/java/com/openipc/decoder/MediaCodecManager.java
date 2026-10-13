@@ -141,10 +141,12 @@ class MediaCodecManager {
                     for (String t : ci.getSupportedTypes()) {
                         if (!t.equalsIgnoreCase(mime)
                                 || (found != null && !n.startsWith("c2.android."))) continue;
-                        found = n;
-                        max = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                        // The limit first: a failed query keeps the previous candidate
+                        int m = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
                                 ? ci.getCapabilitiesForType(t).getMaxSupportedInstances()
                                 : Integer.MAX_VALUE;
+                        found = n;
+                        max = m;
                     }
                 } catch (RuntimeException ignored) {
                 }
