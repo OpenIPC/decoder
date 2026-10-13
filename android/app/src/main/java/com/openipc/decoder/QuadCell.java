@@ -283,7 +283,8 @@ class QuadCell implements RtspSession.Callback {
         lastIn = in;
         lastOut = out;
         lastLost = lost;
-        int netLoss = nalAssembler.lossCount();
+        // Any lost packet, not only one inside a fragmented NAL unit (Qodo on #147)
+        int netLoss = nalAssembler.gapCount();
         networkLoss = netLoss > lastNetLoss;
         lastNetLoss = netLoss;
         lastSampleMs = nowMs;

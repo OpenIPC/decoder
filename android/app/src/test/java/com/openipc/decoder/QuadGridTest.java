@@ -78,12 +78,19 @@ public class QuadGridTest {
     }
 
     @Test
-    public void decoderStuckNeedsSeveralReceivingCellsAndNoOutput() {
-        assertTrue(Decoder.looksStuck(2, 0));
-        assertTrue(Decoder.looksStuck(9, 0));
-        // One camera alone may just wait for a key frame; any output means it works
-        assertFalse(Decoder.looksStuck(1, 0));
-        assertFalse(Decoder.looksStuck(9, 1));
-        assertFalse(Decoder.looksStuck(0, 0));
+    public void decoderStuckIsReportedAfterTwentyQuietSeconds() {
+        int s = 0;
+        for (int i = 1; i < Decoder.STUCK_SECONDS; i++) {
+            s = Decoder.stuckStep(s, 9, false);
+            assertEquals(i, s);
+        }
+        assertTrue(s < Decoder.STUCK_SECONDS);
+        s = Decoder.stuckStep(s, 9, false);
+        assertTrue(s >= Decoder.STUCK_SECONDS);
+        // Any output, from any cell, starts the count again (Qodo on #147)
+        assertEquals(0, Decoder.stuckStep(s, 9, true));
+        // One camera alone may just wait for a key frame
+        assertEquals(0, Decoder.stuckStep(5, 1, false));
+        assertEquals(0, Decoder.stuckStep(5, 0, false));
     }
 }

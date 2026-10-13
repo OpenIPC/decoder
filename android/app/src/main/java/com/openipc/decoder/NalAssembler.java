@@ -44,6 +44,7 @@ class NalAssembler {
     private int dropped;
     /** Of those, dropped because a packet of them was lost (not for size) (#113). */
     private int lostDropped;
+    private int gaps;
 
     NalAssembler(int bufferSize, Runnable onCodecSwitch, FramePool framePool) {
         this.nalBuffer = new byte[bufferSize];
@@ -62,6 +63,8 @@ class NalAssembler {
     int droppedCount() { return dropped; }
     /** NAL units dropped because one of their packets was lost (#113). */
     int lossCount() { return lostDropped; }
+    /** Gaps in the RTP sequence, any packet lost (#145). */
+    int gapCount() { return gaps; }
 
     /**
      * Process one RTP packet ({@code length} bytes at {@code offset}, header included).
@@ -86,6 +89,7 @@ class NalAssembler {
 
         int seq = ((buf[offset + 2] & 0xFF) << 8) | (buf[offset + 3] & 0xFF);
         boolean gap = lastSeq >= 0 && seq != ((lastSeq + 1) & 0xFFFF);
+        if (gap) gaps++;
         lastSeq = seq;
         if (gap && inFragment) {
             lostDropped++;

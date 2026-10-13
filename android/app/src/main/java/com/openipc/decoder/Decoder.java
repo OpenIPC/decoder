@@ -483,7 +483,7 @@ public class Decoder extends Activity
         menuManager.setUdpShown(false);
         stopQuadCells();
         quadContainer.setVisibility(View.GONE);
-        showDecoderStuck(false);
+        resetDecoderStuck();
         mSurface.setVisibility(View.VISIBLE);
         return true;
     }
@@ -737,7 +737,7 @@ public class Decoder extends Activity
         }
 
         quadContainer.setVisibility(View.GONE);
-        showDecoderStuck(false);
+        resetDecoderStuck();
         mSurface.setVisibility(View.VISIBLE);
     }
 
@@ -1039,9 +1039,12 @@ public class Decoder extends Activity
     private int stuckSeconds;
     private TextView stuckBanner;
 
-    /** At least two cells receive and none of them decodes a frame (#145). */
-    static boolean looksStuck(int receiving, int decoding) {
-        return receiving >= 2 && decoding == 0;
+    /**
+     * One second of the detector: the seconds in a row in which at least two cells received
+     * whole frames and no cell at all decoded one (#145).
+     */
+    static int stuckStep(int seconds, int receiving, boolean anyOutput) {
+        return receiving >= 2 && !anyOutput ? seconds + 1 : 0;
     }
 
     /**
@@ -1050,19 +1053,25 @@ public class Decoder extends Activity
      */
     private void checkDecoderStuck(QuadCell[] cells) {
         int receiving = 0;
-        int decoding = 0;
+        boolean anyOutput = false;
         for (QuadCell c : cells) {
-            if (c == null || !c.isReceiving()) continue;
-            receiving++;
-            if (c.outFps() > 0) decoding++;
+            if (c == null) continue;
+            // Output of any cell, a lossy one too, shows the decoder works (Qodo on #147)
+            if (c.outFps() > 0) anyOutput = true;
+            if (c.isReceiving()) receiving++;
         }
-        stuckSeconds = looksStuck(receiving, decoding) ? stuckSeconds + 1 : 0;
+        stuckSeconds = stuckStep(stuckSeconds, receiving, anyOutput);
         showDecoderStuck(stuckSeconds >= STUCK_SECONDS);
+    }
+
+    /** Leaving or rebuilding the grid: a fresh count, no banner (Qodo on #147). */
+    private void resetDecoderStuck() {
+        stuckSeconds = 0;
+        showDecoderStuck(false);
     }
 
     private void showDecoderStuck(boolean on) {
         if (!on) {
-            stuckSeconds = 0;
             if (stuckBanner != null) stuckBanner.setVisibility(View.GONE);
             return;
         }
@@ -1852,6 +1861,7 @@ public class Decoder extends Activity
 
     private void stopStreams() {
         lastJpegFrameMs = 0;
+        resetDecoderStuck();
         mSurface.removeCallbacks(singleUdpCheck);
         // The single view's stream ends here: it is no longer "connected" for the debug page
         singleState = "disconnected";
@@ -1946,7 +1956,7 @@ public class Decoder extends Activity
         } else {
             // The views may still be in Quad layout from before the pause
             quadContainer.setVisibility(View.GONE);
-            showDecoderStuck(false);
+            resetDecoderStuck();
             mSurface.setVisibility(View.VISIBLE);
             boolean configured = mHost != null && !mHost.isEmpty() && !mHost.equals(DEFAULT_URL);
             if (configured) {
