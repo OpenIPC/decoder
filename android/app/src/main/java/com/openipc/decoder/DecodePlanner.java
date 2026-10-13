@@ -164,11 +164,10 @@ final class DecodePlanner {
     Decision step(List<Cell> cells, long nowMs) {
         if (quietSinceMs < 0) quietSinceMs = nowMs;
         if (startMs < 0) startMs = nowMs;
-        if (nowMs - startMs < warmupMs) {
-            // Starting decoders lose frames together; that time is neither lossy nor quiet
-            quietSinceMs = nowMs;
-            return Decision.NONE;
-        }
+        // Starting decoders lose frames together: losses then decide nothing, and the time is
+        // not quiet either; promotions that fit go on (Qodo on #149)
+        boolean warming = nowMs - startMs < warmupMs;
+        if (warming) quietSinceMs = nowMs;
         long load = 0;
         boolean anyLossy = false;
         for (Cell c : cells) {
@@ -176,7 +175,7 @@ final class DecodePlanner {
             if (c.paused || c.pinned) continue;
             if (c.full && c.known) load += c.fullLoad;
             else if (!c.full) load += c.keyLoad;
-            anyLossy |= c.lossy;
+            anyLossy |= c.lossy && !warming;
         }
         while (!lossyTimes.isEmpty() && nowMs - lossyTimes.peekFirst() >= LOSS_WINDOW_MS) {
             lossyTimes.pollFirst();

@@ -105,6 +105,16 @@ public class DecodePlannerTest {
     }
 
     @Test
+    public void aFittingCellIsPromotedDuringTheWarmup() {
+        DecodePlanner p = new DecodePlanner(BUDGET, false);
+        p.setWarmup(DecodePlanner.WARMUP_MS);
+        List<DecodePlanner.Cell> cells = keyCells(4, P1080_30);
+        // Losses of the start do not hold back what fits (Qodo on #149)
+        for (DecodePlanner.Cell c : cells) c.lossy = true;
+        assertEquals(DecodePlanner.Action.PROMOTE, p.step(cells, 0).action);
+    }
+
+    @Test
     public void aPausedCellPlaysAgainAfterAQuietPeriod() {
         DecodePlanner p = new DecodePlanner(1, false);
         List<DecodePlanner.Cell> cells = keyCells(3, P1080_30);

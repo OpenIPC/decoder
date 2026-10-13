@@ -387,7 +387,8 @@ public class Decoder extends Activity
             for (QuadCell c : cells) if (c != null) c.setKeyFramesOnly(true);
         }
         // Back to adaptive: plan from scratch, cells are promoted again where they fit
-        if (!on && quadEnabled) decodePlanner = newPlanner();
+        // The decoders keep running: no warm-up (Qodo on #149)
+        if (!on && quadEnabled) decodePlanner = newPlanner(false);
         Toast.makeText(this, on ? "Slides: key frames only" : "Multi-view",
                 Toast.LENGTH_SHORT).show();
     }
@@ -1025,7 +1026,7 @@ public class Decoder extends Activity
 
     private void startStatsTick() {
         quadContainer.removeCallbacks(quadStatsTick);
-        decodePlanner = newPlanner();
+        decodePlanner = newPlanner(true);
         quadContainer.postDelayed(quadStatsTick, 1000);
     }
 
@@ -1042,7 +1043,8 @@ public class Decoder extends Activity
     static final long MIN_CAPACITY = DecodePlanner.fullLoad(1920, 1080, 30);
     private DecodePlanner decodePlanner;
 
-    private DecodePlanner newPlanner() {
+    /** {@code warmup}: the grid's decoders start now, together (#148). */
+    private DecodePlanner newPlanner(boolean warmup) {
         SharedPreferences pref = getSharedPreferences("settings", MODE_PRIVATE);
         if (pref.contains("decoder_capacity")) {
             pref.edit().remove("decoder_capacity").remove("decoder_failed_load").apply();
@@ -1054,7 +1056,7 @@ public class Decoder extends Activity
                 : new DecodePlanner(declared > 0 ? declared : DEFAULT_CAPACITY, false, failed,
                         MIN_CAPACITY);
         // The decoders start together and lose frames for a moment (#148)
-        p.setWarmup(DecodePlanner.WARMUP_MS);
+        if (warmup) p.setWarmup(DecodePlanner.WARMUP_MS);
         return p;
     }
 
@@ -1132,6 +1134,8 @@ public class Decoder extends Activity
                 case RESUME:
                     Log.i(TAG, "Quiet for a while: Quad-" + d.index + " plays again");
                     c.resume();
+                    // stop() took its audio route; the selected cell gets it back (Qodo on #149)
+                    applyQuadAudio();
                     break;
                 default:
                     break;
