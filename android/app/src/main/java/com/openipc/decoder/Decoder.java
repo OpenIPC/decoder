@@ -953,7 +953,7 @@ public class Decoder extends Activity
     /** Called on a server thread (#98): the cells are chosen on the UI thread, copied here. */
     private byte[] debugSnapshotJpeg(boolean labels) {
         AtomicReference<List<Snapshots.Cell>> ref = new AtomicReference<>();
-        int[] side = new int[1];
+        int[] side = new int[2];
         CountDownLatch done = new CountDownLatch(1);
         new Handler(Looper.getMainLooper()).post(() -> {
             try {
@@ -969,12 +969,17 @@ public class Decoder extends Activity
             return null;
         }
         List<Snapshots.Cell> cells = ref.get();
-        return cells != null ? Snapshots.render(cells, side[0], labels) : null;
+        return cells != null ? Snapshots.render(cells, side[0], side[1], labels) : null;
     }
 
-    /** What to draw, UI thread only; side[0] gets the grid side (1 for a single picture). */
+    /**
+     * What to draw, UI thread only; side[0] gets the grid side (1 for a single picture),
+     * side[1] the width of the picture.
+     */
     private List<Snapshots.Cell> snapshotCells(int[] side) {
         List<Snapshots.Cell> cells = new ArrayList<>();
+        int width = Snapshots.width(getResources().getDisplayMetrics().widthPixels);
+        side[1] = width;
         if (!mResumed || udpViewShown) {
             Snapshots.Cell c = new Snapshots.Cell();
             c.label = !mResumed ? "App in background" : "U \u00b7 UDP RTP port " + UDP_RTP_PORT;
@@ -990,7 +995,7 @@ public class Decoder extends Activity
             c.label = statusText != null && statusText.getVisibility() == View.VISIBLE
                     ? statusText.getText().toString() : c.live ? "Playing" : "No new frames";
             if (c.live) {
-                c.frame = mSurface.getBitmap(Snapshots.CELL_W * 2, Snapshots.CELL_H * 2);
+                c.frame = mSurface.getBitmap(width, Snapshots.height(width));
             }
             cells.add(c);
             side[0] = 1;

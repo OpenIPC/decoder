@@ -1,7 +1,7 @@
 /*
  * Copyright (c) OpenIPC  https://openipc.org  Prosperity Public License 3.0.0
  *
- * Snapshots.java — a small JPEG of what the screen shows, for the debug page (#98)
+ * Snapshots.java — a JPEG of what the screen shows, for the debug page (#98)
  *
  */
 
@@ -31,15 +31,16 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Made only when the debug page asks for it. Cells are copied from their SurfaceViews at
- * thumbnail size with PixelCopy (the GPU scales them, no extra decoder, nothing from the
+ * the size they have in the picture with PixelCopy (the GPU scales them, no extra decoder, nothing from the
  * camera) and laid out like the screen. A cell that is not playing right now is drawn black
  * with its status, never with a stale last frame: the point is to see whether video is there.
  */
 final class Snapshots {
     private static final String TAG = "OpenIPCDecoder";
-    static final int CELL_W = 256;
-    static final int CELL_H = 144;
-    private static final int JPEG_QUALITY = 60;
+    /** The picture is as wide as the screen, but not wider than this; always 16:9. */
+    static final int MAX_WIDTH = 1920;
+    private static final int MIN_WIDTH = 640;
+    private static final int JPEG_QUALITY = 85;
     /** For all cells together: what is not copied by then is shown as "no picture". */
     private static final long COPY_TIMEOUT_MS = 2000;
 
@@ -68,14 +69,25 @@ final class Snapshots {
         return new Handler(copyThread.getLooper());
     }
 
+    /** Width of the picture for a screen of the given width (#103). */
+    static int width(int screenWidth) {
+        return Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, screenWidth));
+    }
+
+    /** Height of a picture of the given width: 16:9, like the wall on the debug page. */
+    static int height(int width) {
+        return width * 9 / 16;
+    }
+
     /**
-     * JPEG of the cells laid out in a grid of the given side (1 for the single view). Without
-     * labels the picture has only the frames: the debug page draws the text itself.
+     * JPEG of the cells laid out in a grid of the given side (1 for the single view), the
+     * whole picture {@code width} wide. Without labels the picture has only the frames: the
+     * debug page draws the text itself.
      */
-    static byte[] render(List<Cell> cells, int side, boolean labels) {
+    static byte[] render(List<Cell> cells, int side, int width, boolean labels) {
         long t0 = SystemClock.elapsedRealtime();
-        int cw = side == 1 ? CELL_W * 2 : CELL_W;
-        int ch = side == 1 ? CELL_H * 2 : CELL_H;
+        int cw = width / side;
+        int ch = height(width) / side;
         int n = Math.min(cells.size(), side * side);
         // All copies are requested at once and run side by side, then awaited together
         Copy[] copies = new Copy[n];
@@ -90,9 +102,13 @@ final class Snapshots {
         Canvas canvas = new Canvas(out);
         canvas.drawColor(Color.BLACK);
         Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
-        text.setTextSize(14);
+        // As large compared with the cell as the 14 px on the former 256×144 cells
+        float textSize = Math.max(14, ch / 10f);
+        text.setTextSize(textSize);
+        int bandH = Math.round(textSize + 6);
         Paint band = new Paint();
         band.setColor(0xA0000000);
+        Paint frames = new Paint(Paint.FILTER_BITMAP_FLAG);
         Paint grid = new Paint();
         grid.setColor(Color.DKGRAY);
         int copied = 0;
@@ -105,11 +121,11 @@ final class Snapshots {
             if (copies[i] != null && frame != null) copied++;
             boolean shown = c.live && frame != null;
             if (shown) {
-                canvas.drawBitmap(frame, null, new Rect(x, y, x + cw, y + ch), null);
+                canvas.drawBitmap(frame, null, new Rect(x, y, x + cw, y + ch), frames);
             }
             if (frame != null) frame.recycle();
             if (labels) {
-                drawLabel(canvas, c, shown, x, y, cw, ch, text, band);
+                drawLabel(canvas, c, shown, x, y, cw, ch, bandH, text, band);
                 canvas.drawRect(x, y, x + cw, y + 1, grid);
                 canvas.drawRect(x, y, x + 1, y + ch, grid);
             }
@@ -119,10 +135,10 @@ final class Snapshots {
             String time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
             text.setColor(Color.WHITE);
             float tw = text.measureText(time);
-            canvas.drawRect(out.getWidth() - tw - 8, 0, out.getWidth(), 20, band);
-            canvas.drawText(time, out.getWidth() - tw - 4, 15, text);
+            canvas.drawRect(out.getWidth() - tw - 8, 0, out.getWidth(), bandH, band);
+            canvas.drawText(time, out.getWidth() - tw - 4, bandH - 5, text);
         }
-        ByteArrayOutputStream jpeg = new ByteArrayOutputStream(64 * 1024);
+        ByteArrayOutputStream jpeg = new ByteArrayOutputStream(256 * 1024);
         out.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, jpeg);
         out.recycle();
         long t2 = SystemClock.elapsedRealtime();
@@ -132,18 +148,18 @@ final class Snapshots {
     }
 
     private static void drawLabel(Canvas canvas, Cell c, boolean shown, int x, int y, int cw,
-                                  int ch, Paint text, Paint band) {
+                                  int ch, int bandH, Paint text, Paint band) {
         String label = (c.slot > 0 ? c.slot + " \u00b7 " : "") + (c.label != null ? c.label : "");
         if (c.live && !shown) label += " \u00b7 no picture";
         if (shown) {
-            canvas.drawRect(x, y + ch - 20, x + cw, y + ch, band);
+            canvas.drawRect(x, y + ch - bandH, x + cw, y + ch, band);
             text.setColor(Color.WHITE);
             canvas.drawText(label, x + 4, y + ch - 6, text);
         } else {
             // No video: slot number and status in the middle, in red
             text.setColor(0xFFFF6060);
             float w = text.measureText(label);
-            canvas.drawText(label, x + Math.max(4, (cw - w) / 2), y + ch / 2f + 5, text);
+            canvas.drawText(label, x + Math.max(4, (cw - w) / 2), y + (ch + text.getTextSize()) / 2f, text);
         }
     }
 
