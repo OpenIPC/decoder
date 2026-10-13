@@ -24,6 +24,8 @@
 | `decoder-v2.apk` | **Текущая версия**, рекомендуется |
 | `decoder.apk`    | Старая версия из ветки `basic`    |
 
+У каждой версии 2.xx есть и свой релиз — [`v2.01`](https://github.com/OpenIPC/decoder/releases/tag/v2.01) и далее, на [странице релизов](https://github.com/OpenIPC/decoder/releases) — с APK этой версии и списком изменений после предыдущей.
+
 Есть бета-канал в [Google Play](https://play.google.com/apps/internaltest/4701231141824898735). Чтобы попасть в него, пришлите свой e-mail через [Telegram-каналы OpenIPC](https://openipc.org/our-channels).
 
 ## Возможности
