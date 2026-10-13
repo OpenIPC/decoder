@@ -138,6 +138,17 @@ class RtspClient implements RtspSession.Callback {
     private int queueFullDrops;
 
     @Override
+    public boolean onJpegFrame(byte[] buf, int offset, int length) {
+        // An http:// MJPEG slot (#121): the frame is whole already, no RTP to assemble
+        if (!videoJpeg || length < 4) return false;
+        Frame frame = framePool.obtain(length);
+        System.arraycopy(buf, offset, frame.data(), 0, length);
+        frame.setLength(length);
+        nalSink.onNal(frame);
+        return true;
+    }
+
+    @Override
     public boolean onPacket(int channel, byte[] buf, int offset, int length) {
         if (length < 12) return false;
         if (channel == RtspSession.CHANNEL_VIDEO) {

@@ -550,6 +550,19 @@ class QuadCell implements RtspSession.Callback {
     }
 
     @Override
+    public boolean onJpegFrame(byte[] buf, int offset, int length) {
+        // An http:// MJPEG slot (#121): the frame is whole already, no RTP to assemble
+        if (!jpeg || length < 4) return false;
+        videoPackets++;
+        framesIn++;
+        Frame frame = cellFramePool.obtain(length);
+        System.arraycopy(buf, offset, frame.data(), 0, length);
+        frame.setLength(length);
+        jpegSink.onNal(frame);
+        return true;
+    }
+
+    @Override
     public boolean onPacket(int channel, byte[] buf, int offset, int length) {
         if (length < 12) return false;
         if (channel == RtspSession.CHANNEL_AUDIO) {
