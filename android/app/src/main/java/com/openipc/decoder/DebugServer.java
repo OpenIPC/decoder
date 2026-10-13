@@ -40,8 +40,11 @@ final class DebugServer {
     /** Lines of the app's log served by /log. */
     static final int LOG_LINES = 500;
     private static final int SOCKET_TIMEOUT_MS = 3000;
-    /** Whole request, writing included: a client that stops reading cannot hold a worker. */
-    private static final long REQUEST_DEADLINE_MS = 5000;
+    /**
+     * Whole request, writing included: a client that stops reading cannot hold a worker.
+     * Long enough for a snapshot on a box that is busy decoding (#98).
+     */
+    private static final long REQUEST_DEADLINE_MS = 10_000;
     private static final int MAX_HEADER_BYTES = 8192;
     private static final long REBIND_DELAY_MS = 10_000;
     /** A snapshot this young is served again: several viewers cost one capture (#98). */
@@ -63,7 +66,12 @@ final class DebugServer {
     private volatile String state = "starting";
     private final ThreadPoolExecutor workers = new ThreadPoolExecutor(2, 2, 30, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(4), r -> {
-                Thread t = new Thread(r, "debug-http");
+                // Background priority: on a box busy decoding, a request waits, not the video
+                Thread t = new Thread(() -> {
+                    android.os.Process.setThreadPriority(
+                            android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                    r.run();
+                }, "debug-http");
                 t.setDaemon(true);
                 return t;
             });

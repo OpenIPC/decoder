@@ -37,9 +37,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 final class Snapshots {
     private static final String TAG = "OpenIPCDecoder";
-    static final int CELL_W = 320;
-    static final int CELL_H = 180;
-    private static final int JPEG_QUALITY = 70;
+    static final int CELL_W = 256;
+    static final int CELL_H = 144;
+    private static final int JPEG_QUALITY = 60;
     /** For all cells together: what is not copied by then is shown as "no picture". */
     private static final long COPY_TIMEOUT_MS = 2000;
 
