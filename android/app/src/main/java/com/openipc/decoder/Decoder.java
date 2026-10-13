@@ -1049,10 +1049,13 @@ public class Decoder extends Activity
         }
         long learnt = pref.getLong(PREF_DECODER_CAPACITY, 0);
         long failed = pref.getLong(PREF_DECODER_FAILED, 0);
-        if (learnt > 0) return new DecodePlanner(learnt, true, failed, MIN_CAPACITY);
         long declared = MediaCodecManager.declaredBlocksPerSec;
-        return new DecodePlanner(declared > 0 ? declared : DEFAULT_CAPACITY, false, failed,
-                MIN_CAPACITY);
+        DecodePlanner p = learnt > 0 ? new DecodePlanner(learnt, true, failed, MIN_CAPACITY)
+                : new DecodePlanner(declared > 0 ? declared : DEFAULT_CAPACITY, false, failed,
+                        MIN_CAPACITY);
+        // The decoders start together and lose frames for a moment (#148)
+        p.setWarmup(DecodePlanner.WARMUP_MS);
+        return p;
     }
 
     /**
@@ -1125,6 +1128,10 @@ public class Decoder extends Activity
                     c.pause(reason);
                     showQuadOverlay(d.index);
                     if (quadStats[d.index] != null) quadStats[d.index].setText(reason);
+                    break;
+                case RESUME:
+                    Log.i(TAG, "Quiet for a while: Quad-" + d.index + " plays again");
+                    c.resume();
                     break;
                 default:
                     break;
