@@ -136,6 +136,12 @@ outgoing:
 
 仅响应本地网络中的客户端（loopback、10/8、172.16/12、192.168/16、链路本地地址、IPv6 fc00::/7），其他地址返回 403。不会显示用户名和密码。
 
+<p align="center">
+  <img src="screenshots/debug_page.jpg" alt="调试页面：快照及每个画面的文字" width="640"><br>
+  <img src="screenshots/debug_json.png" alt="/stats.json" width="318">
+  <img src="screenshots/debug_log.png" alt="/log" width="318">
+</p>
+
 ## 已知限制
 
 > [!IMPORTANT]

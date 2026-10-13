@@ -136,6 +136,12 @@ outgoing:
 
 Отвечает только клиентам из локальной сети (loopback, 10/8, 172.16/12, 192.168/16, link-local, IPv6 fc00::/7), остальным — 403. Логины и пароли не показываются.
 
+<p align="center">
+  <img src="screenshots/debug_page.jpg" alt="Отладочная страница: снимок с текстом каждой ячейки" width="640"><br>
+  <img src="screenshots/debug_json.png" alt="/stats.json" width="318">
+  <img src="screenshots/debug_log.png" alt="/log" width="318">
+</p>
+
 ## Известные ограничения
 
 > [!IMPORTANT]
