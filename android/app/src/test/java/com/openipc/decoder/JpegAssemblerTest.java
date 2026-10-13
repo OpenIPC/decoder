@@ -179,4 +179,17 @@ public class JpegAssemblerTest {
         assertEquals(64, size[0]);
         assertEquals(32, size[1]);
     }
+
+    @Test
+    public void sizeSkipsTableBytesThatLookLikeSof() {
+        // A DQT whose table contains FF C0 before the real SOF0 (64x32)
+        byte[] tables = new byte[128];
+        tables[10] = (byte) 0xFF;
+        tables[11] = (byte) 0xC0;
+        byte[] h = JpegAssembler.headers(0, 64, 32, tables, 0);
+        int[] size = JpegAssembler.size(h, h.length);
+        assertNotNull(size);
+        assertEquals(64, size[0]);
+        assertEquals(32, size[1]);
+    }
 }

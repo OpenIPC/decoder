@@ -98,7 +98,18 @@ final class JpegCodec {
         return byNameTried ? null : BY_NAME[0];
     }
 
-    synchronized boolean decode(Frame frame, Surface target, int w, int h) throws Exception {
+    /** Frames queued in a row without any output: the decoder is not working (Qodo on #135). */
+    static final int MAX_SILENT_FRAMES = 15;
+    private int silentFrames;
+
+    /** Checked under the lock: false once the stream that called decode() has stopped. */
+    interface Current {
+        boolean holds();
+    }
+
+    synchronized boolean decode(Frame frame, Surface target, int w, int h, Current current)
+            throws Exception {
+        if (!current.holds()) return false;
         String[] dec = chosen != null ? chosen : find();
         if (dec == null) {
             if (byNameTried) throw new IllegalStateException("no JPEG decoder");
@@ -120,6 +131,7 @@ final class JpegCodec {
             }
             codec = c;
             chosen = dec;
+            silentFrames = 0;
             surface = target;
             width = w;
             height = h;
@@ -128,13 +140,15 @@ final class JpegCodec {
         int in = codec.dequeueInputBuffer(40_000);
         if (in >= 0) {
             ByteBuffer b = codec.getInputBuffer(in);
-            if (b != null && b.capacity() >= frame.length()) {
-                b.clear();
-                b.put(frame.data(), 0, frame.length());
-                codec.queueInputBuffer(in, 0, frame.length(), System.nanoTime() / 1000, 0);
-            } else {
+            if (b == null || b.capacity() < frame.length()) {
+                // A frame larger than the decoder's input buffers: let the software path have it
                 codec.queueInputBuffer(in, 0, 0, 0, 0);
+                throw new IllegalStateException("JPEG frame of " + frame.length()
+                        + " bytes does not fit the input buffer");
             }
+            b.clear();
+            b.put(frame.data(), 0, frame.length());
+            codec.queueInputBuffer(in, 0, frame.length(), System.nanoTime() / 1000, 0);
         }
         boolean rendered = false;
         int out;
@@ -145,6 +159,10 @@ final class JpegCodec {
                 rendered = true;
             }
             in = -1; // after the first output, only take what is ready
+        }
+        silentFrames = rendered ? 0 : silentFrames + 1;
+        if (silentFrames > MAX_SILENT_FRAMES) {
+            throw new IllegalStateException(MAX_SILENT_FRAMES + " frames without output");
         }
         return rendered;
     }

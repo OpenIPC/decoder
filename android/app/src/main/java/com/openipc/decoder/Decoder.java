@@ -1607,22 +1607,24 @@ public class Decoder extends Activity
      * with BitmapFactory (into the previous bitmap when the size is the same) and drawn over
      * the whole surface; the view's fit transform keeps the aspect ratio, as for video.
      */
-    private void drawJpeg(Frame frame) {
+    private void drawJpeg(Frame frame, int gen) {
         Surface s = mVideoSurface;
-        if (s == null || !s.isValid()) return;
+        if (s == null || !s.isValid() || gen != listenerGen) return;
         // The hardware JPEG decoder first, where there is one (#132)
         if (!hwJpegFailed && !jpegDrawn && JpegCodec.candidate() != null) {
             int[] size = JpegAssembler.size(frame.data(), frame.length());
             if (size != null) {
                 try {
-                    if (jpegCodec.decode(frame, s, size[0], size[1])) {
+                    if (jpegCodec.decode(frame, s, size[0], size[1],
+                            () -> gen == listenerGen && s == mVideoSurface)) {
                         jpegShown(size[0], size[1]);
                     }
                     return;
                 } catch (Exception e) {
-                    Log.w(TAG, "Hardware MJPEG decoder failed, decoding in software: "
-                            + e.getMessage());
                     jpegCodec.release();
+                    // The surface was replaced meanwhile: not the decoder's fault, try again
+                    if (s != mVideoSurface || gen != listenerGen) return;
+                    Log.w(TAG, "Hardware MJPEG decoder failed, decoding in software", e);
                     hwJpegFailed = true;
                 }
             }
@@ -1703,7 +1705,7 @@ public class Decoder extends Activity
                 try {
                     Frame buffer = nalQueue.poll(5, TimeUnit.MILLISECONDS);
                     if (buffer != null && rtspClient.isJpeg()) {
-                        drawJpeg(buffer);
+                        drawJpeg(buffer, gen);
                         framePool.recycle(buffer);
                     } else if (buffer != null && surfacePending) {
                         // Waiting for a fresh surface after MJPEG; the next key frame follows
@@ -1781,7 +1783,6 @@ public class Decoder extends Activity
 
     private void stopStreams() {
         lastJpegFrameMs = 0;
-        jpegCodec.release();
         mSurface.removeCallbacks(singleUdpCheck);
         // The single view's stream ends here: it is no longer "connected" for the debug page
         singleState = "disconnected";
@@ -1803,6 +1804,9 @@ public class Decoder extends Activity
         // for on the UI thread (#32: this used to block it for seconds)
         audioManager.setEnabled(false);
         stopExecutor();
+        // After the worker's generation is gone: a frame still in flight sees that and can no
+        // longer create the JPEG decoder again (Qodo on #135)
+        jpegCodec.release();
         nalQueue.clear();
     }
 
