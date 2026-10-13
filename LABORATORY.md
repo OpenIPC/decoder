@@ -105,7 +105,7 @@ Only for filling grid cells (Quad 2×2, 3×3) and screenshots; not used in strea
 | `172.17.32.167` | | OK |
 | `172.17.32.247` | | OK |
 | `172.17.32.248` | | OK |
-| `172.17.32.165` | H.264 | **Faulty** (2026-10-12): RTSP PLAY succeeds but no packets arrive, load average ~10; the JPEG snapshot works; reboot and codec change did not help |
+| `172.17.32.165` | H.265 1920×1080, 30 fps | OK since 2026-10-13 (SSC335, sc2336; firmware 2.6.10.12 lite). Before, on the 2024-10 firmware, the encoder produced no frames: SDP without parameter sets (`profile-level-id=000000`), `MI_VENC … ring height is zero` in `dmesg`; fixed by the firmware update |
 
 ### URLs
 
@@ -125,7 +125,7 @@ Only for filling grid cells (Quad 2×2, 3×3) and screenshots; not used in strea
 | 7 | `.167` |
 | 8 | `.53` (XM, bottom right) |
 
-The ninth cell stays empty. `.165` was meant to be first, it goes back in once it is repaired.
+The ninth cell is the U cell (pushed UDP RTP, #87). `.165` is repaired and available as a spare filler for any slot.
 
 ## What the servers support
 
@@ -258,6 +258,7 @@ The script uninstalls first. To test an upgrade that keeps the settings, use `$A
 | 4:3 screen | `wm size 960x720`, back with `wm size reset` |
 | Audio playback (sound cannot be heard remotely) | `dumpsys media.audio_flinger`: server position of the app's track; frames/s ≈ sample rate, no underruns |
 | Screenshot | `$ADB exec-out screencap -p > shot.png`; long-press screenshot in the app saves to `Pictures/OpenIPC/` |
+| Load average on SigmaStar cameras | ~10–11 is normal on SSC33x (the vendor pipeline threads sit in `D` state); not a sign of a fault |
 | UI frozen? | `dumpsys gfxinfo com.openipc.decoder`: frame count must grow |
 | Block UDP from a camera (no root on the box) | on the camera: `iptables -A OUTPUT -p udp --sport 1024: -j DROP`, remove afterwards; if the camera has no `iptables`, mark as not testable |
 | Installed build | menu → `Exit [v…, <hash>]`, or `dumpsys package com.openipc.decoder \| grep versionName` |
