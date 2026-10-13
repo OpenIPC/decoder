@@ -42,6 +42,7 @@ Two identical boxes with the same firmware (checked 2026-10-13):
 | Display | **none** (headless): only `screencap`, the debug page and the logs show what is on screen | **monitor** Philips 226VL over HDMI (HDMI audio active); for checks that need a real picture or a person looking |
 | Serial | `KFB442005119` | `KFB442001288` |
 | Extra apps | Yandex Browser TV, Faceter, Record Radio | VK TV, Wink, VLC, Nova; autostart `com.oranth.atvapplist` |
+| Role | test box: builds of working branches, 8-camera 3×3 layout below | **always the latest `v2` release** (updated after every merge into `v2`), for a look at the current app; multi-view with two cameras: slot 1 `.133`, slot 2 `.165` |
 
 Common to both:
 
