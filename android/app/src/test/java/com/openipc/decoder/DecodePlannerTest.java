@@ -33,6 +33,7 @@ public class DecodePlannerTest {
             if (d.action == DecodePlanner.Action.PROMOTE) c.full = true;
             if (d.action == DecodePlanner.Action.DEMOTE) c.full = false;
             if (d.action == DecodePlanner.Action.PAUSE) c.paused = true;
+            if (d.action == DecodePlanner.Action.RESUME) c.paused = false;
         }
     }
 
@@ -84,6 +85,56 @@ public class DecodePlannerTest {
         for (int i = 0; i < DecodePlanner.LOSS_SAMPLES; i++, t += 1000) d = p.step(cells, t);
         assertEquals(DecodePlanner.Action.PAUSE, d.action);
         assertEquals(2, d.index);
+    }
+
+    @Test
+    public void lossesDuringTheWarmupDecideNothing() {
+        DecodePlanner p = new DecodePlanner(1, false);
+        p.setWarmup(DecodePlanner.WARMUP_MS);
+        List<DecodePlanner.Cell> cells = keyCells(3, P1080_30);
+        // Every decoder starting at once loses frames (#148)
+        for (DecodePlanner.Cell c : cells) c.lossy = true;
+        long t = 0;
+        for (; t < DecodePlanner.WARMUP_MS; t += 1000) {
+            assertEquals(DecodePlanner.Action.NONE, p.step(cells, t).action);
+        }
+        // The same losses after the warm-up still count
+        DecodePlanner.Decision d = DecodePlanner.Decision.NONE;
+        for (int i = 0; i < DecodePlanner.LOSS_SAMPLES; i++, t += 1000) d = p.step(cells, t);
+        assertEquals(DecodePlanner.Action.PAUSE, d.action);
+    }
+
+    @Test
+    public void aFittingCellIsPromotedDuringTheWarmup() {
+        DecodePlanner p = new DecodePlanner(BUDGET, false);
+        p.setWarmup(DecodePlanner.WARMUP_MS);
+        List<DecodePlanner.Cell> cells = keyCells(4, P1080_30);
+        // Losses of the start do not hold back what fits (Qodo on #149)
+        for (DecodePlanner.Cell c : cells) c.lossy = true;
+        assertEquals(DecodePlanner.Action.PROMOTE, p.step(cells, 0).action);
+    }
+
+    @Test
+    public void aPausedCellPlaysAgainAfterAQuietPeriod() {
+        DecodePlanner p = new DecodePlanner(1, false);
+        List<DecodePlanner.Cell> cells = keyCells(3, P1080_30);
+        for (DecodePlanner.Cell c : cells) c.lossy = true;
+        long t = 0;
+        DecodePlanner.Decision d = DecodePlanner.Decision.NONE;
+        for (int i = 0; i < DecodePlanner.LOSS_SAMPLES; i++, t += 1000) d = p.step(cells, t);
+        apply(cells, d);
+        assertTrue(cells.get(2).paused);
+        cells.get(2).playing = false;
+        for (DecodePlanner.Cell c : cells) c.lossy = false;
+        // Quiet: after the (doubled) wait the paused cell gets another try (#148)
+        d = DecodePlanner.Decision.NONE;
+        long pausedAt = t;
+        for (; d.action != DecodePlanner.Action.RESUME && t < pausedAt + 10 * 60_000; t += 1000) {
+            d = p.step(cells, t);
+        }
+        assertEquals(DecodePlanner.Action.RESUME, d.action);
+        assertEquals(2, d.index);
+        assertTrue(t - pausedAt >= DecodePlanner.PROBE_QUIET_MS);
     }
 
     @Test

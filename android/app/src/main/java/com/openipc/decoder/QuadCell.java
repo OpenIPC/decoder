@@ -552,6 +552,15 @@ class QuadCell implements RtspSession.Callback {
         stop();
     }
 
+    /** Back after a pause by the planner (#148): on key frames, as a cell starts. */
+    void resume() {
+        if (pausedReason == null) return;
+        pausedReason = null;
+        problem = null;
+        setKeyFramesOnly(true);
+        start();
+    }
+
     @Override
     public void onSdp(Sdp sdp) {
         // First the path, so a JPEG frame still being drawn no longer counts as current
@@ -587,6 +596,21 @@ class QuadCell implements RtspSession.Callback {
         // A stopped or deselected cell holds an old route: the AudioManager ignores it
         AudioManager sink = audioSink;
         if (sink != null) sink.configure(sdp.audio, audioRoute);
+    }
+
+    @Override
+    public boolean onJpegFrame(byte[] buf, int offset, int length) {
+        // An http:// MJPEG slot (#121): the frame is whole already, no RTP to assemble
+        if (!jpeg || length < 4) return false;
+        // A JPEG at all (SOI); anything else must not keep the stream "connected" (Qodo on #150)
+        if ((buf[offset] & 0xFF) != 0xFF || (buf[offset + 1] & 0xFF) != 0xD8) return false;
+        videoPackets++;
+        framesIn++;
+        Frame frame = cellFramePool.obtain(length);
+        System.arraycopy(buf, offset, frame.data(), 0, length);
+        frame.setLength(length);
+        nalSink.onNal(frame);
+        return true;
     }
 
     @Override
