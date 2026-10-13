@@ -283,6 +283,9 @@ class QuadCell implements RtspSession.Callback {
         lastIn = in;
         lastOut = out;
         lastLost = lost;
+        int netLoss = nalAssembler.lossCount();
+        networkLoss = netLoss > lastNetLoss;
+        lastNetLoss = netLoss;
         lastSampleMs = nowMs;
         checkUdpStall();
 
@@ -409,6 +412,18 @@ class QuadCell implements RtspSession.Callback {
     boolean showsVideo(long ms) {
         long window = keyFramesOnly ? Math.max(ms, KEY_FRAMES_LIVE_MS) : ms;
         return pausedReason == null && "connected".equals(state) && decoder.renderedWithin(window);
+    }
+
+    /** NAL units were lost on the network in the last second (#145). */
+    private volatile boolean networkLoss;
+    private int lastNetLoss;
+
+    /**
+     * Connected, not paused, and whole frames arrive (#145): a cell losing packets on the
+     * network may decode nothing for that reason alone (#113, #133).
+     */
+    boolean isReceiving() {
+        return pausedReason == null && "connected".equals(state) && inFps >= 1 && !networkLoss;
     }
 
     /** Connected and decoding: its load is real, so demoting or pausing it helps (#85). */

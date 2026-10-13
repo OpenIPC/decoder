@@ -76,4 +76,14 @@ public class QuadGridTest {
                 java.util.Arrays.asList("172.17.32.144", "192.168.1.20"), 5600);
         assertTrue(two, two.endsWith("output to\n\n172.17.32.144:5600\n192.168.1.20:5600"));
     }
+
+    @Test
+    public void decoderStuckNeedsSeveralReceivingCellsAndNoOutput() {
+        assertTrue(Decoder.looksStuck(2, 0));
+        assertTrue(Decoder.looksStuck(9, 0));
+        // One camera alone may just wait for a key frame; any output means it works
+        assertFalse(Decoder.looksStuck(1, 0));
+        assertFalse(Decoder.looksStuck(9, 1));
+        assertFalse(Decoder.looksStuck(0, 0));
+    }
 }

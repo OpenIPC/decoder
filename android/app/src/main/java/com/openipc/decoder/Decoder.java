@@ -30,6 +30,7 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.util.Log;
+import android.util.TypedValue;
 import android.view.GestureDetector;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -482,6 +483,7 @@ public class Decoder extends Activity
         menuManager.setUdpShown(false);
         stopQuadCells();
         quadContainer.setVisibility(View.GONE);
+        showDecoderStuck(false);
         mSurface.setVisibility(View.VISIBLE);
         return true;
     }
@@ -735,6 +737,7 @@ public class Decoder extends Activity
         }
 
         quadContainer.setVisibility(View.GONE);
+        showDecoderStuck(false);
         mSurface.setVisibility(View.VISIBLE);
     }
 
@@ -1021,12 +1024,68 @@ public class Decoder extends Activity
                 v.setVisibility(showStats ? View.VISIBLE : View.GONE);
                 if (log) Log.i(TAG, "Quad-" + i + ": " + line);
             }
+            checkDecoderStuck(cells);
             planDecoding(cells, now);
             updateDebugUrls();
             refreshUdpHint();
             quadContainer.postDelayed(this, 1000);
         }
     };
+
+    // ====================== The device's decoder stands still (#145) ======================
+
+    /** Seconds with frames arriving in several cells and none decoded: the device is stuck. */
+    static final int STUCK_SECONDS = 20;
+    private int stuckSeconds;
+    private TextView stuckBanner;
+
+    /** At least two cells receive and none of them decodes a frame (#145). */
+    static boolean looksStuck(int receiving, int decoding) {
+        return receiving >= 2 && decoding == 0;
+    }
+
+    /**
+     * Seen on the AG-216: every cell receives but no decoder gives a frame, and only a reboot
+     * of the device helps (#145). Said on screen instead of black cells and "0.0 fps".
+     */
+    private void checkDecoderStuck(QuadCell[] cells) {
+        int receiving = 0;
+        int decoding = 0;
+        for (QuadCell c : cells) {
+            if (c == null || !c.isReceiving()) continue;
+            receiving++;
+            if (c.outFps() > 0) decoding++;
+        }
+        stuckSeconds = looksStuck(receiving, decoding) ? stuckSeconds + 1 : 0;
+        showDecoderStuck(stuckSeconds >= STUCK_SECONDS);
+    }
+
+    private void showDecoderStuck(boolean on) {
+        if (!on) {
+            stuckSeconds = 0;
+            if (stuckBanner != null) stuckBanner.setVisibility(View.GONE);
+            return;
+        }
+        if (stuckBanner == null) {
+            stuckBanner = new TextView(this);
+            stuckBanner.setText("The video decoder of this device does not respond.\n"
+                    + "Frames arrive, none is decoded. Restart the device.");
+            stuckBanner.setTextColor(Color.WHITE);
+            stuckBanner.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+            stuckBanner.setGravity(Gravity.CENTER);
+            stuckBanner.setBackgroundColor(0xCC000000);
+            int pad = (int) (16 * getResources().getDisplayMetrics().density);
+            stuckBanner.setPadding(pad, pad, pad, pad);
+            ((FrameLayout) menuAnchor).addView(stuckBanner, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.CENTER));
+        }
+        if (stuckBanner.getVisibility() != View.VISIBLE) {
+            Log.w(TAG, "No cell decodes although frames arrive: the device's decoder is stuck");
+        }
+        stuckBanner.setVisibility(View.VISIBLE);
+        stuckBanner.bringToFront();
+    }
 
     private void startStatsTick() {
         quadContainer.removeCallbacks(quadStatsTick);
@@ -1357,6 +1416,8 @@ public class Decoder extends Activity
             dec.put("learnt", planner.isLearnt());
             dec.put("failed_load", planner.failedLoad());
             m.put("decoder", dec);
+            // Frames arrive in several cells, none decodes: restart the device (#145)
+            m.put("decoder_stuck", stuckSeconds >= STUCK_SECONDS);
         }
         if (udpViewShown) {
             Map<String, Object> udp = new LinkedHashMap<>();
@@ -1885,6 +1946,7 @@ public class Decoder extends Activity
         } else {
             // The views may still be in Quad layout from before the pause
             quadContainer.setVisibility(View.GONE);
+            showDecoderStuck(false);
             mSurface.setVisibility(View.VISIBLE);
             boolean configured = mHost != null && !mHost.isEmpty() && !mHost.equals(DEFAULT_URL);
             if (configured) {
