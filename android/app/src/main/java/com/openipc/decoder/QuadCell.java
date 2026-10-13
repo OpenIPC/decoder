@@ -77,6 +77,7 @@ class QuadCell implements RtspSession.Callback {
     private volatile boolean jpeg;
     // MJPEG in multi-view (#132)
     private final JpegAssembler jpegAssembler;
+    private final JpegAssembler.Sink jpegSink;
     private final JpegRenderer jpegRenderer = new JpegRenderer();
     /** JPEG frames shown, the MJPEG counterpart of the decoder's output count. */
     private volatile int jpegFramesOut;
@@ -155,6 +156,8 @@ class QuadCell implements RtspSession.Callback {
             decoder.closeDecoder();
         }, pool);
         this.jpegAssembler = new JpegAssembler(pool);
+        // Once, not a method reference per packet: the receive path makes no garbage (#61)
+        this.jpegSink = nalSink::onNal;
     }
 
     void start() {
@@ -242,7 +245,8 @@ class QuadCell implements RtspSession.Callback {
         audioSink = null;
         session.stop();
         nalAssembler.reset();
-        jpegAssembler.reset();
+        // Not the JPEG assembler: a packet may still be in it on the receive thread; the next
+        // stream resets it in onSdp() (Qodo on #139)
         jpegRenderer.release();
         jpegShowing = false;
         lastJpegShownMs = 0;
@@ -550,7 +554,7 @@ class QuadCell implements RtspSession.Callback {
         videoPackets++;
         if ((buf[offset + 1] & 0x80) != 0) framesIn++;
 
-        if (jpeg) return jpegAssembler.assemble(buf, offset, length, nalSink::onNal);
+        if (jpeg) return jpegAssembler.assemble(buf, offset, length, jpegSink);
         return nalAssembler.assemble(buf, offset, length, codecH265, nalSink);
     }
 
