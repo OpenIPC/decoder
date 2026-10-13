@@ -207,13 +207,13 @@ final class HttpMjpeg {
                 String tail;
                 while (true) {
                     if (!readUntil(body, end, part)) return;
-                    tail = readLine(body);
+                    // The rest of the line as it is, terminator included
+                    tail = readRawLine(body);
                     if (tail == null) return;
                     String t = tail.trim();
                     if (t.isEmpty() || t.equals("--")) break;
-                    // Not a delimiter line: put back what was taken for one
-                    byte[] back = ("\n" + delimiter + tail + "\n")
-                            .getBytes(StandardCharsets.ISO_8859_1);
+                    // Not a delimiter line: put back exactly what was taken for one
+                    byte[] back = ("\n" + delimiter + tail).getBytes(StandardCharsets.ISO_8859_1);
                     part.write(back, 0, back.length);
                     if (part.size() > MAX_PART) throw new IOException("MJPEG part too large");
                 }
@@ -260,6 +260,18 @@ final class HttpMjpeg {
             if (r < 0) throw new IOException("Stream ended inside a part");
             off += r;
         }
+    }
+
+    /** Bytes up to and including LF, as ISO-8859-1; null at the end of the stream. */
+    private static String readRawLine(InputStream in) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        int b;
+        while ((b = in.read()) >= 0) {
+            sb.append((char) b);
+            if (b == '\n') return sb.toString();
+            if (sb.length() >= MAX_LINE) return sb.toString();
+        }
+        return sb.length() > 0 ? sb.toString() : null;
     }
 
     /** One CRLF (or LF) terminated ASCII line without the terminator; null at the end. */
