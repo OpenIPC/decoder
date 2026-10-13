@@ -83,7 +83,9 @@ public class CredentialStoreTest {
         // Another key (e.g. data restored on another device)
         assertNull(new CredentialStore(new TestCipher()).open(sealed));
         // Tampered or truncated data
-        assertNull(store.open(sealed.substring(0, sealed.length() - 2) + "00"));
+        // Change the last two characters for sure: "00" could be the original ones (1 in 256)
+        String tail = sealed.endsWith("00") ? "ff" : "00";
+        assertNull(store.open(sealed.substring(0, sealed.length() - 2) + tail));
         assertNull(store.open(CredentialStore.PREFIX + "zz"));
         assertNull(store.open(CredentialStore.PREFIX + "abc"));
     }
