@@ -63,6 +63,7 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 | **U**        | The U cell full-screen: the camera that pushes RTP over UDP to port 5600                                                                                                           |
 | **D**        | Text in the corner of every multi-view cell (resolution, codec, decoded/received fps, key frames, status), or in none                                                        |
 | **Q**        | Turn multi-view (Quad) on or off                                                                                                                                                   |
+| **S**        | Slides: multi-view with every camera on key frames only (the picture updates once per key frame interval), the lowest decoder load; S or Q goes back to the adaptive grid          |
 | **Settings** | Edit the URL and the transport of the active slot (single-camera mode only)                                                                                                        |
 | **WebUI**    | Open the camera's web interface; credentials come from the RTSP URL (single-camera mode only)                                                                                      |
 | **Exit**     | Close the app. The small text next to it is the app version and build hash.                                                                                                        |

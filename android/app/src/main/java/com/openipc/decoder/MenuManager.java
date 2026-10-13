@@ -52,6 +52,9 @@ class MenuManager {
     private LinearLayout mMenuLayout;
     private TextView[] mCachedCamButtons;
     private TextView mCachedQuadBtn;
+    private TextView mCachedSlidesBtn;
+    /** Slide mode (#108): multi-view with every cell on key frames only. */
+    private boolean slidesShown;
     private TextView mCachedUdpBtn;
     private TextView mCachedStatsBtn;
     private boolean statsShown;
@@ -69,6 +72,8 @@ class MenuManager {
     interface Listener {
         void onSwitchCamera(int slot);
         void onToggleQuad();
+        /** S: slide mode on or off — multi-view on key frames only (#108). */
+        void onToggleSlides();
         /** U: the reserved UDP RTP cell full-screen (#68). */
         void onShowUdp();
         /** D: debug text (resolution, codec, fps) in every multi-view cell on or off. */
@@ -104,6 +109,8 @@ class MenuManager {
     void setUdpShown(boolean shown) { udpShown = shown; }
 
     void setStatsShown(boolean shown) { statsShown = shown; }
+
+    void setSlidesShown(boolean shown) { slidesShown = shown; }
 
     void applyQualityToActive(boolean quadEnabled, int mActive) {
         if (camButtons != null && !quadEnabled && !udpShown) {
@@ -249,16 +256,30 @@ class MenuManager {
             if (listener != null) listener.onToggleStats();
         });
 
-        // Q last: 1 2 3 4 5 6 7 8 U D Q (#93)
+        // Q, then S last: 1 2 3 4 5 6 7 8 U D Q S (#93, #108)
         camRow.addView(quadBtn, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
-        if (quadEnabled) highlightItem(quadBtn);
+        if (quadEnabled && !slidesShown) highlightItem(quadBtn);
         mCachedQuadBtn = quadBtn;
         quadBtn.setOnClickListener(v -> {
             PopupWindow p = mMenuPopup;
             if (p != null) p.dismiss();
             if (listener != null) listener.onToggleQuad();
+        });
+
+        final TextView slidesBtn = createItem("S");
+        slidesBtn.setGravity(Gravity.CENTER);
+        slidesBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
+        camRow.addView(slidesBtn, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        if (quadEnabled && slidesShown) highlightItem(slidesBtn);
+        mCachedSlidesBtn = slidesBtn;
+        slidesBtn.setOnClickListener(v -> {
+            PopupWindow p = mMenuPopup;
+            if (p != null) p.dismiss();
+            if (listener != null) listener.onToggleSlides();
         });
 
         String code = "Exit [v" + version + ", " + gitHash + "]";
@@ -305,8 +326,12 @@ class MenuManager {
             mWebUiBtn.setVisibility(single ? View.VISIBLE : View.GONE);
         }
         if (mCachedQuadBtn != null) {
-            if (quadEnabled) highlightItem(mCachedQuadBtn);
+            if (quadEnabled && !slidesShown) highlightItem(mCachedQuadBtn);
             else resetItem(mCachedQuadBtn);
+        }
+        if (mCachedSlidesBtn != null) {
+            if (quadEnabled && slidesShown) highlightItem(mCachedSlidesBtn);
+            else resetItem(mCachedSlidesBtn);
         }
         if (mCachedUdpBtn != null) {
             if (udpShown) highlightItem(mCachedUdpBtn);
@@ -343,6 +368,7 @@ class MenuManager {
     /** The highlighted item of the slot row: the active slot, Q in multi-view, U. */
     private TextView focusItem(boolean quadEnabled, int mActive) {
         if (udpShown && mCachedUdpBtn != null) return mCachedUdpBtn;
+        if (quadEnabled && slidesShown && mCachedSlidesBtn != null) return mCachedSlidesBtn;
         if (quadEnabled && mCachedQuadBtn != null) return mCachedQuadBtn;
         if (camButtons != null && mActive >= 0 && mActive < camButtons.length) {
             return camButtons[mActive];
