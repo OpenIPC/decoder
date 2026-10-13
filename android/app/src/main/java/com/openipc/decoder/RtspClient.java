@@ -69,6 +69,8 @@ class RtspClient implements RtspSession.Callback {
     }
 
     boolean isActive() { return session.isActive(); }
+    /** Transport the stream really uses now, or null (#115). */
+    String transportInUse() { return session.transportInUse(); }
     long getStreamBytes() { return session.getStreamBytes(); }
     long getBitrateMarkNs() { return session.getBitrateMarkNs(); }
 

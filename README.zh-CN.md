@@ -102,6 +102,8 @@ adb shell am start -a android.intent.action.SEND -t text/plain \
 | **Auto**        | 优先 UDP，UDP 不可用时改用 TCP              | 摄像机拒绝 UDP 或 3 秒内未收到视频时回退到 TCP，并保持 TCP 直到修改该槽位                                               |
 | **Multicast**   | RTSP 组播（Android 8.0+），被拒绝时改用 TCP | 适用于提供 RTSP 组播的服务器。OpenIPC Majestic 和 XM 摄像机不支持：它们返回 400 或 451，槽位会在同一连接中改用 TCP 播放 |
 
+实际使用的传输方式会在单画面模式开始播放时显示（`Connected • UDP • H.265 …`），也会显示在调试页面和 `/stats.json` 中（`transport`；槽位的设置为 `transport_mode`）。回退后会显示为例如 `TCP (auto)`。
+
 ### UDP 槽位 (Majestic outgoing)
 
 槽位也可以接收摄像机不经 RTSP 主动推送的 RTP。为此请填写 `udp://` 地址代替 `rtsp://`：

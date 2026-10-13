@@ -34,6 +34,18 @@ class Transport {
         }
     }
 
+    /**
+     * What to show for a stream (#112, #115): the transport in use, with the mode when it fell
+     * back ("TCP (auto)", "TCP (multicast)"); the mode alone while nothing plays yet.
+     */
+    static String label(String inUse, Mode mode) {
+        String m = mode != null ? mode.name() : "TCP";
+        if (inUse == null) return m;
+        boolean fellBack = "TCP".equals(inUse)
+                && (mode == Mode.AUTO || mode == Mode.MULTICAST);
+        return fellBack ? inUse + " (" + m.toLowerCase(java.util.Locale.ROOT) + ")" : inUse;
+    }
+
     /** RTP over the RTSP connection ("RTP/AVP/TCP" or an interleaved= parameter). */
     boolean tcp;
     boolean multicast;

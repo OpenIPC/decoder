@@ -149,9 +149,19 @@ class RtspSession {
         }
     }
 
+    /**
+     * Transport of the stream that plays now, as negotiated (#112, #115): "TCP", "UDP",
+     * "multicast" for RTSP; "UDP push" / "multicast push" for udp:// URLs; null when not
+     * playing. Unlike the mode of the slot, it shows a fallback (Auto → TCP).
+     */
+    private volatile String inUse;
+
+    String transportInUse() { return inUse; }
+
     /** Stop without waiting: threads exit on their own and deliver no more callbacks. */
     void stop() {
         synchronized (lock) {
+            inUse = null;
             generation++;
             active = false;
             keepalive = null;
@@ -407,8 +417,9 @@ class RtspSession {
                 active = true;
                 keepalive = new Keepalive(c, u.requestUrl, session, keepaliveMs);
                 udpPlaying = rx != null;
+                inUse = rx == null ? "TCP" : mc ? "multicast" : "UDP";
             }
-            Log.i(TAG, tag + ": playing over " + (rx == null ? "TCP" : mc ? "multicast" : "UDP"));
+            Log.i(TAG, tag + ": playing over " + inUse);
             status(gen, "buffering");
             s.setSoTimeout(0); // the watchdog handles silence
             if (rx != null) {
@@ -419,7 +430,10 @@ class RtspSession {
             return true;
         } finally {
             synchronized (lock) {
-                if (socket == s) socket = null;
+                if (socket == s) {
+                    socket = null;
+                    inUse = null;
+                }
                 // A newer connection may own these by now
                 if (udp == rx) {
                     udp = null;
@@ -477,6 +491,7 @@ class RtspSession {
                 // packets), and report "connected" again with the next usable one
                 if (!first[0] && System.nanoTime() / 1_000_000 - lastPacketMs > watchdogMs) {
                     first[0] = true;
+                    inUse = null; // listening, but nothing is being pushed (Qodo on #117)
                     status(gen, "disconnected");
                 }
                 return true;
@@ -502,6 +517,8 @@ class RtspSession {
                     lastPacketMs = System.nanoTime() / 1_000_000;
                     if (first[0]) {
                         first[0] = false;
+                        // In use only once something arrives: a quiet port is not a stream
+                        inUse = u.multicast() ? "multicast push" : "UDP push";
                         status(gen, "connected");
                     }
                 }
@@ -512,6 +529,7 @@ class RtspSession {
                 if (listener == l) {
                     listener = null;
                     listening = false;
+                    inUse = null;
                 }
             }
             l.close();
