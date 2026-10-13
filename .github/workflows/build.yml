@@ -9,6 +9,13 @@ on:
         required: false
         type: string
 
+# One run per branch (and event): a newer push cancels the older run, so on basic / v2 the
+# "latest" release always gets the build of the newest commit, not of the run that finished
+# last (#90). Manual runs have their own group and are never cancelled by a push.
+concurrency:
+  group: build-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
 jobs:
   # Unit tests and lint; also runs for pull requests from forks (no secrets needed)
   test:
