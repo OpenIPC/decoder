@@ -30,9 +30,9 @@
 
 - **视频：** RTSP 播放，通过 MediaCodec 进行 H.264/H.265 硬件解码，支持 RTSP 上的 MJPEG（RTP/JPEG，仅单画面），解码器出错后自动恢复，画面适配任意屏幕比例
 - **音频：** AAC（RFC 3640 `mpeg4-generic`、ADTS、MP4A-LATM）、Opus、G.711 μ-law/A-law、L16 PCM（单声道/立体声）；多画面模式下播放所选画面的声音
-- **显示：** 单路画面，或多画面模式（Quad），以 2×2 或 3×3 网格最多同时显示 8 路摄像机
+- **显示：** 单路画面，或多画面模式（Quad），以 2×2 或 3×3 网格最多显示 8 路摄像机外加 U 画面（主动推送 RTP 的摄像机）；自适应解码（每个画面全帧率或仅关键帧，上限按设备实测）；幻灯片（S）：所有摄像机仅解码关键帧
 - **操作：** 双指缩放、拖动平移、双击复位，支持 Android TV 遥控器（Leanback 启动器）
-- **网络：** RTSP over TCP 或 UDP（Auto 模式可回退到 TCP）、RTSP 组播、接收摄像机通过 UDP 主动推送的 RTP（单播或组播），支持 Basic 和 Digest 认证、RTSP 保活，断线后自动重连（指数退避），连接质量指示
+- **网络：** RTSP over TCP 或 UDP（默认 Auto：UDP 被拒绝、无视频或关键帧持续丢失时回退到 TCP），连接时显示实际使用的传输方式、RTSP 组播、接收摄像机通过 UDP 主动推送的 RTP（单播或组播），支持 Basic 和 Digest 认证、RTSP 保活，断线后自动重连（指数退避），连接质量指示
 - **WebUI：** 内置浏览器，可打开摄像机的网页管理界面
 - **其他：** 8 个摄像机槽位，地址加密保存，长按截图，可接收其他应用分享的地址
 
@@ -105,6 +105,10 @@ adb shell am start -a android.intent.action.SEND -t text/plain \
 
 实际使用的传输方式会在单画面模式开始播放时显示（`Connected • UDP • H.265 …`），也会显示在调试页面和 `/stats.json` 中（`transport`；槽位的设置为 `transport_mode`）。回退后会显示为例如 `TCP (auto)`。
 
+<p align="center">
+  <img src="screenshots/single_status.jpg" alt="单画面刚连接时：传输方式、编码和码率" width="640">
+</p>
+
 ### UDP 槽位 (Majestic outgoing)
 
 槽位也可以接收摄像机不经 RTSP 主动推送的 RTP。为此请填写 `udp://` 地址代替 `rtsp://`：
@@ -152,6 +156,8 @@ outgoing:
 >
 > - **RTSP 组播需要 Android 8.0+**，且服务器须支持；OpenIPC 摄像机不支持 — [#69](https://github.com/OpenIPC/decoder/issues/69)
 > - **不支持 G.726 音频，也不支持流内配置的 MP4A-LATM（`cpresent=1`）。** OpenIPC Majestic 不使用这些格式，支持 G.726 的摄像机通常也能输出 G.711 或 AAC — [#14](https://github.com/OpenIPC/decoder/issues/14)
+> - **MJPEG 仅支持单画面且为软件解码**；硬件解码和多画面见 [#132](https://github.com/OpenIPC/decoder/issues/132)
+> - **在多画面与单画面之间切换时，部分电视盒子（如 AG-216）的画面可能会冻结数秒** — [#76](https://github.com/OpenIPC/decoder/issues/76)
 > - **用户名和密码以明文传输**（未加密的 RTSP/HTTP；摄像机未要求 Digest 时发送 Basic），不支持 RTSPS，也不计划支持 — [#16](https://github.com/OpenIPC/decoder/issues/16)
 >
 > 已知的程序错误另行收录在 [`bug` 标签](https://github.com/OpenIPC/decoder/issues?q=is%3Aissue+is%3Aopen+label%3Abug)下。
@@ -199,6 +205,8 @@ export KEY_PASS=your_key_password
 | `Transport`、`UdpReceiver`、`RtpReorder` | 传输方式协商；带发送端过滤的 UDP 与组播接收；数据包重排序                 |
 | `RtpListener`                            | `udp://` 槽位：接收摄像机主动推送的 RTP                                   |
 | `NalAssembler`                           | 将 RTP 包重组为 H.264/H.265 NAL 单元，丢弃因丢包而损坏的单元              |
+| `JpegAssembler`                          | MJPEG：由 RTP/JPEG（RFC 2435）重组完整的 JPEG 帧                          |
+| `DecodePlanner`                          | 多画面：在解码器实测能力内决定哪些画面全帧率、哪些仅解码关键帧            |
 | `MediaCodecManager`、`DecoderRetry`      | 硬件视频解码器的生命周期管理与出错后的恢复                                |
 | `AudioManager`、`AudioConfig`            | 音频处理：G.711/L16 转换、AAC/Opus 解码、通过 AudioTrack 播放             |
 | `QuadCell`                               | 多画面中的单个画面：独立的会话、解码器和可选音频                          |
@@ -206,7 +214,7 @@ export KEY_PASS=your_key_password
 | `CredentialStore`、`KeystoreCipher`      | 摄像机地址加密存储（Android Keystore）                                    |
 | `FramePool`、`Frame`                     | 缓冲区池，减轻垃圾回收压力                                                |
 | `App`、`Crash`                           | 未捕获异常处理与崩溃报告界面                                              |
-| `DebugServer`、`NetInfo`                 | 8085 端口调试页面（仅本地网络）、设备地址                                     |
+| `DebugServer`、`NetInfo`、`Snapshots`    | 8085 端口调试页面（仅本地网络）、设备地址、屏幕快照                           |
 
 网络、视频解码和音频分别运行在独立线程中，解码器较慢时也不会阻塞网络读取。
 
