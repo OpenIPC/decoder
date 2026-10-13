@@ -17,6 +17,7 @@ import android.view.Surface;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 class MediaCodecManager {
     private static final String TAG = "OpenIPCDecoder";
@@ -30,6 +31,14 @@ class MediaCodecManager {
 
     /** Largest NAL unit (single view); 4K key frames at high bitrate can exceed 1 MiB. */
     static final int MAX_NAL_SIZE = 2 * 1024 * 1024;
+    /** One wait for a free input buffer, in microseconds. */
+    private static final long INPUT_POLL_US = 5_000;
+    /**
+     * How long a NAL unit waits for a free input buffer before it is dropped (#89): longer
+     * than a frame at 30 fps, so a decoder that only falls behind for a moment loses nothing;
+     * meanwhile the network queue of the stream takes the backlog.
+     */
+    static final long INPUT_WAIT_MS = 40;
 
     private volatile MediaCodec decoder;
     private final Object decoderLock = new Object();
@@ -54,6 +63,8 @@ class MediaCodecManager {
     private volatile long lastFrameMs;
     /** NAL units not fed because the decoder had no free input buffer: it is not keeping up. */
     private volatile int inputDropped;
+    /** closeDecoder() calls waiting for decoderLock: the input wait gives way to them. */
+    private final AtomicInteger closeWaiting = new AtomicInteger();
     private volatile int outWidth;
     private volatile int outHeight;
     /** MIME type whose instance slot this manager holds while it has a decoder (#83). */
@@ -187,6 +198,15 @@ class MediaCodecManager {
 
     /** Release the decoder on purpose (codec switch, camera switch): no back-off. */
     void closeDecoder() {
+        closeWaiting.incrementAndGet();
+        try {
+            closeDecoderLocked();
+        } finally {
+            closeWaiting.decrementAndGet();
+        }
+    }
+
+    private void closeDecoderLocked() {
         synchronized (decoderLock) {
             retry.onSuccess();
             MediaCodec codec = decoder;
@@ -315,7 +335,17 @@ class MediaCodecManager {
                     if ((configSeen & needed) == needed) awaitingConfig = false;
                 }
                 try {
-                    int inputBufferId = codec.dequeueInputBuffer(5_000);
+                    // No free input buffer at once: give decoded frames back (the decoder may
+                    // be waiting for output space) and try again, for up to INPUT_WAIT_MS.
+                    // Dropping a NAL unit corrupts the picture until the next key frame (#89)
+                    int inputBufferId = codec.dequeueInputBuffer(INPUT_POLL_US);
+                    long waitUntil = nowMs() + INPUT_WAIT_MS;
+                    // A close or a pause waiting for the lock ends the wait at once (UI thread)
+                    while (inputBufferId < 0 && nowMs() < waitUntil && enabled
+                            && closeWaiting.get() == 0) {
+                        drainOutput(codec);
+                        inputBufferId = codec.dequeueInputBuffer(INPUT_POLL_US);
+                    }
                     if (inputBufferId >= 0) {
                         ByteBuffer inputBuffer = codec.getInputBuffer(inputBufferId);
                         if (inputBuffer != null) {
@@ -324,30 +354,11 @@ class MediaCodecManager {
                             codec.queueInputBuffer(inputBufferId, 0,
                                     buffer.length(), System.nanoTime() / 1000, flag);
                         }
-                    } else {
+                    } else if (enabled && closeWaiting.get() == 0) {
+                        // Only a full wait is a decoder loss; a close or pause cut it short
                         inputDropped++;
                     }
-
-                    MediaCodec.BufferInfo info = bufferInfo;
-                    int outputBufferId;
-                    while ((outputBufferId = codec.dequeueOutputBuffer(info, 0)) >= 0
-                            || outputBufferId == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                        if (outputBufferId == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                            MediaFormat format = codec.getOutputFormat();
-                            int mWidth = format.getInteger(MediaFormat.KEY_WIDTH);
-                            int mHeight = format.getInteger(MediaFormat.KEY_HEIGHT);
-                            outWidth = mWidth;
-                            outHeight = mHeight;
-                            if (listener != null) {
-                                listener.onResolutionChanged(mWidth, mHeight);
-                            }
-                        } else {
-                            codec.releaseOutputBuffer(outputBufferId, true);
-                            framesOut++;
-                            lastFrameMs = nowMs();
-                            retry.onSuccess(); // a decoded frame: the decoder works
-                        }
-                    }
+                    drainOutput(codec);
                 } catch (Exception e) {
                     decoder = null;
                     releaseSlot();
@@ -361,5 +372,29 @@ class MediaCodecManager {
             }
         }
         return needCreate;
+    }
+
+    /** Renders every decoded frame that is ready; caller holds decoderLock. */
+    private void drainOutput(MediaCodec codec) {
+        MediaCodec.BufferInfo info = bufferInfo;
+        int outputBufferId;
+        while ((outputBufferId = codec.dequeueOutputBuffer(info, 0)) >= 0
+                || outputBufferId == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+            if (outputBufferId == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                MediaFormat format = codec.getOutputFormat();
+                int mWidth = format.getInteger(MediaFormat.KEY_WIDTH);
+                int mHeight = format.getInteger(MediaFormat.KEY_HEIGHT);
+                outWidth = mWidth;
+                outHeight = mHeight;
+                if (listener != null) {
+                    listener.onResolutionChanged(mWidth, mHeight);
+                }
+            } else {
+                codec.releaseOutputBuffer(outputBufferId, true);
+                framesOut++;
+                lastFrameMs = nowMs();
+                retry.onSuccess(); // a decoded frame: the decoder works
+            }
+        }
     }
 }
