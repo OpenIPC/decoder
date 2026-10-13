@@ -142,8 +142,11 @@ class QuadCell implements RtspSession.Callback {
             }
         });
         this.nalSink = nal -> {
-            // Whole units out of the assembler, before the queue: what really arrives (#145)
-            assembled++;
+            // Picture slices out of the assembler, before the queue: what the video decoder
+            // would get (#145); parameter sets alone are no picture (Qodo on #147)
+            if (!jpeg && nal.length() > 4 && NalAssembler.isSlice(nal.data()[4], codecH265)) {
+                assembled++;
+            }
             if (!nalQueue.offer(nal)) {
                 // Rate-limited: one aggregation packet can carry many NAL units
                 if (queueFullDrops++ % 100 == 0) {
@@ -504,6 +507,9 @@ class QuadCell implements RtspSession.Callback {
      * Connected, not paused, and whole frames arrive (#145): a cell losing packets on the
      * network may decode nothing for that reason alone (#113, #133).
      */
+    /** H.264/H.265, decoded by the device's video decoder (not MJPEG, #145). */
+    boolean usesVideoDecoder() { return !jpeg; }
+
     boolean isReceiving() {
         return pausedReason == null && "connected".equals(state) && unitsArrived
                 && !networkLoss;

@@ -1062,6 +1062,8 @@ public class Decoder extends Activity
         for (QuadCell c : cells) {
             if (c == null) continue;
             // Output of any cell, a lossy one too, shows the decoder works (Qodo on #147)
+            // Only H.264/H.265 cells: MJPEG may be drawn without the video decoder at all
+            if (!c.usesVideoDecoder()) continue;
             if (c.outFps() > 0) anyOutput = true;
             if (c.isReceiving()) receiving++;
         }

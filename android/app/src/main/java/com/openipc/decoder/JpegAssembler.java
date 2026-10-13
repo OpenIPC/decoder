@@ -83,7 +83,8 @@ final class JpegAssembler {
     /** Offset the next fragment must have; -1 while no frame is being collected. */
     private int expectedOffset = -1;
     private byte[] header;
-    private int dropped;
+    /** Written by the receive thread, read by the UI thread (Qodo on #147). */
+    private volatile int dropped;
     /** In-band tables by Q (128..254): a sender may send them once and then only the Q. */
     private final java.util.Map<Integer, byte[]> tablesByQ = new java.util.HashMap<>();
     private final java.util.Map<Integer, Integer> precisionByQ = new java.util.HashMap<>();
