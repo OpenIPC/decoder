@@ -524,7 +524,8 @@ class RtspSession {
                         + (u.port == 80 ? "" : ":" + u.port);
                 String request = "GET " + u.path + " HTTP/1.1\r\n"
                         + "Host: " + host + "\r\n"
-                        + "User-Agent: " + userAgent + "\r\n"
+                        // userAgent is the whole header line already, CRLF included
+                        + userAgent
                         + auth.header("GET", u.path)
                         + "Connection: close\r\n\r\n";
                 OutputStream out = s.getOutputStream();
