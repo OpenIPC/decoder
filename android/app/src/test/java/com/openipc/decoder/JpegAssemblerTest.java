@@ -13,14 +13,11 @@ import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
-
-import javax.imageio.ImageIO;
 
 public class JpegAssemblerTest {
     /**
@@ -28,15 +25,21 @@ public class JpegAssemblerTest {
      * cut into RTP/JPEG packets of 64 scan bytes — once with Q = 255 and the quantization
      * tables in the stream, once with Q = 50 (tables from Q). Format: 16-bit length + packet.
      */
-    private static List<byte[]> packets(String name) throws Exception {
-        List<byte[]> out = new ArrayList<>();
+    private static byte[] resource(String name) throws Exception {
         try (InputStream in = JpegAssemblerTest.class.getResourceAsStream("/rtp/" + name)) {
             assertNotNull(name, in);
             ByteArrayOutputStream all = new ByteArrayOutputStream();
             byte[] b = new byte[4096];
             int n;
             while ((n = in.read(b)) > 0) all.write(b, 0, n);
-            byte[] d = all.toByteArray();
+            return all.toByteArray();
+        }
+    }
+
+    private static List<byte[]> packets(String name) throws Exception {
+        List<byte[]> out = new ArrayList<>();
+        {
+            byte[] d = resource(name);
             for (int i = 0; i < d.length; ) {
                 int len = ((d[i] & 0xFF) << 8) | (d[i + 1] & 0xFF);
                 byte[] p = new byte[len];
@@ -61,29 +64,42 @@ public class JpegAssemblerTest {
         return frames;
     }
 
-    private static void assertGradient(byte[] jpeg) throws Exception {
-        BufferedImage im = ImageIO.read(new ByteArrayInputStream(jpeg));
-        assertNotNull("decodable JPEG", im);
-        assertEquals(64, im.getWidth());
-        assertEquals(32, im.getHeight());
-        int rgb = im.getRGB(40, 20);
-        assertEquals(160, (rgb >> 16) & 0xFF, 8);
-        assertEquals(160, (rgb >> 8) & 0xFF, 8);
-        assertEquals(128, rgb & 0xFF, 8);
+    /**
+     * The expected .jpg files were made by a reference implementation of the same header
+     * rebuilding (RFC 2435 Appendix B) and decoded back to the gradient with PIL; the
+     * assembler must produce them byte for byte (ImageIO is not available in unit tests).
+     */
+    private static void assertJpeg(byte[] jpeg, String expected) throws Exception {
+        assertEquals(0xFF, jpeg[0] & 0xFF);
+        assertEquals(0xD8, jpeg[1] & 0xFF);
+        assertEquals(0xFF, jpeg[jpeg.length - 2] & 0xFF);
+        assertEquals(0xD9, jpeg[jpeg.length - 1] & 0xFF);
+        // SOF0: 8 bits, height 32, width 64, 3 components, Y sampled 2x1 (type 0)
+        int sof = indexOf(jpeg, (byte) 0xFF, (byte) 0xC0);
+        assertTrue(sof > 0);
+        assertEquals(32, ((jpeg[sof + 5] & 0xFF) << 8) | (jpeg[sof + 6] & 0xFF));
+        assertEquals(64, ((jpeg[sof + 7] & 0xFF) << 8) | (jpeg[sof + 8] & 0xFF));
+        assertEquals(0x21, jpeg[sof + 11] & 0xFF);
+        assertTrue(Arrays.equals(resource(expected), jpeg));
+    }
+
+    private static int indexOf(byte[] d, byte a, byte b) {
+        for (int i = 0; i + 1 < d.length; i++) if (d[i] == a && d[i + 1] == b) return i;
+        return -1;
     }
 
     @Test
     public void tablesInTheStream() throws Exception {
         List<byte[]> frames = assemble(packets("jpeg_q255_64x32.rtp"));
         assertEquals(1, frames.size());
-        assertGradient(frames.get(0));
+        assertJpeg(frames.get(0), "jpeg_q255_64x32.jpg");
     }
 
     @Test
     public void tablesFromQ() throws Exception {
         List<byte[]> frames = assemble(packets("jpeg_q50_64x32.rtp"));
         assertEquals(1, frames.size());
-        assertGradient(frames.get(0));
+        assertJpeg(frames.get(0), "jpeg_q50_64x32.jpg");
     }
 
     @Test
