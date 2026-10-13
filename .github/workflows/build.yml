@@ -131,33 +131,47 @@ jobs:
           VER=$(sed -n 's/.*versionName "\(.*\)".*/\1/p' android/app/build.gradle)
           TAG="v${VER}"
           if [ -z "$VER" ]; then echo "No versionName found"; exit 1; fi
+          APK="decoder-v2-${VER}.apk"
+          cp decoder-v2.apk "$APK"
+          # An existing release is complete only with its APK (Qodo on #158)
+          has_apk() {
+            gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null | grep -qx "$APK"
+          }
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG exists: only latest was updated"
+            if has_apk; then
+              echo "Release $TAG exists: only latest was updated"
+            else
+              echo "Release $TAG has no $APK: uploading it"
+              gh release upload "$TAG" "$APK" --clobber
+            fi
             exit 0
           fi
-          cp decoder-v2.apk "decoder-v2-${VER}.apk"
           # The previous version by number, not by date: a manual build of an older commit may
           # publish after a newer one (Qodo on #158)
-          PREV=$(gh release list --limit 200 --json tagName -q '.[].tagName' \
-            | grep '^v2\.' | sed 's/^v//' | { cat; echo "$VER"; } | sort -V -u \
+          PREV=$(gh api --paginate "repos/${{ github.repository }}/releases?per_page=100" \
+            -q '.[].tag_name' | grep '^v2\.' | sed 's/^v//' | { cat; echo "$VER"; } | sort -V -u \
             | grep -B1 -x "$VER" | grep -v -x "$VER" || true)
           if [ -n "$PREV" ]; then
             NOTES=(--generate-notes --notes-start-tag "v$PREV")
           else
             NOTES=(--notes "First release of the 2.xx line (v2 branch). Earlier changes: https://github.com/${{ github.repository }}/commits/v2")
           fi
-          if ! gh release create "$TAG" "decoder-v2-${VER}.apk" --target "$(git rev-parse HEAD)" \
+          if ! gh release create "$TAG" "$APK" --target "$(git rev-parse HEAD)" \
               --title "OpenIPC Decoder ${VER}" --latest=false "${NOTES[@]}"; then
-            # Another build of the same version created it meanwhile: fine
-            gh release view "$TAG" >/dev/null && echo "Release $TAG created by another build"
+            # Another build of the same version created it meanwhile, or the upload failed:
+            # the release must exist and carry the APK, else the step fails
+            gh release view "$TAG" >/dev/null
+            has_apk || gh release upload "$TAG" "$APK" --clobber
           fi
 
       - name: Telegram
         if: github.ref_name == 'basic' || github.ref_name == 'v2'
         run: |
-          # basic keeps its Gradle files at the top level
-          VER=$(sed -n 's/.*versionName "\(.*\)".*/\1/p' android/app/build.gradle app/build.gradle \
-            2>/dev/null | head -1)
+          # basic keeps its Gradle files at the top level; read only the one that exists
+          # (a missing file would fail the step under pipefail, Qodo on #158)
+          GRADLE=android/app/build.gradle
+          [ -f "$GRADLE" ] || GRADLE=app/build.gradle
+          VER=$(sed -n 's/.*versionName "\(.*\)".*/\1/p' "$GRADLE" | head -1)
           GIT_HASH=$(git rev-parse --short HEAD)
           GIT_BRANCH="${{ github.ref_name }}"
           TAG_NAME="${{ github.ref_type == 'tag' && github.ref_name || '' }}"
