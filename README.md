@@ -136,6 +136,12 @@ While the app runs it serves its debug information over HTTP on port **8085**, f
 
 Only clients on the local network are answered (loopback, 10/8, 172.16/12, 192.168/16, link-local, IPv6 fc00::/7); others get 403. Logins and passwords are never shown.
 
+<p align="center">
+  <img src="screenshots/debug_page.jpg" alt="Debug page: snapshot with each cell's text" width="640"><br>
+  <img src="screenshots/debug_json.png" alt="/stats.json" width="318">
+  <img src="screenshots/debug_log.png" alt="/log" width="318">
+</p>
+
 ## Known limitations
 
 > [!IMPORTANT]
