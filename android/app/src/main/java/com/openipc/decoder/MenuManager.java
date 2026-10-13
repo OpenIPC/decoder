@@ -167,7 +167,7 @@ class MenuManager {
 
         LinearLayout camRow = new LinearLayout(activity);
         camRow.setOrientation(LinearLayout.HORIZONTAL);
-        // Q + 8 slots (#13) may not fit a narrow screen or a large font: the row scrolls,
+        // 8 slots + U D Q (#13, #93) may not fit a narrow screen or a large font: the row scrolls,
         // and follows the focus when moving with a remote
         HorizontalScrollView camScroll = new HorizontalScrollView(activity);
         camScroll.setHorizontalScrollBarEnabled(false);
@@ -216,17 +216,6 @@ class MenuManager {
             });
         }
 
-        camRow.addView(quadBtn, 0, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-        if (quadEnabled) highlightItem(quadBtn);
-        mCachedQuadBtn = quadBtn;
-        quadBtn.setOnClickListener(v -> {
-            PopupWindow p = mMenuPopup;
-            if (p != null) p.dismiss();
-            if (listener != null) listener.onToggleQuad();
-        });
-
         // U after the slots: the reserved UDP RTP cell of the 3x3 grid, full-screen (#68)
         final TextView udpBtn = createItem("U");
         udpBtn.setGravity(Gravity.CENTER);
@@ -255,6 +244,18 @@ class MenuManager {
             PopupWindow p = mMenuPopup;
             if (p != null) p.dismiss();
             if (listener != null) listener.onToggleStats();
+        });
+
+        // Q last: 1 2 3 4 5 6 7 8 U D Q (#93)
+        camRow.addView(quadBtn, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        if (quadEnabled) highlightItem(quadBtn);
+        mCachedQuadBtn = quadBtn;
+        quadBtn.setOnClickListener(v -> {
+            PopupWindow p = mMenuPopup;
+            if (p != null) p.dismiss();
+            if (listener != null) listener.onToggleQuad();
         });
 
         String code = "Exit [v" + version + ", " + gitHash + "]";

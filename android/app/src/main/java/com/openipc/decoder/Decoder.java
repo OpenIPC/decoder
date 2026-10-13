@@ -104,7 +104,7 @@ public class Decoder extends Activity
     private final TextView[] quadAudioBadges = new TextView[CAM_COUNT];
     /** Small text in each cell's corner: stats while playing, otherwise the status (#80, #82). */
     private final TextView[] quadStats = new TextView[CAM_COUNT];
-    /** Debug text in every cell (menu D); without it only cells needing attention show text. */
+    /** Debug text in every cell (menu D), or in none (#92). */
     private boolean showStats;
     /** With the debug text on: where the debug page is (#96). */
     private TextView debugUrls;
@@ -338,7 +338,7 @@ public class Decoder extends Activity
         for (int i = 0; i < quadStats.length; i++) {
             QuadCell c = cells != null ? cells[i] : null;
             if (quadStats[i] == null || c == null) continue;
-            quadStats[i].setVisibility(showStats || c.needsAttention() ? View.VISIBLE : View.GONE);
+            quadStats[i].setVisibility(showStats ? View.VISIBLE : View.GONE);
         }
         Toast.makeText(this, showStats ? "Debug text on" : "Debug text off",
                 Toast.LENGTH_SHORT).show();
@@ -921,8 +921,8 @@ public class Decoder extends Activity
                 if (c == null || v == null) continue;
                 String line = c.sample(now);
                 v.setText(line);
-                // Without the debug text (D) only what needs attention is shown
-                v.setVisibility(showStats || c.needsAttention() ? View.VISIBLE : View.GONE);
+                // The corner text of every cell, or of none: menu D (#92)
+                v.setVisibility(showStats ? View.VISIBLE : View.GONE);
                 if (log) Log.i(TAG, "Quad-" + i + ": " + line);
             }
             planDecoding(cells, now);
