@@ -109,14 +109,29 @@ class MediaCodecManager {
     /** The current decoder is a software one (it is never promoted to full rate). */
     boolean isSoftware() { return softwareInUse && decoder != null; }
 
-    /** A software decoder for the mime type (c2.android.* first), or null; looked up once. */
+    /** Budget key of the software decoders of a mime type: they have their own limit. */
+    static String softwareSlot(String mime) { return "software:" + mime; }
+
+    /**
+     * A software decoder for the mime type (c2.android.* first), or null. Looked up once, with
+     * its instance limit; a failed codec list is not cached, so a later call tries again.
+     */
     static String softwareDecoder(String mime) {
         synchronized (SOFTWARE) {
             if (SOFTWARE.containsKey(mime)) return SOFTWARE.get(mime);
-            String found = null;
+            MediaCodecInfo[] infos;
             try {
-                for (MediaCodecInfo ci : new android.media.MediaCodecList(
-                        android.media.MediaCodecList.ALL_CODECS).getCodecInfos()) {
+                infos = new android.media.MediaCodecList(
+                        android.media.MediaCodecList.ALL_CODECS).getCodecInfos();
+            } catch (RuntimeException e) {
+                Log.w(TAG, "Codec list unavailable: " + e.getMessage());
+                return null;
+            }
+            String found = null;
+            int max = Integer.MAX_VALUE;
+            for (MediaCodecInfo ci : infos) {
+                // One broken entry must not hide the others
+                try {
                     if (ci.isEncoder()) continue;
                     String n = ci.getName();
                     boolean sw = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
@@ -124,13 +139,20 @@ class MediaCodecManager {
                             : n.startsWith("c2.android.") || n.startsWith("OMX.google.");
                     if (!sw) continue;
                     for (String t : ci.getSupportedTypes()) {
-                        if (t.equalsIgnoreCase(mime)
-                                && (found == null || n.startsWith("c2.android."))) {
-                            found = n;
-                        }
+                        if (!t.equalsIgnoreCase(mime)
+                                || (found != null && !n.startsWith("c2.android."))) continue;
+                        found = n;
+                        max = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                                ? ci.getCapabilitiesForType(t).getMaxSupportedInstances()
+                                : Integer.MAX_VALUE;
                     }
+                } catch (RuntimeException ignored) {
                 }
-            } catch (RuntimeException ignored) {
+            }
+            if (found != null) {
+                InstanceBudget.learn(softwareSlot(mime), max > 0 ? max : Integer.MAX_VALUE);
+                Log.i(TAG, "Software decoder " + found + " (" + mime + "): up to " + max
+                        + " instances");
             }
             SOFTWARE.put(mime, found);
             return found;
@@ -322,6 +344,10 @@ class MediaCodecManager {
         if (!InstanceBudget.tryAcquire(type)) {
             int limit = InstanceBudget.limit(type);
             softwareName = limit >= 0 && allowSoftware ? softwareDecoder(type) : null;
+            // Software decoders have their own limit: beyond it, the hardware one is reported
+            if (softwareName != null && !InstanceBudget.tryAcquire(softwareSlot(type))) {
+                softwareName = null;
+            }
             if (softwareName == null) {
                 synchronized (decoderLock) {
                     retry.onFailure(nowMs());
@@ -334,6 +360,7 @@ class MediaCodecManager {
             }
         }
         final boolean software = softwareName != null;
+        final String slot = software ? softwareSlot(type) : type;
 
         MediaCodec local;
         try {
@@ -355,7 +382,7 @@ class MediaCodecManager {
                 throw e;
             }
         } catch (Exception e) {
-            if (!software) InstanceBudget.release(type);
+            InstanceBudget.release(slot);
             synchronized (decoderLock) {
                 // A creation cancelled by a pause must not delay the next start
                 if (gen != lifecycle || !enabled) return;
@@ -369,13 +396,13 @@ class MediaCodecManager {
         synchronized (decoderLock) {
             // Disabled meanwhile (pause/stop) or another thread was faster
             if (decoder != null || !enabled || gen != lifecycle) {
-                if (!software) InstanceBudget.release(type);
+                InstanceBudget.release(slot);
                 releaseAsync(local);
                 return;
             }
             decoder = local;
-            // A software decoder holds no slot of the hardware budget
-            heldMime = software ? null : type;
+            // A software decoder holds a slot of its own budget, not of the hardware one
+            heldMime = slot;
             softwareInUse = software;
             awaitingConfig = true;
             configSeen = 0;

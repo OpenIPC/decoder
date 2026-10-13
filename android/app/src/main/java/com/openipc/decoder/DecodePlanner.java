@@ -152,7 +152,8 @@ final class DecodePlanner {
         long load = 0;
         boolean anyLossy = false;
         for (Cell c : cells) {
-            if (c.paused) continue;
+            // A software cell neither loads the hardware decoder nor shows its limits (#88)
+            if (c.paused || c.pinned) continue;
             if (c.full && c.known) load += c.fullLoad;
             else if (!c.full) load += c.keyLoad;
             anyLossy |= c.lossy;
@@ -200,7 +201,9 @@ final class DecodePlanner {
             if (countPlaying(cells) < 2) return Decision.NONE;
             for (int i = cells.size() - 1; i >= 0; i--) {
                 Cell c = cells.get(i);
-                if (!c.paused && c.playing) return change(nowMs, Action.PAUSE, c.index);
+                if (!c.paused && c.playing && !c.pinned) {
+                    return change(nowMs, Action.PAUSE, c.index);
+                }
             }
             return Decision.NONE;
         }

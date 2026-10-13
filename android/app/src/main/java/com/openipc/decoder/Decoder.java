@@ -1153,16 +1153,14 @@ public class Decoder extends Activity
     private static DecodePlanner.Cell plannerCell(int index, QuadCell c, long now) {
         // At full rate a few lost frames per second are noise; on key frames, a cell decodes
         // one frame per GOP, so every decoder loss counts, whatever the frame rate
-        // A software decoder's losses and load say nothing of the hardware's means (#88)
-        boolean software = c.isSoftwareDecoder();
-        boolean lossy = !software && c.isSettled(now) && (c.isKeyFramesOnly() ? c.lostFps() > 0
+        boolean lossy = c.isSettled(now) && (c.isKeyFramesOnly() ? c.lostFps() > 0
                 : c.inFps() >= 5 && c.lostFps() >= Math.max(2f, 0.1f * c.inFps()));
         DecodePlanner.Cell pc = new DecodePlanner.Cell(index, !c.isKeyFramesOnly(),
                 c.knowsLoad(), c.knowsLoad() ? c.fullLoad() : 0, lossy);
         pc.paused = c.isPaused();
         pc.playing = c.isPlaying();
-        pc.pinned = software;
-        if (c.knowsLoad() && !software) pc.keyLoad = c.keyLoad();
+        pc.pinned = c.isSoftwareDecoder();
+        if (c.knowsLoad()) pc.keyLoad = c.keyLoad();
         return pc;
     }
 

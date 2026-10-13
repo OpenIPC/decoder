@@ -340,4 +340,19 @@ public class DecodePlannerTest {
         assertTrue(!cells.get(0).full);
         assertTrue("the next cell is not held back", cells.get(1).full);
     }
+
+    @Test
+    public void aSoftwareCellNeitherLoadsNorPausesTheHardware() {
+        DecodePlanner p = new DecodePlanner(P1080_30, false, 0, P1080_30);
+        List<DecodePlanner.Cell> cells = keyCells(2, P1080_30);
+        DecodePlanner.Cell sw = cells.get(0);
+        sw.pinned = true;
+        sw.keyLoad = P1080_30 / 2;
+        sw.lossy = true; // the software decoder drops frames: not a hardware overload
+        long t = 0;
+        for (int i = 0; i < 20; i++, t += 1000) apply(cells, p.step(cells, t));
+        assertTrue("the hardware cell fits without the software load", cells.get(1).full);
+        assertTrue(!cells.get(0).paused && !cells.get(1).paused);
+        assertEquals(P1080_30, p.capacity());
+    }
 }
