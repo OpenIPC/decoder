@@ -43,13 +43,37 @@ final class HttpMjpeg {
         static Url parse(String url) throws IOException {
             if (!matches(url)) throw new IOException("Not an http:// URL");
             String rest = url.trim().substring("http://".length());
-            int slash = rest.indexOf('/');
-            String authority = slash >= 0 ? rest.substring(0, slash) : rest;
+            // The fragment is not sent (Qodo on #150)
+            int hash = rest.indexOf('#');
+            if (hash >= 0) rest = rest.substring(0, hash);
+            // The authority ends at '/' or '?' (http://camera?stream=1)
+            int end = rest.length();
+            for (int i = 0; i < rest.length(); i++) {
+                char ch = rest.charAt(i);
+                if (ch == '/' || ch == '?') {
+                    end = i;
+                    break;
+                }
+            }
+            String authority = rest.substring(0, end);
             Url u = new Url();
-            if (slash >= 0) u.path = rest.substring(slash);
+            if (end < rest.length()) {
+                u.path = rest.charAt(end) == '?' ? "/" + rest.substring(end) : rest.substring(end);
+            }
+            // The path goes into the request line: no spaces or control characters (Qodo on #150)
+            for (int i = 0; i < u.path.length(); i++) {
+                char ch = u.path.charAt(i);
+                if (ch <= 0x20 || ch == 0x7F) throw new IOException("Bad character in URL path");
+            }
             int at = authority.lastIndexOf('@');
             if (at >= 0) {
                 u.userInfo = RtspSession.Url.percentDecode(authority.substring(0, at));
+                for (int i = 0; i < u.userInfo.length(); i++) {
+                    char ch = u.userInfo.charAt(i);
+                    if (ch < 0x20 || ch == 0x7F) {
+                        throw new IOException("Bad character in URL credentials");
+                    }
+                }
                 authority = authority.substring(at + 1);
             }
             String host = authority;
@@ -91,10 +115,14 @@ final class HttpMjpeg {
             int i = lower.indexOf("boundary=");
             if (i < 0) return null;
             String b = contentType.substring(i + "boundary=".length()).trim();
-            int semi = b.indexOf(';');
-            if (semi >= 0) b = b.substring(0, semi).trim();
-            if (b.length() >= 2 && b.startsWith("\"") && b.endsWith("\"")) {
-                b = b.substring(1, b.length() - 1);
+            if (b.startsWith("\"")) {
+                // Quoted: up to the closing quote, a ';' inside belongs to it (Qodo on #150)
+                int close = b.indexOf('"', 1);
+                if (close < 0) return null;
+                b = b.substring(1, close);
+            } else {
+                int semi = b.indexOf(';');
+                if (semi >= 0) b = b.substring(0, semi).trim();
             }
             // Some servers put the dashes into the parameter too
             if (b.startsWith("--")) b = b.substring(2);
@@ -172,17 +200,30 @@ final class HttpMjpeg {
                     // skip
                 }
             } else {
-                // No length: the data runs up to CRLF + delimiter
+                // No length: the data runs up to a line that is the delimiter, after LF or CR LF
+                // (Qodo on #150); "\n--boundary" inside the data with more on its line is data
                 ByteArrayOutputStream part = new ByteArrayOutputStream();
-                byte[] end = ("\r\n" + delimiter).getBytes(StandardCharsets.US_ASCII);
-                if (!readUntil(body, end, part)) return;
-                n = part.size();
-                if (n > MAX_PART) throw new IOException("MJPEG part of " + n + " bytes");
+                byte[] end = ("\n" + delimiter).getBytes(StandardCharsets.US_ASCII);
+                String tail;
+                while (true) {
+                    if (!readUntil(body, end, part)) return;
+                    tail = readLine(body);
+                    if (tail == null) return;
+                    String t = tail.trim();
+                    if (t.isEmpty() || t.equals("--")) break;
+                    // Not a delimiter line: put back what was taken for one
+                    byte[] back = ("\n" + delimiter + tail + "\n")
+                            .getBytes(StandardCharsets.ISO_8859_1);
+                    part.write(back, 0, back.length);
+                    if (part.size() > MAX_PART) throw new IOException("MJPEG part too large");
+                }
+                byte[] data = part.toByteArray();
+                n = data.length;
+                if (n > 0 && data[n - 1] == '\r') n--;
                 if (buf.length < n) buf = new byte[n];
-                System.arraycopy(part.toByteArray(), 0, buf, 0, n);
-                // What follows the delimiter on its line: "--" closes the stream
-                String tail = readLine(body);
-                line = tail == null ? null : delimiter + tail;
+                System.arraycopy(data, 0, buf, 0, n);
+                // "--" after the delimiter closes the stream
+                line = delimiter + tail.trim();
             }
             if (n > 0 && !sink.onFrame(buf, 0, n)) return;
         }

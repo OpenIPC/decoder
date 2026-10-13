@@ -139,4 +139,51 @@ public class HttpMjpegTest {
         assertArrayEquals(JPEG1, frames.get(0));
         assertArrayEquals(JPEG2, frames.get(1));
     }
+
+    @Test
+    public void urlQueryWithoutPathAndFragment() throws IOException {
+        HttpMjpeg.Url u = HttpMjpeg.Url.parse("http://cam?stream=1#preview");
+        assertEquals("cam", u.host);
+        assertEquals("/?stream=1", u.path);
+        assertEquals("/mjpeg", HttpMjpeg.Url.parse("http://cam/mjpeg#x").path);
+    }
+
+    @Test(expected = IOException.class)
+    public void aLineBreakInThePathIsRejected() throws IOException {
+        HttpMjpeg.Url.parse("http://cam/mjpeg\r\nX-Evil: 1");
+    }
+
+    @Test(expected = IOException.class)
+    public void aLineBreakInTheCredentialsIsRejected() throws IOException {
+        HttpMjpeg.Url.parse("http://ro%0D%0Aot:pw@cam/mjpeg");
+    }
+
+    @Test
+    public void quotedBoundaryWithASemicolon() {
+        HttpMjpeg.Response r = new HttpMjpeg.Response();
+        r.contentType = "multipart/x-mixed-replace; boundary=\"a;b\"; charset=x";
+        assertEquals("a;b", r.boundary());
+    }
+
+    @Test
+    public void lfOnlyPartsWithoutLength() throws IOException {
+        byte[] body = concat(ascii("--f\nContent-Type: image/jpeg\n\n"), JPEG1,
+                ascii("\n--f\nContent-Type: image/jpeg\n\n"), JPEG2, ascii("\n--f--\n"));
+        List<byte[]> frames = read(new ByteArrayInputStream(body), "f");
+        assertEquals(2, frames.size());
+        assertArrayEquals(JPEG1, frames.get(0));
+        assertArrayEquals(JPEG2, frames.get(1));
+    }
+
+    @Test
+    public void boundaryTextInsideTheDataIsData() throws IOException {
+        // "\r\n--f" followed by more on that line is not a delimiter line
+        byte[] tricky = concat(new byte[] {(byte) 0xFF, (byte) 0xD8},
+                ascii("\r\n--fX\r\nmore"), new byte[] {(byte) 0xFF, (byte) 0xD9});
+        byte[] body = concat(part("f", tricky, false), part("f", JPEG1, false), ascii("--f--\r\n"));
+        List<byte[]> frames = read(new ByteArrayInputStream(body), "f");
+        assertEquals(2, frames.size());
+        assertArrayEquals(tricky, frames.get(0));
+        assertArrayEquals(JPEG1, frames.get(1));
+    }
 }
