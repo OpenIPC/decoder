@@ -343,9 +343,16 @@ class QuadCell implements RtspSession.Callback {
     }
     boolean isPaused() { return pausedReason != null; }
 
-    /** Connected, not paused and a frame shown within the last {@code ms} milliseconds (#98). */
+    /** On key frames only, a frame comes once per GOP, which can be several seconds (#85). */
+    static final long KEY_FRAMES_LIVE_MS = 10_000;
+
+    /**
+     * Connected, not paused and a frame shown within the last {@code ms} milliseconds (#98);
+     * on key frames within KEY_FRAMES_LIVE_MS, or the cell would blink between key frames.
+     */
     boolean showsVideo(long ms) {
-        return pausedReason == null && "connected".equals(state) && decoder.renderedWithin(ms);
+        long window = keyFramesOnly ? Math.max(ms, KEY_FRAMES_LIVE_MS) : ms;
+        return pausedReason == null && "connected".equals(state) && decoder.renderedWithin(window);
     }
 
     /** Connected and decoding: its load is real, so demoting or pausing it helps (#85). */
