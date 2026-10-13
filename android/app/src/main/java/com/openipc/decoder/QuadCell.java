@@ -558,7 +558,7 @@ class QuadCell implements RtspSession.Callback {
         Frame frame = cellFramePool.obtain(length);
         System.arraycopy(buf, offset, frame.data(), 0, length);
         frame.setLength(length);
-        jpegSink.onNal(frame);
+        nalSink.onNal(frame);
         return true;
     }
 
