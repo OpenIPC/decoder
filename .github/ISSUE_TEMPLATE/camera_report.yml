@@ -8,7 +8,7 @@ body:
       value: |
         Thanks for testing! Camera reports help other users and show which streams need work.
         **Remove the password from the URL** (write `user:***`) and do not post public IP addresses.
-        The app version and build hash are shown in the menu next to **Exit**, for example `v1.28, 1dda076`.
+        The app version and build hash are shown in the menu next to **Exit**, for example `v2.00, 1dda076`.
 
   - type: input
     id: manufacturer
@@ -144,7 +144,7 @@ body:
     attributes:
       label: App version and device
       description: App version from the menu, and the device it ran on
-      placeholder: "v1.28, 1dda076 on AG-216 (Android 10)"
+      placeholder: "v2.00, 1dda076 on AG-216 (Android 10)"
     validations:
       required: true
 
