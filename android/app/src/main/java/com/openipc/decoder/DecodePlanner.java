@@ -58,6 +58,8 @@ final class DecodePlanner {
         boolean lossy;
         /** Connected and decoding: only such cells are demoted or paused (Qodo on #84). */
         boolean playing = true;
+        /** On a software decoder beyond the hardware limit: never promoted (#88). */
+        boolean pinned;
 
         Cell(int index, boolean full, boolean known, long fullLoad, boolean lossy) {
             this.index = index;
@@ -206,7 +208,7 @@ final class DecodePlanner {
 
         // Promote the highest-priority key-frame cell whose load is known
         for (Cell c : cells) {
-            if (c.full || c.paused || !c.playing) {
+            if (c.full || c.paused || !c.playing || c.pinned) {
                 // Not connected (an offline camera) or paused: nothing to wait for
                 unknownSince.remove(c.index);
                 continue;

@@ -329,4 +329,15 @@ public class DecodePlannerTest {
         p.offerDeclared(P1080_30 / 3);
         assertEquals(P1080_30, p.capacity());
     }
+
+    @Test
+    public void aCellOnASoftwareDecoderIsNeverPromoted() {
+        DecodePlanner p = new DecodePlanner(BUDGET, false);
+        List<DecodePlanner.Cell> cells = keyCells(2, P1080_30);
+        cells.get(0).pinned = true; // over the hardware limit (#88)
+        long t = 0;
+        for (int i = 0; i < 10; i++, t += 1000) apply(cells, p.step(cells, t));
+        assertTrue(!cells.get(0).full);
+        assertTrue("the next cell is not held back", cells.get(1).full);
+    }
 }
