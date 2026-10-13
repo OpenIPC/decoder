@@ -43,6 +43,11 @@ final class DecodePlanner {
     static final double FAILED_MARGIN = 0.9;
     /** Quiet time after which a load that failed is tried once more: it may have been a fluke. */
     static final long FAILED_RETRY_MS = 60 * 60_000;
+    /**
+     * After the grid starts, every decoder starts at once and all of them lose frames for a
+     * second or two: no decision on losses that early (#148). Set by the app; 0 in tests.
+     */
+    static final long WARMUP_MS = 10_000;
 
     static final class Cell {
         int index;
@@ -70,7 +75,7 @@ final class DecodePlanner {
         }
     }
 
-    enum Action { NONE, PROMOTE, DEMOTE, PAUSE }
+    enum Action { NONE, PROMOTE, DEMOTE, PAUSE, RESUME }
 
     static final class Decision {
         final Action action;
@@ -98,6 +103,15 @@ final class DecodePlanner {
     private final Map<Integer, Long> unknownSince = new HashMap<>();
     private long quietSinceMs = -1;
     private long lastChangeMs = -1;
+    private long warmupMs;
+    private long startMs = -1;
+    /** Quiet time before a paused cell gets another try; doubles with every pause (#148). */
+    private long resumeWaitMs = PROBE_QUIET_MS;
+    /** The last lossy sample; promotions do not move it, unlike quietSinceMs. */
+    private long lastLossMs = -1;
+
+    /** No loss-based decision for this long after the first step (#148). */
+    void setWarmup(long ms) { warmupMs = ms; }
 
     /**
      * Never learnt below this (#126): losses at a lower load come from a stalled system (a hung
@@ -149,6 +163,11 @@ final class DecodePlanner {
 
     Decision step(List<Cell> cells, long nowMs) {
         if (quietSinceMs < 0) quietSinceMs = nowMs;
+        if (startMs < 0) startMs = nowMs;
+        // Starting decoders lose frames together: losses then decide nothing, and the time is
+        // not quiet either; promotions that fit go on (Qodo on #149)
+        boolean warming = nowMs - startMs < warmupMs;
+        if (warming) quietSinceMs = nowMs;
         long load = 0;
         boolean anyLossy = false;
         for (Cell c : cells) {
@@ -156,14 +175,16 @@ final class DecodePlanner {
             if (c.paused || c.pinned) continue;
             if (c.full && c.known) load += c.fullLoad;
             else if (!c.full) load += c.keyLoad;
-            anyLossy |= c.lossy;
+            anyLossy |= c.lossy && !warming;
         }
         while (!lossyTimes.isEmpty() && nowMs - lossyTimes.peekFirst() >= LOSS_WINDOW_MS) {
             lossyTimes.pollFirst();
         }
+        if (lastLossMs < 0) lastLossMs = nowMs;
         if (anyLossy) {
             lossyTimes.addLast(nowMs);
             quietSinceMs = nowMs;
+            lastLossMs = nowMs;
         } else if (nowMs - quietSinceMs >= PROBE_QUIET_MS && load > proven) {
             // A load that played without losses long enough is within this device's means
             proven = load;
@@ -202,12 +223,26 @@ final class DecodePlanner {
             for (int i = cells.size() - 1; i >= 0; i--) {
                 Cell c = cells.get(i);
                 if (!c.paused && c.playing && !c.pinned) {
+                    // The next try of a paused cell waits longer each time
+                    resumeWaitMs = Math.min(resumeWaitMs * 2, PROBE_MAX_WAIT_MS);
                     return change(nowMs, Action.PAUSE, c.index);
                 }
             }
             return Decision.NONE;
         }
         if (anyLossy) return Decision.NONE;
+
+        // A paused cell gets another try on key frames after a quiet period, the highest
+        // priority first: a pause is not for ever (#148)
+        if (nowMs - lastLossMs >= resumeWaitMs) {
+            for (Cell c : cells) {
+                if (c.paused) {
+                    quietSinceMs = nowMs;
+                    lastLossMs = nowMs;
+                    return change(nowMs, Action.RESUME, c.index);
+                }
+            }
+        }
 
         // Promote the highest-priority key-frame cell whose load is known
         for (Cell c : cells) {
