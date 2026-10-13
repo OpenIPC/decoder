@@ -141,6 +141,7 @@ class QuadCell implements RtspSession.Callback {
     }
 
     void start() {
+        decoder.setSoftwareFallback(keyFramesOnly);
         if (started) return;
         started = true;
         running = true;
@@ -300,15 +301,21 @@ class QuadCell implements RtspSession.Callback {
         if (keyFramesOnly) {
             String rate = outAvg < 10 ? String.format(java.util.Locale.ROOT, "%.1f", outAvg)
                     : String.valueOf(Math.round(outAvg));
-            return size + codec + " key frames · " + rate + " fps";
+            return size + codec + " key frames · " + rate + " fps"
+                    + (decoder.isSoftware() ? " · software" : "");
         }
         return size + codec + " " + Math.round(outFps) + "/" + Math.round(inFps) + " fps";
     }
 
     boolean isKeyFramesOnly() { return keyFramesOnly; }
 
+    /** Decoded by a software decoder beyond the hardware limit: stays on key frames (#88). */
+    boolean isSoftwareDecoder() { return decoder.isSoftware(); }
+
     /** Full rate or key frames only (#85). Going to full rate waits for the next key frame. */
     void setKeyFramesOnly(boolean on) {
+        // Key frames only may run on a software decoder beyond the hardware limit (#88)
+        decoder.setSoftwareFallback(on);
         if (on == keyFramesOnly) return;
         if (!on) waitingKeyFrame = true;
         keyFramesOnly = on;

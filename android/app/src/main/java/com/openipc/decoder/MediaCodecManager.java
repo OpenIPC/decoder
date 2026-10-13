@@ -69,6 +69,14 @@ class MediaCodecManager {
     private volatile int outHeight;
     /** MIME type whose instance slot this manager holds while it has a decoder (#83). */
     private String heldMime;
+    /**
+     * Beyond the hardware instance limit, a software decoder may be used (#88): set while the
+     * cell decodes key frames only, about one frame per second, which a software decoder
+     * manages at little CPU cost.
+     */
+    private volatile boolean allowSoftware;
+    private volatile boolean softwareInUse;
+    private static final java.util.Map<String, String> SOFTWARE = new java.util.HashMap<>();
 
     interface Listener {
         void onResolutionChanged(int width, int height);
@@ -95,6 +103,64 @@ class MediaCodecManager {
      * learnt from the first decoder of a type, so it is the codec that createDecoderByType
      * really picks (#83).
      */
+    /** Allow a software decoder beyond the hardware limit (key-frame cells, #88). */
+    void setSoftwareFallback(boolean allow) { allowSoftware = allow; }
+
+    /** The current decoder is a software one (it is never promoted to full rate). */
+    boolean isSoftware() { return softwareInUse && decoder != null; }
+
+    /** Budget key of the software decoders of a mime type: they have their own limit. */
+    static String softwareSlot(String mime) { return "software:" + mime; }
+
+    /**
+     * A software decoder for the mime type (c2.android.* first), or null. Looked up once, with
+     * its instance limit; a failed codec list is not cached, so a later call tries again.
+     */
+    static String softwareDecoder(String mime) {
+        synchronized (SOFTWARE) {
+            if (SOFTWARE.containsKey(mime)) return SOFTWARE.get(mime);
+            MediaCodecInfo[] infos;
+            try {
+                infos = new android.media.MediaCodecList(
+                        android.media.MediaCodecList.ALL_CODECS).getCodecInfos();
+            } catch (RuntimeException e) {
+                Log.w(TAG, "Codec list unavailable: " + e.getMessage());
+                return null;
+            }
+            String found = null;
+            int max = Integer.MAX_VALUE;
+            for (MediaCodecInfo ci : infos) {
+                // One broken entry must not hide the others
+                try {
+                    if (ci.isEncoder()) continue;
+                    String n = ci.getName();
+                    boolean sw = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                            ? ci.isSoftwareOnly()
+                            : n.startsWith("c2.android.") || n.startsWith("OMX.google.");
+                    if (!sw) continue;
+                    for (String t : ci.getSupportedTypes()) {
+                        if (!t.equalsIgnoreCase(mime)
+                                || (found != null && !n.startsWith("c2.android."))) continue;
+                        // The limit first: a failed query keeps the previous candidate
+                        int m = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                                ? ci.getCapabilitiesForType(t).getMaxSupportedInstances()
+                                : Integer.MAX_VALUE;
+                        found = n;
+                        max = m;
+                    }
+                } catch (RuntimeException ignored) {
+                }
+            }
+            if (found != null) {
+                InstanceBudget.learn(softwareSlot(mime), max > 0 ? max : Integer.MAX_VALUE);
+                Log.i(TAG, "Software decoder " + found + " (" + mime + "): up to " + max
+                        + " instances");
+            }
+            SOFTWARE.put(mime, found);
+            return found;
+        }
+    }
+
     static final class InstanceBudget {
         private static final Map<String, Integer> used = new HashMap<>();
         private static final Map<String, Integer> limit = new HashMap<>();
@@ -276,23 +342,39 @@ class MediaCodecManager {
         // Must hold the largest NAL unit the assembler can deliver
         format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, MAX_NAL_SIZE);
 
+        String softwareName = null;
         if (!InstanceBudget.tryAcquire(type)) {
             int limit = InstanceBudget.limit(type);
-            synchronized (decoderLock) {
-                retry.onFailure(nowMs());
+            softwareName = limit >= 0 && allowSoftware ? softwareDecoder(type) : null;
+            // Software decoders have their own limit: beyond it, the hardware one is reported
+            if (softwareName != null && !InstanceBudget.tryAcquire(softwareSlot(type))) {
+                softwareName = null;
             }
-            // Limit still unknown: another cell is creating the first decoder, just retry
-            if (limit < 0) return;
-            Log.w(TAG, "Decoder limit reached: " + limit + " × " + type);
-            if (listener != null) listener.onDecoderLimit(type, limit);
-            return;
+            if (softwareName == null) {
+                synchronized (decoderLock) {
+                    retry.onFailure(nowMs());
+                }
+                // Limit still unknown: another cell is creating the first decoder, just retry
+                if (limit < 0) return;
+                Log.w(TAG, "Decoder limit reached: " + limit + " × " + type);
+                if (listener != null) listener.onDecoderLimit(type, limit);
+                return;
+            }
         }
+        final boolean software = softwareName != null;
+        final String slot = software ? softwareSlot(type) : type;
 
         MediaCodec local;
         try {
-            Log.i(TAG, "Start video decoder (" + type + ")");
-            local = MediaCodec.createDecoderByType(type);
-            learnLimits(local, type);
+            if (software) {
+                Log.i(TAG, "Start software video decoder " + softwareName
+                        + " (hardware limit reached, key frames only)");
+                local = MediaCodec.createByCodecName(softwareName);
+            } else {
+                Log.i(TAG, "Start video decoder (" + type + ")");
+                local = MediaCodec.createDecoderByType(type);
+                learnLimits(local, type);
+            }
             try {
                 local.configure(format, s, null, 0);
                 local.start();
@@ -302,7 +384,7 @@ class MediaCodecManager {
                 throw e;
             }
         } catch (Exception e) {
-            InstanceBudget.release(type);
+            InstanceBudget.release(slot);
             synchronized (decoderLock) {
                 // A creation cancelled by a pause must not delay the next start
                 if (gen != lifecycle || !enabled) return;
@@ -316,12 +398,14 @@ class MediaCodecManager {
         synchronized (decoderLock) {
             // Disabled meanwhile (pause/stop) or another thread was faster
             if (decoder != null || !enabled || gen != lifecycle) {
-                InstanceBudget.release(type);
+                InstanceBudget.release(slot);
                 releaseAsync(local);
                 return;
             }
             decoder = local;
-            heldMime = type;
+            // A software decoder holds a slot of its own budget, not of the hardware one
+            heldMime = slot;
+            softwareInUse = software;
             awaitingConfig = true;
             configSeen = 0;
         }
