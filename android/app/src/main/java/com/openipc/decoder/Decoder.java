@@ -103,8 +103,9 @@ public class Decoder extends Activity
     private final TextView[] quadStats = new TextView[CELL_COUNT];
     /** Debug text in every cell (menu D), or in none (#92). */
     private boolean showStats;
-    /** Slide mode (#108): multi-view, every cell on key frames only; saved as "slides". */
-    private boolean slides;
+    /** S (#108, #153): key frames only, in every view; saved as "slides". */
+    /** Read by the single view's decode thread too (Qodo on #155). */
+    private volatile boolean slides;
     /** With the debug text on: where the debug page is (#96). */
     private TextView debugUrls;
     private volatile int quadAudioGen;
@@ -332,20 +333,13 @@ public class Decoder extends Activity
 
     @Override
     public void onToggleQuad() {
+        // Q switches the view only; the playback mode is S's and stays as it is (#153)
         if (leaveUdpView()) {
-            setSlides(false);
             startQuad();
-            return;
-        }
-        if (quadEnabled && slides) {
-            // From slides back to the adaptive grid; Q again then leaves multi-view
-            setSlides(false);
             return;
         }
         boolean newState = !quadEnabled;
         if (newState) {
-            // Q always opens the adaptive grid; slides only come with S (Qodo on #124)
-            if (slides) setSlides(false);
             startQuad();
         } else {
             stopQuad();
@@ -359,21 +353,12 @@ public class Decoder extends Activity
     }
 
     /**
-     * S (#108): multi-view with every cell on key frames only, the lowest decoder load. From
-     * the single or U view it starts multi-view in this mode; in multi-view it toggles.
+     * S (#108, #153): the playback mode only — every frame, or key frames only (the lowest
+     * decoder load) — in whatever view is shown: multi-view, U or a single camera. It never
+     * switches the view; Q does that.
      */
     @Override
     public void onToggleSlides() {
-        if (leaveUdpView()) {
-            setSlides(true);
-            startQuad();
-            return;
-        }
-        if (!quadEnabled) {
-            setSlides(true);
-            startQuad();
-            return;
-        }
         setSlides(!slides);
     }
 
@@ -390,8 +375,9 @@ public class Decoder extends Activity
         // Back to adaptive: plan from scratch, cells are promoted again where they fit
         // The decoders keep running: no warm-up (Qodo on #149)
         if (!on && quadEnabled) decodePlanner = newPlanner(false);
-        Toast.makeText(this, on ? "Slides: key frames only" : "Multi-view",
-                Toast.LENGTH_SHORT).show();
+        // The single view: back to every frame from the next key frame on (#153)
+        if (!on) singleWaitKey = true;
+        Toast.makeText(this, on ? "Key frames only" : "Full stream", Toast.LENGTH_SHORT).show();
     }
 
     @Override
@@ -1468,6 +1454,9 @@ public class Decoder extends Activity
             single.put("codec", rtspClient != null && rtspClient.isJpeg() ? "MJPEG"
                     : codecH265 ? "H.265" : "H.264");
             single.put("audio", audioCodec);
+            // Frames shown in the last second and the playback mode of S (#153)
+            single.put("out_fps", singleOutFps);
+            single.put("decode", slides ? "key frames" : "full");
             m.put("single", single);
         }
         QuadCell[] cells = quadCells;
@@ -1701,10 +1690,11 @@ public class Decoder extends Activity
      * One JPEG frame of an MJPEG stream into the single view, on the decode thread, drawn over
      * the whole surface; the view's fit transform keeps the aspect ratio, as for video.
      */
-    private void drawJpeg(Frame frame, int gen) {
+    private boolean drawJpeg(Frame frame, int gen) {
         Surface s = mVideoSurface;
         int[] size = jpegRenderer.render(frame, s, () -> gen == listenerGen && s == mVideoSurface);
         if (size != null) jpegShown(size[0], size[1]);
+        return size != null;
     }
 
     /** A JPEG frame is on screen (hardware or software path). */
@@ -1751,10 +1741,20 @@ public class Decoder extends Activity
                 try {
                     Frame buffer = nalQueue.poll(5, TimeUnit.MILLISECONDS);
                     if (buffer != null && rtspClient.isJpeg()) {
-                        drawJpeg(buffer, gen);
+                        // S: MJPEG has no key frames, one frame per second instead (#153); the
+                        // second counts from a frame really shown (Qodo on #155)
+                        long now = System.nanoTime() / 1_000_000;
+                        if ((!slides || now - lastSlideJpegMs >= QuadCell.JPEG_REDUCED_MS)
+                                && drawJpeg(buffer, gen)) {
+                            lastSlideJpegMs = now;
+                        }
                         framePool.recycle(buffer);
                     } else if (buffer != null && surfacePending) {
                         // Waiting for a fresh surface after MJPEG; the next key frame follows
+                        framePool.recycle(buffer);
+                    } else if (buffer != null && skipForKeyFrames(buffer)) {
+                        // After surfacePending: a key frame dropped there must not end the wait
+                        // for one (Qodo on #155)
                         framePool.recycle(buffer);
                     } else if (buffer != null) {
                         if (videoDecoder.decodeFrame(buffer, codecH265, 0)) {
@@ -1782,6 +1782,24 @@ public class Decoder extends Activity
         });
     }
 
+    /** S in the single view: the last MJPEG frame drawn (#153). */
+    private long lastSlideJpegMs;
+    /** Back from key frames only: P frames wait for the next key frame (#153). */
+    private volatile boolean singleWaitKey;
+
+    /**
+     * Key frames only in the single view (S, #153): parameter sets and key frames go to the
+     * decoder, the rest is dropped; after S is turned off, until the next key frame.
+     */
+    private boolean skipForKeyFrames(Frame buffer) {
+        if (!slides && !singleWaitKey) return false;
+        if (buffer.length() < 5) return true;
+        int type = NalAssembler.fragment(buffer.data()[4], codecH265);
+        if (!QuadCell.isKeyNal(type, codecH265)) return true;
+        if (!slides && QuadCell.isKeyFrameNal(type, codecH265)) singleWaitKey = false;
+        return false;
+    }
+
     // ====================== Lifecycle ======================
 
     @Override
@@ -1803,6 +1821,7 @@ public class Decoder extends Activity
     private static final int UDP_STALL_SECONDS = 8;
     private int singleStallSeconds;
     private int lastSingleFrames;
+    private volatile int singleOutFps;
     private long lastSingleBytes;
     private final Runnable singleUdpCheck = new Runnable() {
         @Override
@@ -1816,6 +1835,8 @@ public class Decoder extends Activity
                     && (client.playsOverUdp() || client.listens())
                     && "connected".equals(singleState)
                     && bytes - lastSingleBytes > 10_000 && frames == lastSingleFrames;
+            // Frames shown in the last second, for /stats.json (#153)
+            singleOutFps = Math.max(0, frames - lastSingleFrames);
             lastSingleFrames = frames;
             lastSingleBytes = bytes;
             singleStallSeconds = stalled ? singleStallSeconds + 1 : 0;
@@ -1836,6 +1857,8 @@ public class Decoder extends Activity
 
     private void stopStreams() {
         lastJpegFrameMs = 0;
+        // The next stream's first MJPEG frame shows at once with S on (Qodo on #155)
+        lastSlideJpegMs = 0;
         resetDecoderStuck();
         mSurface.removeCallbacks(singleUdpCheck);
         // The single view's stream ends here: it is no longer "connected" for the debug page
