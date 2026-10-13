@@ -15,8 +15,12 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
+import android.graphics.Paint;
+import android.graphics.Rect;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -192,6 +196,15 @@ public class Decoder extends Activity
             public void onCodecChanged(boolean h265, AudioConfig audio) {
                 codecH265 = h265;
                 audioCodec = audio.codec;
+                boolean jpeg = rtspClient.isJpeg();
+                if (jpeg) {
+                    // MJPEG is drawn by the app (#119): no MediaCodec may hold the surface
+                    closeDecoder();
+                } else if (jpegDrawn) {
+                    // A surface drawn with lockCanvas() cannot take a decoder any more
+                    jpegDrawn = false;
+                    runOnUiThread(() -> recreateVideoSurface());
+                }
                 // RtspClient configures the AudioManager itself, on its own audio route
             }
             @Override public void onJitterSample(int avg) {
@@ -608,10 +621,12 @@ public class Decoder extends Activity
 
     private void showConnectedDetails() {
         if (statusText == null || statusText.getVisibility() != View.VISIBLE) return;
-        String videoCodec = codecH265 ? "H.265" : "H.264";
+        String videoCodec = rtspClient != null && rtspClient.isJpeg() ? "MJPEG"
+                : codecH265 ? "H.265" : "H.264";
         String aCodec;
         switch (audioCodec) {
             case AudioConfig.AAC:  aCodec = " • AAC"; break;
+            case AudioConfig.OPUS: aCodec = " • Opus"; break;
             case AudioConfig.PCMU:
             case AudioConfig.PCMA: aCodec = " • G.711"; break;
             case AudioConfig.PCM:  aCodec = " • PCM"; break;
@@ -1225,7 +1240,7 @@ public class Decoder extends Activity
             Snapshots.Cell c = new Snapshots.Cell();
             c.slot = mActive + 1;
             c.live = mResumed && "connected".equals(singleState)
-                    && videoDecoder.renderedWithin(SNAPSHOT_LIVE_MS);
+                    && singleRenderedWithin(SNAPSHOT_LIVE_MS);
             c.label = statusText != null && statusText.getVisibility() == View.VISIBLE
                     ? statusText.getText().toString() : c.live ? "Playing" : "No new frames";
             if (c.live) {
@@ -1340,11 +1355,12 @@ public class Decoder extends Activity
             single.put("transport_mode", mTransports[mActive] != null
                     ? mTransports[mActive].name() : null);
             single.put("video", mResumed && "connected".equals(singleState)
-                    && videoDecoder.renderedWithin(SNAPSHOT_LIVE_MS));
+                    && singleRenderedWithin(SNAPSHOT_LIVE_MS));
             single.put("status", statusText != null && statusText.getVisibility() == View.VISIBLE
                     ? statusText.getText().toString() : singleState);
             if (mVideoWidth > 0) single.put("size", mVideoWidth + "x" + mVideoHeight);
-            single.put("codec", codecH265 ? "H.265" : "H.264");
+            single.put("codec", rtspClient != null && rtspClient.isJpeg() ? "MJPEG"
+                    : codecH265 ? "H.265" : "H.264");
             single.put("audio", audioCodec);
             m.put("single", single);
         }
@@ -1559,6 +1575,74 @@ public class Decoder extends Activity
         return (int) (dp * mDensity + 0.5f);
     }
 
+    // ====================== MJPEG (#119) ======================
+
+    /** Something was drawn into the video surface with lockCanvas(). */
+    private volatile boolean jpegDrawn;
+    private volatile long lastJpegFrameMs;
+    private Bitmap jpegBitmap;
+    private final Paint jpegPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+
+    /**
+     * One JPEG frame of an MJPEG stream into the single view, on the decode thread: decoded
+     * with BitmapFactory (into the previous bitmap when the size is the same) and drawn over
+     * the whole surface; the view's fit transform keeps the aspect ratio, as for video.
+     */
+    private void drawJpeg(Frame frame) {
+        Surface s = mVideoSurface;
+        if (s == null || !s.isValid()) return;
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        o.inMutable = true;
+        Bitmap reuse = jpegBitmap;
+        if (reuse != null) o.inBitmap = reuse;
+        Bitmap b;
+        try {
+            b = BitmapFactory.decodeByteArray(frame.data(), 0, frame.length(), o);
+        } catch (IllegalArgumentException e) {
+            // Another size than the reusable bitmap
+            o.inBitmap = null;
+            b = BitmapFactory.decodeByteArray(frame.data(), 0, frame.length(), o);
+        }
+        if (b == null) return;
+        jpegBitmap = b;
+        final int w = b.getWidth();
+        final int h = b.getHeight();
+        try {
+            Canvas c = s.lockCanvas(null);
+            try {
+                c.drawColor(Color.BLACK);
+                c.drawBitmap(b, null, new Rect(0, 0, c.getWidth(), c.getHeight()), jpegPaint);
+            } finally {
+                s.unlockCanvasAndPost(c);
+            }
+        } catch (RuntimeException e) {
+            // The surface went away meanwhile (view or activity change)
+            return;
+        }
+        jpegDrawn = true;
+        boolean first = lastJpegFrameMs == 0;
+        lastJpegFrameMs = SystemClock.elapsedRealtime();
+        if (first || w != mVideoWidth || h != mVideoHeight) {
+            runOnUiThread(() -> {
+                updateResolution(w, h);
+                removeClearOverlay();
+            });
+        }
+    }
+
+    /** A new Surface on the TextureView, for a decoder after MJPEG was drawn (#119). */
+    private void recreateVideoSurface() {
+        android.graphics.SurfaceTexture st = mSurface != null ? mSurface.getSurfaceTexture() : null;
+        if (st != null) replaceSurface(new Surface(st));
+    }
+
+    /** The single view showed a frame within the last {@code ms} (video or MJPEG). */
+    private boolean singleRenderedWithin(long ms) {
+        return videoDecoder.renderedWithin(ms)
+                || (rtspClient != null && rtspClient.isJpeg() && lastJpegFrameMs > 0
+                && SystemClock.elapsedRealtime() - lastJpegFrameMs < ms);
+    }
+
     // ====================== Video decode thread ======================
 
     private void startListener() {
@@ -1576,7 +1660,10 @@ public class Decoder extends Activity
             while (gen == listenerGen) {
                 try {
                     Frame buffer = nalQueue.poll(5, TimeUnit.MILLISECONDS);
-                    if (buffer != null) {
+                    if (buffer != null && rtspClient.isJpeg()) {
+                        drawJpeg(buffer);
+                        framePool.recycle(buffer);
+                    } else if (buffer != null) {
                         if (videoDecoder.decodeFrame(buffer, codecH265, 0)) {
                             createDecoder();
                             // The frame that triggered creation (often the SPS) goes in too
@@ -1647,6 +1734,7 @@ public class Decoder extends Activity
     };
 
     private void stopStreams() {
+        lastJpegFrameMs = 0;
         mSurface.removeCallbacks(singleUdpCheck);
         // The single view's stream ends here: it is no longer "connected" for the debug page
         singleState = "disconnected";
