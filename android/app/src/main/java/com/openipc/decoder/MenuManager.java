@@ -36,6 +36,9 @@ import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.TextView;
 
+import java.util.HashSet;
+import java.util.Set;
+
 class MenuManager {
     private static final String TAG = "OpenIPCDecoder";
     private static final int CAM_COUNT = Decoder.CAM_COUNT;
@@ -374,16 +377,35 @@ class MenuManager {
         return text;
     }
 
+    /** On / active (D on, Q, U, the active slot): orange, unlike the blue focus (#114). */
+    private static final int ACTIVE_BORDER = 0xFFFF9800;
+    private static final int ACTIVE_FILL = 0xFF4A2C00;
+    private static final int FOCUS_BORDER = Color.BLUE;
+    private final Set<View> activeItems = new HashSet<>();
+
     private void highlightItem(TextView item) {
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.BLACK);
-        bg.setStroke(2, Color.BLUE);
-        item.setBackground(bg);
+        activeItems.add(item);
+        paintItem(item, item.hasFocus());
     }
 
     private void resetItem(TextView item) {
         item.setTextColor(Color.WHITE);
-        focusChange(item);
+        activeItems.remove(item);
+        paintItem(item, item.hasFocus());
+    }
+
+    /**
+     * Active items have an orange fill and border, the focused item a thick blue border; an
+     * item that is both keeps the orange fill under the blue border, so neither state hides.
+     */
+    private void paintItem(View item, boolean focused) {
+        boolean active = activeItems.contains(item);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(active ? ACTIVE_FILL : Color.BLACK);
+        if (focused) bg.setStroke(dp(2), FOCUS_BORDER);
+        else if (active) bg.setStroke(dp(2), ACTIVE_BORDER);
+        else bg.setStroke(1, Color.GRAY);
+        item.setBackground(bg);
     }
 
     private void applyQualityColor(TextView btn, int slot, boolean quadEnabled,
@@ -459,15 +481,8 @@ class MenuManager {
     }
 
     private void focusChange(View item) {
-        GradientDrawable border = new GradientDrawable();
-        border.setColor(Color.BLACK);
-        border.setStroke(1, Color.GRAY);
-        item.setBackground(border);
-        item.setOnFocusChangeListener((v, hasFocus) -> {
-            if (hasFocus) border.setStroke(1, Color.BLUE);
-            else border.setStroke(1, Color.GRAY);
-            v.setBackground(border);
-        });
+        paintItem(item, false);
+        item.setOnFocusChangeListener((v, hasFocus) -> paintItem(v, hasFocus));
     }
 
     @SuppressLint("SetJavaScriptEnabled")
