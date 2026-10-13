@@ -119,14 +119,44 @@ jobs:
           tag_name: latest
           files: ${{ steps.vars.outputs.name }}.apk
 
+      # v2: every version gets a release of its own (#157), at the commit that was built, with
+      # the APK and the merged PRs since the previous v2.* release. A push without a version
+      # bump (docs, CI) only updates "latest" above. Not marked Latest: the README links
+      # releases/tag/latest
+      - name: Versioned release
+        if: github.ref_name == 'v2'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER=$(sed -n 's/.*versionName "\(.*\)".*/\1/p' android/app/build.gradle)
+          TAG="v${VER}"
+          if [ -z "$VER" ]; then echo "No versionName found"; exit 1; fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists: only latest was updated"
+            exit 0
+          fi
+          cp decoder-v2.apk "decoder-v2-${VER}.apk"
+          PREV=$(gh release list --limit 100 --json tagName \
+            -q '[.[].tagName | select(startswith("v2."))][0] // ""')
+          if [ -n "$PREV" ]; then
+            NOTES=(--generate-notes --notes-start-tag "$PREV")
+          else
+            NOTES=(--notes "First release of the 2.xx line (v2 branch). Earlier changes: https://github.com/${{ github.repository }}/commits/v2")
+          fi
+          gh release create "$TAG" "decoder-v2-${VER}.apk" --target "$(git rev-parse HEAD)" \
+            --title "OpenIPC Decoder ${VER}" --latest=false "${NOTES[@]}"
+
       - name: Telegram
         if: github.ref_name == 'basic' || github.ref_name == 'v2'
         run: |
+          # basic keeps its Gradle files at the top level
+          VER=$(sed -n 's/.*versionName "\(.*\)".*/\1/p' android/app/build.gradle app/build.gradle \
+            2>/dev/null | head -1)
           GIT_HASH=$(git rev-parse --short HEAD)
           GIT_BRANCH="${{ github.ref_name }}"
           TAG_NAME="${{ github.ref_type == 'tag' && github.ref_name || '' }}"
           TIME=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-          TG_MSG="Commit: ${GIT_HASH}\nBranch: ${GIT_BRANCH}\nTag: ${TAG_NAME}\nTime: ${TIME}\n\n"
+          TG_MSG="Version: ${VER}\nCommit: ${GIT_HASH}\nBranch: ${GIT_BRANCH}\nTag: ${TAG_NAME}\nTime: ${TIME}\n\n"
           TG_ICON="\xE2\x9C\x85 GitHub Actions"
           TG_HEADER=$(echo -e ${TG_MSG}${TG_ICON})
           TG_TOKEN=${{secrets.TELEGRAM_TOKEN_BOT_OPENIPC}}
