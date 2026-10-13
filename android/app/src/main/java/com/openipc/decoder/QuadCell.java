@@ -11,6 +11,7 @@ import android.util.Log;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
+import android.view.View;
 
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -72,6 +73,8 @@ class QuadCell implements RtspSession.Callback {
     private float outAvg;
     /** Decode only key frames and parameter sets (#85): a fraction of the load. */
     private volatile boolean keyFramesOnly = true;
+    /** The camera sends MJPEG, which the grid does not decode yet (#119). */
+    private volatile boolean jpeg;
     /** Just promoted to full rate: skip until the next key frame, the references are missing. */
     private volatile boolean waitingKeyFrame;
 
@@ -421,6 +424,14 @@ class QuadCell implements RtspSession.Callback {
 
     @Override
     public void onSdp(Sdp sdp) {
+        // MJPEG plays in the single view only for now (#119)
+        jpeg = sdp.videoJpeg;
+        if (jpeg) {
+            // Paused rather than pulling a stream it cannot show (Qodo on #131)
+            problem = "Decoder: MJPEG in the single view only";
+            View v = view;
+            if (v != null) v.post(() -> pause("MJPEG: single view only"));
+        }
         udpStallSamples = 0;
         nalAssembler.reset();
         lastUnknownPayload = -1;
@@ -447,6 +458,7 @@ class QuadCell implements RtspSession.Callback {
             return false;
         }
         if (channel != RtspSession.CHANNEL_VIDEO) return false;
+        if (jpeg) return true; // dropped, but no reconnect loop before the pause
         int pt = buf[offset + 1] & 0x7F;
         if (pt != videoPt) {
             if (pt != lastUnknownPayload) {

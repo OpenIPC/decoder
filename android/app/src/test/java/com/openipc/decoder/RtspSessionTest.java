@@ -499,7 +499,7 @@ public class RtspSessionTest {
 
     @Test
     public void noSupportedVideoTrackFailsAndRetries() throws Exception {
-        server.sdp = "v=0\r\nm=video 0 RTP/AVP 26\r\na=rtpmap:26 JPEG/90000\r\n";
+        server.sdp = "v=0\r\nm=video 0 RTP/AVP 98\r\na=rtpmap:98 VP8/90000\r\n";
         session.configure(server.url(null), "", true);
         session.start();
         long deadline = System.nanoTime() + 3_000_000_000L;

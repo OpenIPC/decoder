@@ -311,7 +311,7 @@ class RtspSession {
             Sdp sdp = Sdp.parse(r.body, base != null ? base : u.requestUrl);
             if (sdp.videoPt < 0) {
                 // Nothing we could decode: fail so that the back-off applies, not a black view
-                throw new IOException("No H.264/H.265 video track in SDP");
+                throw new IOException("No H.264/H.265/MJPEG video track in SDP");
             }
 
             Transport.Mode m = mode;

@@ -23,6 +23,9 @@ class RtspClient implements RtspSession.Callback {
     // Session parameters from the SDP (network thread)
     private volatile int videoPt = -1;
     private volatile boolean codecH265;
+    /** MJPEG over RTSP (#119): whole JPEG frames go to the queue instead of NAL units. */
+    private volatile boolean videoJpeg;
+    private final JpegAssembler jpegAssembler;
 
     // Quality tracking (network thread)
     private long lastQualityUpdateTime;
@@ -49,6 +52,7 @@ class RtspClient implements RtspSession.Callback {
         this.framePool = framePool;
         this.nalAssembler = nalAssembler;
         this.nalQueue = nalQueue;
+        this.jpegAssembler = new JpegAssembler(framePool);
         this.nalSink = nal -> {
             if (!nalQueue.offer(nal)) {
                 // Rate-limited: one aggregation packet can carry many NAL units
@@ -76,10 +80,13 @@ class RtspClient implements RtspSession.Callback {
     /** Transport the stream really uses now, or null (#115). */
     String transportInUse() { return session.transportInUse(); }
     long getStreamBytes() { return session.getStreamBytes(); }
+    /** The stream is MJPEG: the queue carries complete JPEG frames (#119). */
+    boolean isJpeg() { return videoJpeg; }
     long getBitrateMarkNs() { return session.getBitrateMarkNs(); }
 
     void start() {
         nalAssembler.reset();
+        jpegAssembler.reset();
         session.start();
     }
 
@@ -87,6 +94,7 @@ class RtspClient implements RtspSession.Callback {
     void stop() {
         session.stop();
         nalAssembler.reset();
+        jpegAssembler.reset();
     }
 
     // ====================== RtspSession.Callback ======================
@@ -103,9 +111,17 @@ class RtspClient implements RtspSession.Callback {
         lastUnknownPayload = -1;
         lastRtpTimestamp = -1;
         lastRtpArrivalNs = -1;
+        jpegAssembler.reset();
+        if (sdp.videoJpeg != videoJpeg || sdp.videoH265 != codecH265) {
+            // Frames of the previous codec must not reach the new path (Qodo on #131)
+            Frame f;
+            while ((f = nalQueue.poll()) != null) framePool.recycle(f);
+        }
         videoPt = sdp.videoPt;
         codecH265 = sdp.videoH265;
-        Log.i(TAG, "Video pt " + sdp.videoPt + (sdp.videoH265 ? " H.265" : " H.264")
+        videoJpeg = sdp.videoJpeg;
+        Log.i(TAG, "Video pt " + sdp.videoPt
+                + (sdp.videoJpeg ? " MJPEG" : sdp.videoH265 ? " H.265" : " H.264")
                 + ", audio " + sdp.audio.codec);
         if (audioManager != null) audioManager.configure(sdp.audio, audioRoute);
         Listener l = listenerCb;
@@ -142,7 +158,11 @@ class RtspClient implements RtspSession.Callback {
             return false;
         }
 
-        if (!nalAssembler.assemble(data, offset, length, codecH265, nalSink)) return false;
+        if (videoJpeg) {
+            if (!jpegAssembler.assemble(data, offset, length, nalSink::onNal)) return false;
+        } else if (!nalAssembler.assemble(data, offset, length, codecH265, nalSink)) {
+            return false;
+        }
         updateJitter(data, offset);
         return true;
     }

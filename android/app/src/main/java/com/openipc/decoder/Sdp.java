@@ -17,12 +17,16 @@ class Sdp {
     /** Legacy payload types, used when the SDP has no rtpmap for the video track. */
     static final int PT_H264 = 96;
     static final int PT_H265 = 97;
+    /** Static payload type of RTP/JPEG (RFC 3551), used without an rtpmap (#119). */
+    static final int PT_JPEG = 26;
 
     String videoUrl;
     /** Null when the stream has no audio track. */
     String audioUrl;
     int videoPt = -1;
     boolean videoH265;
+    /** MJPEG (RTP/JPEG, RFC 2435) instead of H.264/H.265 (#119). */
+    boolean videoJpeg;
     AudioConfig audio = new AudioConfig();
 
     /**
@@ -92,7 +96,8 @@ class Sdp {
         }
         audio.finish();
 
-        // Video: the first section offering H.264/H.265 (legacy 96/97 without rtpmap);
+        // Video: the first section offering H.264/H.265 (legacy 96/97 without rtpmap) or, if
+        // none does, MJPEG (#119);
         // payload type and control URL always come from that same section
         String sessionBase = resolve(base, session);
         String videoControl = null;
@@ -106,8 +111,15 @@ class Sdp {
                 if ("H264".equals(codec) || "H265".equals(codec) || "HEVC".equals(codec)) {
                     out.videoPt = pt;
                     out.videoH265 = !"H264".equals(codec);
+                    out.videoJpeg = false;
                     videoControl = v.control;
                     break outer;
+                }
+                boolean jpeg = codec != null ? "JPEG".equals(codec) : pt == PT_JPEG;
+                if (jpeg && out.videoPt < 0) {
+                    out.videoPt = pt;
+                    out.videoJpeg = true;
+                    videoControl = v.control;
                 }
             }
         }

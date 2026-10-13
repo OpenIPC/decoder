@@ -28,7 +28,7 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 
 ## Features
 
-- **Video:** RTSP playback, hardware H.264/H.265 decoding via MediaCodec, automatic decoder recovery, picture fitted to any screen shape
+- **Video:** RTSP playback, hardware H.264/H.265 decoding via MediaCodec, MJPEG over RTSP (RTP/JPEG, single view), automatic decoder recovery, picture fitted to any screen shape
 - **Audio:** AAC (RFC 3640 `mpeg4-generic`, ADTS, MP4A-LATM), Opus, G.711 μ-law/A-law, L16 PCM (mono/stereo); in multi-view, the sound of the selected cell
 - **Display:** single camera, or multi-view (Quad) with up to 8 cameras at once in a 2×2 or 3×3 grid
 - **Controls:** pinch-to-zoom, pan, double-tap to reset, Android TV remote (Leanback launcher)
