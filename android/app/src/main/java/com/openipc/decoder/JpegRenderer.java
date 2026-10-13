@@ -27,8 +27,13 @@ import android.view.Surface;
 final class JpegRenderer {
     private static final String TAG = "OpenIPCDecoder";
 
-    /** The hardware decoder failed once in this run: the software path from then on. */
-    private static volatile boolean hwFailed;
+    /**
+     * This stream's hardware decoder failed: the software path from then on. Per renderer, so
+     * one cell at a decoder limit does not send the others to lockCanvas() (Qodo on #139).
+     */
+    private volatile boolean hwFailed;
+    /** The last frame was decoded with BitmapFactory. */
+    private volatile boolean software;
 
     private final JpegCodec codec = new JpegCodec();
     private final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
@@ -46,6 +51,7 @@ final class JpegRenderer {
             int[] size = JpegAssembler.size(frame.data(), frame.length());
             if (size != null) {
                 try {
+                    software = false;
                     return codec.decode(frame, s, size[0], size[1], current) ? size : null;
                 } catch (Exception e) {
                     codec.release();
@@ -56,6 +62,9 @@ final class JpegRenderer {
                 }
             }
         }
+        // A decoder still connected to the surface would make lockCanvas() fail
+        codec.release();
+        software = true;
         BitmapFactory.Options o = new BitmapFactory.Options();
         o.inMutable = true;
         Bitmap reuse = bitmap;
@@ -98,6 +107,12 @@ final class JpegRenderer {
 
     /** The surface holds frames drawn with lockCanvas(). */
     boolean drewWithCanvas() { return drawn; }
+
+    /** Frames are decoded with BitmapFactory: CPU load, not the hardware decoder's. */
+    boolean isSoftware() { return software; }
+
+    /** Frames the hardware decoder had no input buffer for. */
+    int dropped() { return codec.inputDropped(); }
 
     /** Releases the hardware decoder (the stream stopped or is no MJPEG any more). */
     void release() {

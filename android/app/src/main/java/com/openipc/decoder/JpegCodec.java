@@ -51,7 +51,7 @@ final class JpegCodec {
         try {
             for (MediaCodecInfo ci : new MediaCodecList(MediaCodecList.ALL_CODECS)
                     .getCodecInfos()) {
-                if (ci.isEncoder()) continue;
+                if (ci.isEncoder() || softwareOnly(ci)) continue;
                 for (String type : ci.getSupportedTypes()) {
                     for (String m : MIMES) {
                         if (m.equalsIgnoreCase(type) && result.length == 0) {
@@ -86,6 +86,16 @@ final class JpegCodec {
     }
 
     /**
+     * A software codec does no better than BitmapFactory and its load is not the hardware's:
+     * the software path takes the stream instead (Qodo on #139).
+     */
+    private static boolean softwareOnly(MediaCodecInfo ci) {
+        if (android.os.Build.VERSION.SDK_INT >= 29) return ci.isSoftwareOnly();
+        String n = ci.getName().toLowerCase(java.util.Locale.ROOT);
+        return n.startsWith("omx.google.") || n.startsWith("c2.android.");
+    }
+
+    /**
      * Decodes one JPEG of {@code w}×{@code h} to {@code target}; (re)creates the decoder when
      * the size or surface changes. Returns true when a frame was rendered. Throws when the
      * decoder cannot be used: the caller then switches to the software path.
@@ -101,6 +111,10 @@ final class JpegCodec {
     /** Frames queued in a row without any output: the decoder is not working (Qodo on #135). */
     static final int MAX_SILENT_FRAMES = 15;
     private int silentFrames;
+    /** Frames the decoder had no input buffer for: decoder losses for the planner (#85). */
+    private volatile int inputDropped;
+
+    int inputDropped() { return inputDropped; }
 
     /** Checked under the lock: false once the stream that called decode() has stopped. */
     interface Current {
@@ -149,6 +163,8 @@ final class JpegCodec {
             b.clear();
             b.put(frame.data(), 0, frame.length());
             codec.queueInputBuffer(in, 0, frame.length(), System.nanoTime() / 1000, 0);
+        } else {
+            inputDropped++;
         }
         boolean rendered = false;
         int out;

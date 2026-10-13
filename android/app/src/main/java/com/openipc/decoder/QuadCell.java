@@ -168,6 +168,8 @@ class QuadCell implements RtspSession.Callback {
         // the VM, which allocated about 1 MB/s of garbage with four streams
         view.getHolder().addCallback(holderCallback);
         Surface s = view.getHolder().getSurface();
+        // Drawn with lockCanvas() before stop(): the video path asks for a new one (decode())
+        surfacePending = false;
         if (s != null && s.isValid()) {
             surface = s;
             if (!threadsStarted) startThreads();
@@ -194,6 +196,11 @@ class QuadCell implements RtspSession.Callback {
             surface = null;
             decoder.closeDecoder();
             jpegRenderer.release();
+            if (recreating) {
+                recreating = false;
+                SurfaceView v = view;
+                if (v != null) v.post(() -> v.setVisibility(View.VISIBLE));
+            }
         }
     };
 
@@ -239,6 +246,12 @@ class QuadCell implements RtspSession.Callback {
         jpegRenderer.release();
         jpegShowing = false;
         lastJpegShownMs = 0;
+        surfacePending = false;
+        if (recreating) {
+            recreating = false;
+            SurfaceView v = view;
+            if (v != null) v.post(() -> v.setVisibility(View.VISIBLE));
+        }
         // Disabling releases the decoder and stops the decode thread from creating another,
         // so there is nothing to wait for on the UI thread (#32)
         decoder.setEnabled(false);
@@ -296,7 +309,7 @@ class QuadCell implements RtspSession.Callback {
     String sample(long nowMs) {
         int in = framesIn;
         int out = decoder.framesOut() + jpegFramesOut;
-        int lost = queueFullDrops + decoder.inputDropped();
+        int lost = queueFullDrops + decoder.inputDropped() + jpegRenderer.dropped();
         if (lastSampleMs > 0 && nowMs > lastSampleMs) {
             float sec = (nowMs - lastSampleMs) / 1000f;
             inFps = Math.max(0, in - lastIn) / sec;
@@ -328,7 +341,8 @@ class QuadCell implements RtspSession.Callback {
                     : String.valueOf(Math.round(outAvg));
             // MJPEG has no key frames: its cheap mode shows one frame per second (#132)
             return size + codec + (jpeg ? " reduced" : " key frames") + " · " + rate + " fps"
-                    + (decoder.isSoftware() ? " · software" : "");
+                    + ((jpeg ? jpegRenderer.isSoftware() : decoder.isSoftware())
+                            ? " · software" : "");
         }
         return size + codec + " " + Math.round(outFps) + "/" + Math.round(inFps) + " fps";
     }
@@ -354,11 +368,14 @@ class QuadCell implements RtspSession.Callback {
 
     /** Macroblocks per second at full rate (#85). */
     long fullLoad() {
+        // MJPEG drawn with BitmapFactory loads the CPU, not the hardware decoder (Qodo on #139)
+        if (jpeg && jpegRenderer.isSoftware()) return 0;
         return DecodePlanner.fullLoad(width(), height(), inAvg);
     }
 
     /** Macroblocks per second it costs now on key frames only (#85). */
     long keyLoad() {
+        if (jpeg && jpegRenderer.isSoftware()) return 0;
         return DecodePlanner.fullLoad(width(), height(), outAvg);
     }
 
@@ -382,7 +399,7 @@ class QuadCell implements RtspSession.Callback {
     /** Video RTP packets received, for the stall check (frames need a marker bit). */
     private volatile int videoPackets;
     private int lastVideoPackets;
-    private int lastLossCount;
+    private volatile int lastLossCount;
 
     /**
      * Over UDP a lost packet drops the whole NAL unit; on key frames only (#85) a camera that
@@ -393,7 +410,8 @@ class QuadCell implements RtspSession.Callback {
      */
     private void checkUdpStall() {
         int packets = videoPackets;
-        int loss = nalAssembler.lossCount();
+        // The assembler of the stream: JPEG frames lost to missing fragments count too
+        int loss = jpeg ? jpegAssembler.droppedCount() : nalAssembler.lossCount();
         boolean arriving = packets - lastVideoPackets >= 10;
         boolean losing = loss > lastLossCount;
         lastVideoPackets = packets;
@@ -412,7 +430,7 @@ class QuadCell implements RtspSession.Callback {
         if (udpStallSamples >= UDP_STALL_SAMPLES) {
             udpStallSamples = 0;
             session.reportUdpBroken("packets but no decoded frame for " + UDP_STALL_SAMPLES
-                    + " s (" + loss + " NAL units lost)");
+                    + " s (" + loss + (jpeg ? " JPEG frames" : " NAL units") + " lost)");
         }
     }
 
@@ -472,31 +490,27 @@ class QuadCell implements RtspSession.Callback {
 
     @Override
     public void onSdp(Sdp sdp) {
-        boolean wasJpeg = jpeg;
-        if (sdp.videoJpeg != wasJpeg || sdp.videoH265 != codecH265) {
-            // Frames of the previous codec must not reach the new path (Qodo on #131)
-            Frame f;
-            while ((f = nalQueue.poll()) != null) cellFramePool.recycle(f);
-        }
+        // First the path, so a JPEG frame still being drawn no longer counts as current
+        jpeg = sdp.videoJpeg;
+        // Frames of the previous connection must not reach the new one (Qodo on #131, #139);
+        // one the decode thread already holds is checked against the path in decode()
+        Frame f;
+        while ((f = nalQueue.poll()) != null) cellFramePool.recycle(f);
         if (sdp.videoJpeg) {
             // MJPEG has its own decoder or is drawn by the app (#132): the video decoder must
             // not hold the surface
             decoder.closeDecoder();
         } else {
+            // A surface drawn with lockCanvas() is replaced by the decode thread (decode())
             jpegRenderer.release();
-            if (jpegRenderer.takeCanvasDrawn()) {
-                // A surface drawn with lockCanvas() cannot take a decoder any more: hide and
-                // show the view for a new one, no decoder until it is there (Qodo on #131)
-                surfacePending = true;
-                SurfaceView v = view;
-                if (v != null) v.post(() -> {
-                    v.setVisibility(View.GONE);
-                    v.post(() -> v.setVisibility(View.VISIBLE));
-                });
-            }
         }
-        jpeg = sdp.videoJpeg;
+        // Nothing of the new stream is on screen yet (Qodo on #139)
+        jpegShowing = false;
+        jpegWidth = 0;
+        jpegHeight = 0;
+        lastJpegShownMs = 0;
         lastJpegDecodeMs = 0;
+        lastLossCount = sdp.videoJpeg ? jpegAssembler.droppedCount() : nalAssembler.lossCount();
         udpStallSamples = 0;
         nalAssembler.reset();
         jpegAssembler.reset();
@@ -542,11 +556,22 @@ class QuadCell implements RtspSession.Callback {
 
 
     private void decode(Frame buffer) {
+        // The frame's own type, not only the current path: a frame taken from the queue before
+        // a codec change must not reach the other path (Qodo on #139)
+        boolean isJpeg = buffer.length() >= 2 && (buffer.data()[0] & 0xFF) == 0xFF
+                && (buffer.data()[1] & 0xFF) == 0xD8;
+        if (isJpeg != jpeg) return;
         if (jpeg) {
             decodeJpeg(buffer);
             return;
         }
         if (buffer.length() < 5 || surfacePending) return;
+        if (jpegRenderer.takeCanvasDrawn()) {
+            // MJPEG was drawn into this surface with lockCanvas(), which cannot take a decoder
+            // any more: no decoder until there is a new surface (Qodo on #131, #139)
+            recreateSurface();
+            return;
+        }
         if (keyFramesOnly || waitingKeyFrame) {
             int type = NalAssembler.fragment(buffer.data()[4], codecH265);
             if (!isKeyNal(type, codecH265)) return;
@@ -560,6 +585,29 @@ class QuadCell implements RtspSession.Callback {
             // Feed the frame that triggered creation (often the SPS) to the new decoder
             decoder.decodeFrame(buffer, codecH265, 0);
         }
+    }
+
+    /** The view hides the surface to get a new one; surfaceDestroyed() shows it again. */
+    private volatile boolean recreating;
+
+    /**
+     * A new surface for the view after MJPEG was drawn with lockCanvas(). GONE has to reach a
+     * layout pass to destroy the surface, so VISIBLE follows in surfaceDestroyed(), not right
+     * after it (Qodo on #139).
+     */
+    private void recreateSurface() {
+        surfacePending = true;
+        SurfaceView v = view;
+        if (v == null) return;
+        v.post(() -> {
+            if (!running || recreating) return;
+            if (!v.getHolder().getSurface().isValid()) {
+                // No surface now: the next one is new anyway (surfaceCreated)
+                return;
+            }
+            recreating = true;
+            v.setVisibility(View.GONE);
+        });
     }
 
     /** One JPEG frame onto the cell's surface; on key frames only, one per second (#132). */
