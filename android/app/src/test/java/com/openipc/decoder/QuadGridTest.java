@@ -49,10 +49,29 @@ public class QuadGridTest {
 
     @Test
     public void udpCellHintNamesPortAndAddress() {
-        String t = Decoder.udpHintText("192.168.1.20", 5600);
+        String t = Decoder.udpHintText(java.util.Arrays.asList("192.168.1.20"), 5600);
         assertTrue(t.contains("UDP RTP"));
         assertTrue(t.contains("192.168.1.20:5600"));
         // Without a known address the hint still tells where to send the stream
-        assertTrue(Decoder.udpHintText(null, 5600).contains("this device:5600"));
+        assertTrue(Decoder.udpHintText(java.util.Collections.emptyList(), 5600)
+                .contains("this device:5600"));
+    }
+
+    @Test
+    public void theUCellIsTheNinthCell() {
+        assertEquals(Decoder.CAM_COUNT, Decoder.U_CELL);
+        assertEquals(9, Decoder.CELL_COUNT);
+        assertEquals("udp://@:5600", Decoder.UDP_CELL_URL);
+    }
+
+    @Test
+    public void udpHintListsEveryAddress() {
+        String none = Decoder.udpHintText(java.util.Collections.emptyList(), 5600);
+        assertTrue(none, none.endsWith("\nthis device:5600"));
+        String one = Decoder.udpHintText(java.util.Arrays.asList("172.17.32.144"), 5600);
+        assertTrue(one, one.endsWith("output to\n172.17.32.144:5600"));
+        String two = Decoder.udpHintText(
+                java.util.Arrays.asList("172.17.32.144", "192.168.1.20"), 5600);
+        assertTrue(two, two.endsWith("output to\n172.17.32.144:5600\n192.168.1.20:5600"));
     }
 }

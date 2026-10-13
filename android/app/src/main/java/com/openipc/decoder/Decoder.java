@@ -47,13 +47,9 @@ import android.widget.Toast;
 import java.io.IOException;
 import java.io.OutputStream;
 
-import java.net.Inet4Address;
-import java.net.InetAddress;
-import java.net.NetworkInterface;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -98,12 +94,12 @@ public class Decoder extends Activity
     private boolean quadEnabled;
     private QuadCell[] quadCells;
     private LinearLayout quadContainer;
-    private final SurfaceView[] quadViews = new SurfaceView[CAM_COUNT];
+    private final SurfaceView[] quadViews = new SurfaceView[CELL_COUNT];
     // Quad audio (#12): the cell whose sound plays, -1 for none
     private int quadAudio = -1;
-    private final TextView[] quadAudioBadges = new TextView[CAM_COUNT];
+    private final TextView[] quadAudioBadges = new TextView[CELL_COUNT];
     /** Small text in each cell's corner: stats while playing, otherwise the status (#80, #82). */
-    private final TextView[] quadStats = new TextView[CAM_COUNT];
+    private final TextView[] quadStats = new TextView[CELL_COUNT];
     /** Debug text in every cell (menu D), or in none (#92). */
     private boolean showStats;
     /** With the debug text on: where the debug page is (#96). */
@@ -114,6 +110,10 @@ public class Decoder extends Activity
     // Camera settings
     /** Camera slots (#13). Multi-view shows 2x2, or 3x3 once a slot above 4 is in use. */
     static final int CAM_COUNT = 8;
+    /** Index of the U cell (pushed UDP RTP, #87): the ninth cell of the 3x3 grid. */
+    static final int U_CELL = CAM_COUNT;
+    /** Multi-view cells: the slots and the U cell. */
+    static final int CELL_COUNT = CAM_COUNT + 1;
     private static final String DEFAULT_URL = "rtsp://root:12345@192.168.1.10:554/stream=0";
     private final String[] mHosts = new String[CAM_COUNT];
     /** RTP transport per slot (#67): TCP, UDP or Auto (UDP with fallback to TCP). */
@@ -377,21 +377,31 @@ public class Decoder extends Activity
             nalQueue.clear();
         }
         mSurface.setVisibility(View.GONE);
-        if (udpFullView == null) {
-            udpFullView = udpHintCell();
-            udpFullView.setTextSize(20);
-            ((FrameLayout) findViewById(R.id.decoder)).addView(udpFullView,
-                    new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
-                            FrameLayout.LayoutParams.MATCH_PARENT));
-        } else {
-            udpFullView.setText(udpHintText(localIpv4(), UDP_RTP_PORT));
-        }
-        // An unconfigured slot brings its black overlay to the front (clearVideo()):
-        // the hint must be above it each time it is shown
-        udpFullView.bringToFront();
-        udpFullView.setVisibility(View.VISIBLE);
         udpViewShown = true;
         menuManager.setUdpShown(true);
+        startUdpGrid();
+    }
+
+    /** The U view (#87): a grid of one cell, the U cell, receiving on UDP_RTP_PORT. */
+    private void startUdpGrid() {
+        buildQuadGrid(1);
+        quadContainer.setVisibility(View.VISIBLE);
+        quadContainer.bringToFront();
+        ensureQuadLaidOut();
+        clearQuadViews();
+        createQuadCells();
+    }
+
+    /** Stops the cells of the grid, its audio and its stats; the views stay. */
+    private void stopQuadCells() {
+        quadContainer.removeCallbacks(quadStatsTick);
+        stopQuadAudio();
+        if (quadCells != null) {
+            for (QuadCell cell : quadCells) {
+                if (cell != null) cell.stop();
+            }
+            quadCells = null;
+        }
     }
 
     /** Hide the UDP view; true if it was shown. The caller starts what comes next. */
@@ -399,7 +409,8 @@ public class Decoder extends Activity
         if (!udpViewShown) return false;
         udpViewShown = false;
         menuManager.setUdpShown(false);
-        if (udpFullView != null) udpFullView.setVisibility(View.GONE);
+        stopQuadCells();
+        quadContainer.setVisibility(View.GONE);
         mSurface.setVisibility(View.VISIBLE);
         return true;
     }
@@ -655,7 +666,7 @@ public class Decoder extends Activity
      */
     private void ensureQuadLaidOut() {
         quadContainer.postDelayed(() -> {
-            if (!quadEnabled || quadContainer.getWidth() > 0) return;
+            if (!(quadEnabled || udpViewShown) || quadContainer.getWidth() > 0) return;
             Log.w(TAG, "Quad layout did not happen, forcing a layout pass");
             View decor = getWindow().getDecorView();
             for (View v = quadContainer; v != null && v != decor;
@@ -676,7 +687,10 @@ public class Decoder extends Activity
         return 2;
     }
 
-    /** (Re)build the multi-view grid; cells beyond it have no view. */
+    /**
+     * (Re)build the multi-view grid; cells beyond it have no view. Side 3: the ninth cell is
+     * the U cell; side 1: the U cell alone (the U view).
+     */
     private void buildQuadGrid(int size) {
         quadContainer.removeAllViews();
         Arrays.fill(quadViews, null);
@@ -688,14 +702,7 @@ public class Decoder extends Activity
             quadContainer.addView(lr, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
             for (int col = 0; col < size; col++) {
-                int idx = row * size + col;
-                if (idx >= CAM_COUNT) {
-                    // The ninth cell of a 3x3 grid is reserved for a pushed UDP RTP stream
-                    // (#68); until the receiver exists it explains what will appear there
-                    lr.addView(udpHintCell(), new LinearLayout.LayoutParams(
-                            0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
-                    continue;
-                }
+                int idx = size == 1 ? U_CELL : row * size + col;
                 quadViews[idx] = new SurfaceView(this);
                 quadViews[idx].setOnClickListener(cv ->
                         menuManager.showMenu(findViewById(R.id.decoder), quadEnabled, mActive, mVersion,
@@ -705,11 +712,13 @@ public class Decoder extends Activity
                 cell.addView(quadViews[idx], new FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT));
-                // Long press selects the cell whose audio plays (#12)
-                quadViews[idx].setOnLongClickListener(v -> {
-                    toggleQuadAudio(idx);
-                    return true;
-                });
+                // Long press selects the cell whose audio plays (#12); the U cell has video only
+                if (idx != U_CELL) {
+                    quadViews[idx].setOnLongClickListener(v -> {
+                        toggleQuadAudio(idx);
+                        return true;
+                    });
+                }
                 TextView badge = new TextView(this);
                 badge.setText(R.string.quad_audio_badge);
                 badge.setTextColor(Color.WHITE);
@@ -741,15 +750,17 @@ public class Decoder extends Activity
         }
     }
 
-    /** Port of the reserved UDP RTP cell (#68); 5600 is the usual default for pushed RTP. */
+    /** Port of the U cell (#68, #87); 5600 is the usual default for pushed RTP. */
     static final int UDP_RTP_PORT = 5600;
-    /** The UDP cell full-screen (menu button U); there is no receiver yet (#68). */
-    private TextView udpFullView;
+    /** What the U cell listens to: any sender, unicast, on UDP_RTP_PORT (#87). */
+    static final String UDP_CELL_URL = "udp://@:" + UDP_RTP_PORT;
+    /** The U cell full-screen (menu button U). */
     private boolean udpViewShown;
 
+    /** Shown over the U cell until its first frame: where to send the stream. */
     private TextView udpHintCell() {
         TextView hint = new TextView(this);
-        hint.setText(udpHintText(localIpv4(), UDP_RTP_PORT));
+        hint.setText(udpHintText(NetInfo.addresses(), UDP_RTP_PORT));
         hint.setTextColor(Color.GRAY);
         hint.setTextSize(13);
         hint.setGravity(Gravity.CENTER);
@@ -761,36 +772,35 @@ public class Decoder extends Activity
         return hint;
     }
 
-    static String udpHintText(String ip, int port) {
-        String target = (ip != null ? ip : "this device") + ":" + port;
-        return "UDP RTP \u00b7 port " + port + "\nWaiting for a stream\u2026\n\n"
-                + "Send the camera's RTP/UDP output to\n" + target;
+    /** Keeps the addresses in the U cell's hint current (DHCP, cable, Wi-Fi), once a second. */
+    private void refreshUdpHint() {
+        SurfaceView v = quadViews[U_CELL];
+        if (v == null) return;
+        View overlay = ((View) v.getParent()).findViewWithTag("quad_overlay_" + U_CELL);
+        if (!(overlay instanceof TextView) || overlay.getVisibility() != View.VISIBLE) return;
+        String text = udpHintText(NetInfo.addresses(), UDP_RTP_PORT);
+        TextView hint = (TextView) overlay;
+        if (!text.contentEquals(hint.getText())) hint.setText(text);
     }
 
-    /** First site-local IPv4 address of this device, or null. */
-    static String localIpv4() {
-        try {
-            for (NetworkInterface nif : Collections.list(NetworkInterface.getNetworkInterfaces())) {
-                if (!nif.isUp() || nif.isLoopback()) continue;
-                for (InetAddress a : Collections.list(nif.getInetAddresses())) {
-                    if (a instanceof Inet4Address && a.isSiteLocalAddress()) {
-                        return a.getHostAddress();
-                    }
-                }
-            }
-        } catch (Exception e) {
-            Log.w(TAG, "No local address: " + e.getMessage());
-        }
-        return null;
+    /** Hint of the U cell: every usable IPv4 address of the device, one per line (#87). */
+    static String udpHintText(List<String> ips, int port) {
+        StringBuilder target = new StringBuilder();
+        for (String ip : ips) target.append('\n').append(ip).append(':').append(port);
+        if (target.length() == 0) target.append("\nthis device:").append(port);
+        return "UDP RTP \u00b7 port " + port + "\nWaiting for a stream\u2026\n\n"
+                + "Send the camera's RTP/UDP output to" + target;
     }
+
 
     private void createQuadCells() {
-        quadCells = new QuadCell[CAM_COUNT];
-        for (int i = 0; i < CAM_COUNT; i++) {
+        quadCells = new QuadCell[CELL_COUNT];
+        for (int i = 0; i < CELL_COUNT; i++) {
             if (quadViews[i] == null) continue;
-            String url = mHosts[i];
+            String url = i == U_CELL ? UDP_CELL_URL : mHosts[i];
             if (url == null || url.isEmpty() || url.equals(DEFAULT_URL)) continue;
-            quadCells[i] = new QuadCell(i, url, mTransports[i], quadViews[i], framePool, mUserAgent,
+            Transport.Mode mode = i == U_CELL ? Transport.Mode.UDP : mTransports[i];
+            quadCells[i] = new QuadCell(i, url, mode, quadViews[i], framePool, mUserAgent,
                     index -> runOnUiThread(() -> removeQuadOverlay(index)));
             quadCells[i].start();
         }
@@ -815,7 +825,7 @@ public class Decoder extends Activity
         // A new route: audio of a previously selected cell can no longer reach playback
         int route = audioManager.newRoute();
         QuadCell[] cells = quadCells;
-        for (int i = 0; i < CAM_COUNT; i++) {
+        for (int i = 0; i < CELL_COUNT; i++) {
             QuadCell cell = cells != null ? cells[i] : null;
             boolean on = i == quadAudio && cell != null;
             if (cell != null) cell.setAudioSink(on ? audioManager : null, route);
@@ -881,7 +891,7 @@ public class Decoder extends Activity
     }
 
     private void clearQuadViews() {
-        for (int i = 0; i < CAM_COUNT; i++) showQuadOverlay(i);
+        for (int i = 0; i < CELL_COUNT; i++) showQuadOverlay(i);
     }
 
     /** Black overlay over a cell; its corner text stays visible above it. */
@@ -891,13 +901,17 @@ public class Decoder extends Activity
         FrameLayout cell = (FrameLayout) t.getParent();
         View overlay = cell.findViewWithTag("quad_overlay_" + i);
         if (overlay == null) {
-            overlay = new View(this);
+            // The U cell explains where to send the stream until the first frame (#87)
+            overlay = i == U_CELL ? udpHintCell() : new View(this);
+            if (i == U_CELL && udpViewShown) ((TextView) overlay).setTextSize(20);
             overlay.setTag("quad_overlay_" + i);
             overlay.setLayoutParams(new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.MATCH_PARENT));
             overlay.setBackgroundColor(Color.BLACK);
             cell.addView(overlay);
+        } else if (i == U_CELL) {
+            ((TextView) overlay).setText(udpHintText(NetInfo.addresses(), UDP_RTP_PORT));
         }
         overlay.setVisibility(View.VISIBLE);
         overlay.bringToFront();
@@ -912,7 +926,7 @@ public class Decoder extends Activity
         @Override
         public void run() {
             QuadCell[] cells = quadCells;
-            if (!quadEnabled || cells == null) return;
+            if (!(quadEnabled || udpViewShown) || cells == null) return;
             long now = System.nanoTime() / 1_000_000;
             boolean log = ++ticks % 5 == 0;
             for (int i = 0; i < cells.length; i++) {
@@ -927,6 +941,7 @@ public class Decoder extends Activity
             }
             planDecoding(cells, now);
             updateDebugUrls();
+            refreshUdpHint();
             quadContainer.postDelayed(this, 1000);
         }
     };
@@ -975,12 +990,19 @@ public class Decoder extends Activity
         boolean learntBefore = planner.isLearnt();
 
         java.util.List<DecodePlanner.Cell> order = new java.util.ArrayList<>();
-        // Priority: the cell whose sound plays, then slot order
-        if (quadAudio >= 0 && quadAudio < cells.length && cells[quadAudio] != null) {
+        // Priority: the U cell once its stream plays (#94), the cell whose sound plays, then
+        // slot order. While U receives nothing it stays last and takes no share
+        int first = U_CELL < cells.length && cells[U_CELL] != null && cells[U_CELL].isPlaying()
+                ? U_CELL : -1;
+        if (first >= 0) order.add(plannerCell(first, cells[first], now));
+        if (quadAudio >= 0 && quadAudio < cells.length && cells[quadAudio] != null
+                && quadAudio != first) {
             order.add(plannerCell(quadAudio, cells[quadAudio], now));
         }
         for (int i = 0; i < cells.length; i++) {
-            if (cells[i] != null && i != quadAudio) order.add(plannerCell(i, cells[i], now));
+            if (cells[i] != null && i != quadAudio && i != first) {
+                order.add(plannerCell(i, cells[i], now));
+            }
         }
         DecodePlanner.Decision d = planner.step(order, now);
         if (d.action != DecodePlanner.Action.NONE) {
@@ -1102,10 +1124,15 @@ public class Decoder extends Activity
         List<Snapshots.Cell> cells = new ArrayList<>();
         int width = Snapshots.width(getResources().getDisplayMetrics().widthPixels);
         side[1] = width;
-        if (!mResumed || udpViewShown) {
+        if (!mResumed) {
             Snapshots.Cell c = new Snapshots.Cell();
-            c.label = !mResumed ? "App in background" : "U \u00b7 UDP RTP port " + UDP_RTP_PORT;
+            c.label = "App in background";
             cells.add(c);
+            side[0] = 1;
+            return cells;
+        }
+        if (udpViewShown) {
+            cells.add(snapshotCell(U_CELL));
             side[0] = 1;
             return cells;
         }
@@ -1124,28 +1151,29 @@ public class Decoder extends Activity
             return cells;
         }
         int size = quadGridSize(mHosts, DEFAULT_URL);
-        QuadCell[] quad = quadCells;
-        for (int i = 0; i < size * size; i++) {
-            Snapshots.Cell c = new Snapshots.Cell();
-            if (i >= CAM_COUNT) {
-                c.label = "U \u00b7 no receiver yet";
-                cells.add(c);
-                continue;
-            }
-            c.slot = i + 1;
-            QuadCell cell = quad != null ? quad[i] : null;
-            TextView stats = quadStats[i];
-            if (cell == null) {
-                c.label = "not configured";
-            } else {
-                c.label = stats != null ? stats.getText().toString() : "";
-                c.live = cell.showsVideo(SNAPSHOT_LIVE_MS);
-                c.view = quadViews[i];
-            }
-            cells.add(c);
-        }
+        for (int i = 0; i < size * size; i++) cells.add(snapshotCell(i));
         side[0] = size;
         return cells;
+    }
+
+    /** One multi-view cell of a snapshot; slot 0 is the U cell. UI thread only. */
+    private Snapshots.Cell snapshotCell(int i) {
+        Snapshots.Cell c = new Snapshots.Cell();
+        c.slot = i == U_CELL ? 0 : i + 1;
+        QuadCell[] quad = quadCells;
+        QuadCell cell = quad != null && i < quad.length ? quad[i] : null;
+        TextView stats = quadStats[i];
+        if (cell == null) {
+            c.label = "not configured";
+        } else {
+            c.label = stats != null ? stats.getText().toString() : "";
+            c.live = cell.showsVideo(SNAPSHOT_LIVE_MS);
+            c.view = quadViews[i];
+            if (i == U_CELL && !c.live) {
+                c.label = "U \u00b7 waiting for RTP on port " + UDP_RTP_PORT;
+            }
+        }
+        return c;
     }
 
     /** Called on a server thread: the state is read on the UI thread, which owns it. */
@@ -1216,7 +1244,7 @@ public class Decoder extends Activity
         if (udpViewShown) {
             Map<String, Object> udp = new LinkedHashMap<>();
             udp.put("port", UDP_RTP_PORT);
-            udp.put("status", "no receiver yet (#87)");
+            udp.put("addresses", NetInfo.addresses());
             m.put("udp", udp);
         } else if (!quadEnabled) {
             Map<String, Object> single = new LinkedHashMap<>();
@@ -1232,12 +1260,13 @@ public class Decoder extends Activity
             m.put("single", single);
         }
         QuadCell[] cells = quadCells;
-        if (quadEnabled && cells != null) {
+        if ((quadEnabled || udpViewShown) && cells != null) {
             List<Object> list = new ArrayList<>();
-            for (int i = 0; i < CAM_COUNT; i++) {
+            for (int i = 0; i < CELL_COUNT; i++) {
                 if (quadViews[i] == null) continue;
                 Map<String, Object> c = new LinkedHashMap<>();
-                c.put("slot", i + 1);
+                boolean u = i == U_CELL;
+                c.put("slot", u ? "U" : i + 1);
                 QuadCell cell = cells[i];
                 if (cell == null) {
                     c.put("video", false);
@@ -1246,8 +1275,9 @@ public class Decoder extends Activity
                     c.put("video", cell.showsVideo(SNAPSHOT_LIVE_MS));
                     TextView v = quadStats[i];
                     c.put("text", v != null ? v.getText().toString() : null);
-                    c.put("url", DebugServer.redact(mHosts[i]));
-                    c.put("transport", mTransports[i] != null ? mTransports[i].name() : null);
+                    c.put("url", u ? UDP_CELL_URL : DebugServer.redact(mHosts[i]));
+                    c.put("transport", u ? "UDP" : mTransports[i] != null
+                            ? mTransports[i].name() : null);
                     c.put("out_fps", cell.outFps());
                     c.put("in_fps", cell.inFps());
                     c.put("lost_fps", cell.lostFps());
