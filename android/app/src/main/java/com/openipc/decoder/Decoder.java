@@ -1407,6 +1407,9 @@ public class Decoder extends Activity
                     c.put("lost_fps", cell.lostFps());
                     // NAL units dropped because one of their packets was lost (#113)
                     c.put("nal_dropped", cell.nalDropped());
+                    // Decoded damaged, cut short at a lost piece; absent while that is off (#133)
+                    int salvaged = cell.nalSalvaged();
+                    if (salvaged >= 0) c.put("nal_damaged", salvaged);
                     // Every frame, or key frames only while the decoder has no room (#85)
                     c.put("decode", cell.isKeyFramesOnly() ? "key frames" : "full");
                     if (cell.knowsLoad()) c.put("load", cell.isKeyFramesOnly()

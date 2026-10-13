@@ -139,6 +139,36 @@ public class NalAssemblerTest {
     }
 
     @Test
+    public void salvagePassesTheNalOnCutShortAtTheGap() {
+        nal.setSalvage(true);
+        // 16 slice bytes before the gap: enough to be worth decoding (#133)
+        feed(rtp(0x7C, 0x85, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12), false);
+        feed(rtp(0x7C, 0x05, 13, 14, 15, 16), false);
+        seq++; // one packet lost
+        feed(rtp(0x7C, 0x05, 0xB1), false);
+        assertEquals(1, out.size());
+        assertArrayEquals(b(0, 0, 0, 1, 0x65, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                16), out.get(0));
+        assertEquals(1, nal.salvagedCount());
+        assertEquals(1, nal.lossCount());
+        // The rest of that unit is skipped; the next one is complete again
+        feed(rtp(0x7C, 0x45, 0xC1), false);
+        feed(rtp(0x7C, 0x85, 0xD1), false);
+        feed(rtp(0x7C, 0x45, 0xD2), false);
+        assertEquals(2, out.size());
+        assertArrayEquals(b(0, 0, 0, 1, 0x65, 0xD1, 0xD2), out.get(1));
+    }
+
+    @Test
+    public void salvageOffDropsAsBefore() {
+        feed(rtp(0x7C, 0x85, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16), false);
+        seq++;
+        feed(rtp(0x7C, 0x45, 0xC1), false);
+        assertEquals(0, out.size());
+        assertEquals(0, nal.salvagedCount());
+    }
+
+    @Test
     public void continuationWithoutStartIsIgnoredAndCountedOnce() {
         feed(rtp(0x7C, 0x05, 0xB1), false);
         feed(rtp(0x7C, 0x05, 0xB2), false);
