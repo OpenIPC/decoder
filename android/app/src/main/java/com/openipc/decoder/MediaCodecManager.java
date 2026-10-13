@@ -50,6 +50,8 @@ class MediaCodecManager {
 
     /** Frames rendered so far (#82): with the frames received this gives the real decode rate. */
     private volatile int framesOut;
+    /** When the last frame was rendered (nowMs()), 0 if none since the decoder was closed (#98). */
+    private volatile long lastFrameMs;
     /** NAL units not fed because the decoder had no free input buffer: it is not keeping up. */
     private volatile int inputDropped;
     private volatile int outWidth;
@@ -66,6 +68,11 @@ class MediaCodecManager {
     }
 
     int framesOut() { return framesOut; }
+    /** True when a frame was rendered within the last {@code ms} milliseconds (#98). */
+    boolean renderedWithin(long ms) {
+        long last = lastFrameMs;
+        return last > 0 && nowMs() - last <= ms;
+    }
     int inputDropped() { return inputDropped; }
     int outWidth() { return outWidth; }
     int outHeight() { return outHeight; }
@@ -183,6 +190,8 @@ class MediaCodecManager {
         synchronized (decoderLock) {
             retry.onSuccess();
             MediaCodec codec = decoder;
+            // The next stream must not look live because of this one's last frame
+            lastFrameMs = 0;
             if (codec == null) return;
             decoder = null;
             releaseSlot();
@@ -335,6 +344,7 @@ class MediaCodecManager {
                         } else {
                             codec.releaseOutputBuffer(outputBufferId, true);
                             framesOut++;
+                            lastFrameMs = nowMs();
                             retry.onSuccess(); // a decoded frame: the decoder works
                         }
                     }
