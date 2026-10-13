@@ -124,4 +124,48 @@ public class JpegAssemblerTest {
         assertEquals(17, t[64]);
         assertEquals(99, t[127]);
     }
+
+    @Test
+    public void tablesSentOnceAreReusedForTheSameQ() throws Exception {
+        List<byte[]> first = packets("jpeg_q255_64x32.rtp");
+        // Q 200 instead of 255: the sender may then send the tables only once
+        for (byte[] p : first) p[12 + 5] = (byte) 200;
+        List<byte[]> all = new ArrayList<>(first);
+        for (int i = 0; i < first.size(); i++) {
+            byte[] p = first.get(i).clone();
+            if (i == 0) {
+                // Same frame again, but its table header says "length 0"
+                byte[] shorter = new byte[p.length - 128];
+                System.arraycopy(p, 0, shorter, 0, 12 + 8 + 4);
+                System.arraycopy(p, 12 + 8 + 4 + 128, shorter, 12 + 8 + 4, p.length - 12 - 8 - 4 - 128);
+                shorter[12 + 8 + 2] = 0;
+                shorter[12 + 8 + 3] = 0;
+                p = shorter;
+            }
+            all.add(p);
+        }
+        List<byte[]> frames = assemble(all);
+        assertEquals(2, frames.size());
+        assertTrue(Arrays.equals(frames.get(0), frames.get(1)));
+    }
+
+    @Test
+    public void zeroSizeMeans2048() throws Exception {
+        List<byte[]> p = packets("jpeg_q50_64x32.rtp");
+        for (byte[] b : p) b[12 + 6] = 0;
+        byte[] jpeg = assemble(p).get(0);
+        int sof = indexOf(jpeg, (byte) 0xFF, (byte) 0xC0);
+        assertEquals(2048, ((jpeg[sof + 7] & 0xFF) << 8) | (jpeg[sof + 8] & 0xFF));
+    }
+
+    @Test
+    public void sixteenBitTables() {
+        assertTrue(JpegAssembler.tablesFit(128, 0));
+        assertTrue(JpegAssembler.tablesFit(192, 1));
+        assertTrue(!JpegAssembler.tablesFit(128, 1));
+        byte[] h = JpegAssembler.headers(0, 64, 32, new byte[192], 1, 0);
+        int dqt = indexOf(h, (byte) 0xFF, (byte) 0xDB);
+        assertEquals(3 + 128, ((h[dqt + 2] & 0xFF) << 8) | (h[dqt + 3] & 0xFF));
+        assertEquals(0x10, h[dqt + 4] & 0xFF);
+    }
 }

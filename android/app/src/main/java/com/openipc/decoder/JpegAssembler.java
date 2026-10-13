@@ -84,6 +84,9 @@ final class JpegAssembler {
     private int expectedOffset = -1;
     private byte[] header;
     private int dropped;
+    /** In-band tables by Q (128..254): a sender may send them once and then only the Q. */
+    private final java.util.Map<Integer, byte[]> tablesByQ = new java.util.HashMap<>();
+    private final java.util.Map<Integer, Integer> precisionByQ = new java.util.HashMap<>();
 
     JpegAssembler(FramePool pool) {
         this.pool = pool;
@@ -119,8 +122,9 @@ final class JpegAssembler {
                 | (buf[pos + 3] & 0xFF);
         int type = buf[pos + 4] & 0xFF;
         int q = buf[pos + 5] & 0xFF;
-        int width = (buf[pos + 6] & 0xFF) * 8;
-        int height = (buf[pos + 7] & 0xFF) * 8;
+        // 0 stands for 256 units: 2048 pixels (RFC 2435 3.1.5/3.1.6)
+        int width = ((buf[pos + 6] & 0xFF) == 0 ? 256 : buf[pos + 6] & 0xFF) * 8;
+        int height = ((buf[pos + 7] & 0xFF) == 0 ? 256 : buf[pos + 7] & 0xFF) * 8;
         pos += 8;
         int restartInterval = 0;
         if (type >= 64 && type <= 127) {
@@ -134,19 +138,35 @@ final class JpegAssembler {
         }
         if (fragment == 0) {
             byte[] tables;
+            int precision = 0;
             if (q >= 128) {
                 if (pos + 4 > end) return false;
+                precision = buf[pos + 1] & 0xFF;
                 int len = ((buf[pos + 2] & 0xFF) << 8) | (buf[pos + 3] & 0xFF);
                 pos += 4;
-                if (len < 64 || len % 64 != 0 || pos + len > end) return false;
-                tables = new byte[len];
-                System.arraycopy(buf, pos, tables, 0, len);
-                pos += len;
+                if (pos + len > end) return false;
+                if (len == 0 && q < 255 && tablesByQ.containsKey(q)) {
+                    // Tables sent once before for this Q (RFC 2435 3.1.8)
+                    tables = tablesByQ.get(q);
+                    precision = precisionByQ.get(q);
+                } else if (len == 0 || !tablesFit(len, precision)) {
+                    if (expectedOffset > 0) drop("frame without its end");
+                    expectedOffset = -1;
+                    return true;
+                } else {
+                    tables = new byte[len];
+                    System.arraycopy(buf, pos, tables, 0, len);
+                    pos += len;
+                    if (q < 255) {
+                        tablesByQ.put(q, tables);
+                        precisionByQ.put(q, precision);
+                    }
+                }
             } else {
                 tables = tables(q);
             }
             if (expectedOffset > 0) drop("frame without its end");
-            header = headers(type, width, height, tables, restartInterval);
+            header = headers(type, width, height, tables, precision, restartInterval);
             scanLength = 0;
             expectedOffset = 0;
         } else if (expectedOffset < 0) {
@@ -212,16 +232,34 @@ final class JpegAssembler {
         return out;
     }
 
+    /**
+     * Whether {@code len} bytes are a whole number of tables: table i has 64 entries of
+     * 8 bits, or of 16 bits when bit i of {@code precision} is set.
+     */
+    static boolean tablesFit(int len, int precision) {
+        int used = 0;
+        for (int i = 0; used < len && i < 4; i++) used += (precision >> i & 1) != 0 ? 128 : 64;
+        return used == len;
+    }
+
     /** SOI, DQT, DRI, SOF0, DHT, SOS for a frame (RFC 2435 Appendix B). */
     static byte[] headers(int type, int width, int height, byte[] tables, int restartInterval) {
+        return headers(type, width, height, tables, 0, restartInterval);
+    }
+
+    static byte[] headers(int type, int width, int height, byte[] tables, int precision,
+                          int restartInterval) {
         java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream(700);
         o.write(0xFF);
         o.write(0xD8);
-        int count = tables.length / 64;
-        for (int i = 0; i < count; i++) {
-            marker(o, 0xDB, 67);
-            o.write(i);
-            o.write(tables, i * 64, 64);
+        int count = 0;
+        for (int at = 0; at < tables.length && count < 4; count++) {
+            boolean wide = (precision >> count & 1) != 0;
+            int size = wide ? 128 : 64;
+            marker(o, 0xDB, 3 + size);
+            o.write((wide ? 0x10 : 0) | count);
+            o.write(tables, at, size);
+            at += size;
         }
         if (restartInterval > 0) {
             marker(o, 0xDD, 4);

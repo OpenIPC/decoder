@@ -201,9 +201,14 @@ public class Decoder extends Activity
                     // MJPEG is drawn by the app (#119): no MediaCodec may hold the surface
                     closeDecoder();
                 } else if (jpegDrawn) {
-                    // A surface drawn with lockCanvas() cannot take a decoder any more
+                    // A surface drawn with lockCanvas() cannot take a decoder any more: no
+                    // decoder until the UI thread has put a new one in place (Qodo on #131)
                     jpegDrawn = false;
-                    runOnUiThread(() -> recreateVideoSurface());
+                    surfacePending = true;
+                    runOnUiThread(() -> {
+                        recreateVideoSurface();
+                        surfacePending = false;
+                    });
                 }
                 // RtspClient configures the AudioManager itself, on its own audio route
             }
@@ -1579,6 +1584,10 @@ public class Decoder extends Activity
 
     /** Something was drawn into the video surface with lockCanvas(). */
     private volatile boolean jpegDrawn;
+    /** A new video surface is being made after MJPEG: no decoder until it is there. */
+    private volatile boolean surfacePending;
+    /** JPEG frames drawn, the MJPEG counterpart of the decoder's output count. */
+    private volatile int jpegFramesOut;
     private volatile long lastJpegFrameMs;
     private Bitmap jpegBitmap;
     private final Paint jpegPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
@@ -1620,6 +1629,7 @@ public class Decoder extends Activity
             return;
         }
         jpegDrawn = true;
+        jpegFramesOut++;
         boolean first = lastJpegFrameMs == 0;
         lastJpegFrameMs = SystemClock.elapsedRealtime();
         if (first || w != mVideoWidth || h != mVideoHeight) {
@@ -1662,6 +1672,9 @@ public class Decoder extends Activity
                     Frame buffer = nalQueue.poll(5, TimeUnit.MILLISECONDS);
                     if (buffer != null && rtspClient.isJpeg()) {
                         drawJpeg(buffer);
+                        framePool.recycle(buffer);
+                    } else if (buffer != null && surfacePending) {
+                        // Waiting for a fresh surface after MJPEG; the next key frame follows
                         framePool.recycle(buffer);
                     } else if (buffer != null) {
                         if (videoDecoder.decodeFrame(buffer, codecH265, 0)) {
@@ -1716,7 +1729,8 @@ public class Decoder extends Activity
         public void run() {
             if (!mResumed) return;
             RtspClient client = rtspClient;
-            int frames = videoDecoder.framesOut();
+            // Drawn MJPEG frames count as output too (Qodo on #131)
+            int frames = videoDecoder.framesOut() + jpegFramesOut;
             long bytes = client != null ? client.getStreamBytes() : 0;
             boolean stalled = !quadEnabled && !udpViewShown && client != null
                     && client.playsOverUdp() && "connected".equals(singleState)

@@ -112,6 +112,11 @@ class RtspClient implements RtspSession.Callback {
         lastRtpTimestamp = -1;
         lastRtpArrivalNs = -1;
         jpegAssembler.reset();
+        if (sdp.videoJpeg != videoJpeg || sdp.videoH265 != codecH265) {
+            // Frames of the previous codec must not reach the new path (Qodo on #131)
+            Frame f;
+            while ((f = nalQueue.poll()) != null) framePool.recycle(f);
+        }
         videoPt = sdp.videoPt;
         codecH265 = sdp.videoH265;
         videoJpeg = sdp.videoJpeg;
