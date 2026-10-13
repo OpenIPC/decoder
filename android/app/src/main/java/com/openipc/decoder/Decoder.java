@@ -990,12 +990,19 @@ public class Decoder extends Activity
         boolean learntBefore = planner.isLearnt();
 
         java.util.List<DecodePlanner.Cell> order = new java.util.ArrayList<>();
-        // Priority: the cell whose sound plays, then slot order
-        if (quadAudio >= 0 && quadAudio < cells.length && cells[quadAudio] != null) {
+        // Priority: the U cell once its stream plays (#94), the cell whose sound plays, then
+        // slot order. While U receives nothing it stays last and takes no share
+        int first = U_CELL < cells.length && cells[U_CELL] != null && cells[U_CELL].isPlaying()
+                ? U_CELL : -1;
+        if (first >= 0) order.add(plannerCell(first, cells[first], now));
+        if (quadAudio >= 0 && quadAudio < cells.length && cells[quadAudio] != null
+                && quadAudio != first) {
             order.add(plannerCell(quadAudio, cells[quadAudio], now));
         }
         for (int i = 0; i < cells.length; i++) {
-            if (cells[i] != null && i != quadAudio) order.add(plannerCell(i, cells[i], now));
+            if (cells[i] != null && i != quadAudio && i != first) {
+                order.add(plannerCell(i, cells[i], now));
+            }
         }
         DecodePlanner.Decision d = planner.step(order, now);
         if (d.action != DecodePlanner.Action.NONE) {
