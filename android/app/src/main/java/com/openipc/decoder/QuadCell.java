@@ -274,6 +274,9 @@ class QuadCell implements RtspSession.Callback {
     public void onStatus(String status) {
         // A new connection (or a lost one) starts the UDP stall count afresh (Qodo on #125)
         if (!status.equals(state)) udpStallSamples = 0;
+        // A pushed stream that went quiet may come back whole: no damaged decoding until it
+        // stalls again (Qodo on #146)
+        if ("disconnected".equals(status)) nalAssembler.setSalvage(false);
         state = status;
         // A connection that works again clears the last connection error
         if ("connected".equals(status) && problem != null && !problem.startsWith("Decoder")) {
@@ -346,9 +349,15 @@ class QuadCell implements RtspSession.Callback {
             // MJPEG has no key frames: its cheap mode shows one frame per second (#132)
             return size + codec + (jpeg ? " reduced" : " key frames") + " · " + rate + " fps"
                     + ((jpeg ? jpegRenderer.isSoftware() : decoder.isSoftware())
-                            ? " · software" : "");
+                            ? " · software" : "") + damaged();
         }
-        return size + codec + " " + Math.round(outFps) + "/" + Math.round(inFps) + " fps";
+        return size + codec + " " + Math.round(outFps) + "/" + Math.round(inFps) + " fps"
+                + damaged();
+    }
+
+    /** Corner note while damaged key frames are decoded (#133). */
+    private String damaged() {
+        return !jpeg && nalAssembler.salvaging() ? " · damaged" : "";
     }
 
     boolean isKeyFramesOnly() { return keyFramesOnly; }
@@ -421,7 +430,9 @@ class QuadCell implements RtspSession.Callback {
         lastVideoPackets = packets;
         lastLossCount = loss;
         Surface s = surface;
-        boolean stalled = session.playsOverUdp() && "connected".equals(state)
+        // A pushed stream (udp:// slot, the U cell) counts too: no TCP to fall back to (#133)
+        boolean stalled = (session.playsOverUdp() || session.listens())
+                && "connected".equals(state)
                 && pausedReason == null && problem == null && s != null && s.isValid()
                 && arriving && outFps == 0;
         if (!stalled) {
@@ -433,6 +444,12 @@ class QuadCell implements RtspSession.Callback {
         if (losing || udpStallSamples > 0) udpStallSamples++;
         if (udpStallSamples >= UDP_STALL_SAMPLES) {
             udpStallSamples = 0;
+            // Every key frame loses a piece: decode them damaged rather than not at all. A
+            // pushed stream has no TCP to go to; over RTSP, Auto goes to TCP anyway (#133)
+            if (!jpeg && !nalAssembler.salvaging()) {
+                nalAssembler.setSalvage(true);
+                Log.w(TAG, tag + ": no complete key frame over UDP, decoding damaged ones");
+            }
             session.reportUdpBroken("packets but no decoded frame for " + UDP_STALL_SAMPLES
                     + " s (" + loss + (jpeg ? " JPEG frames" : " NAL units") + " lost)");
         }
@@ -440,6 +457,9 @@ class QuadCell implements RtspSession.Callback {
 
     /** NAL units dropped so far because a packet of them was lost (#113). */
     int nalDropped() { return nalAssembler.lossCount(); }
+
+    /** Slices passed on cut short at a lost piece, or -1 while that is off (#133). */
+    int nalSalvaged() { return nalAssembler.salvaging() ? nalAssembler.salvagedCount() : -1; }
 
     float inFps() { return inFps; }
     float outFps() { return outFps; }
@@ -517,6 +537,8 @@ class QuadCell implements RtspSession.Callback {
         lastLossCount = sdp.videoJpeg ? jpegAssembler.droppedCount() : nalAssembler.lossCount();
         udpStallSamples = 0;
         nalAssembler.reset();
+        // A new stream gets a chance to be complete again (#133)
+        nalAssembler.setSalvage(false);
         jpegAssembler.reset();
         lastUnknownPayload = -1;
         videoPt = sdp.videoPt;

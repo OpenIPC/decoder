@@ -1402,6 +1402,10 @@ public class Decoder extends Activity
                     c.put("lost_fps", cell.lostFps());
                     // NAL units dropped because one of their packets was lost (#113)
                     c.put("nal_dropped", cell.nalDropped());
+                    // Slices passed on cut short at a lost piece (some may still be dropped by
+                    // a full queue); absent while that is off (#133)
+                    int salvaged = cell.nalSalvaged();
+                    if (salvaged >= 0) c.put("nal_damaged", salvaged);
                     // Every frame, or key frames only while the decoder has no room (#85)
                     c.put("decode", cell.isKeyFramesOnly() ? "key frames" : "full");
                     if (cell.knowsLoad()) c.put("load", cell.isKeyFramesOnly()
@@ -1715,13 +1719,20 @@ public class Decoder extends Activity
             int frames = videoDecoder.framesOut() + jpegFramesOut;
             long bytes = client != null ? client.getStreamBytes() : 0;
             boolean stalled = !quadEnabled && !udpViewShown && client != null
-                    && client.playsOverUdp() && "connected".equals(singleState)
+                    && (client.playsOverUdp() || client.listens())
+                    && "connected".equals(singleState)
                     && bytes - lastSingleBytes > 10_000 && frames == lastSingleFrames;
             lastSingleFrames = frames;
             lastSingleBytes = bytes;
             singleStallSeconds = stalled ? singleStallSeconds + 1 : 0;
             if (singleStallSeconds >= UDP_STALL_SECONDS) {
                 singleStallSeconds = 0;
+                // Every key frame loses a piece: decode them damaged rather than not at all;
+                // a pushed stream has no TCP to go to (#133)
+                if (!nalAssembler.salvaging()) {
+                    nalAssembler.setSalvage(true);
+                    Log.w(TAG, "No complete key frame over UDP, decoding damaged ones");
+                }
                 client.reportUdpBroken("packets but no decoded frame for " + UDP_STALL_SECONDS
                         + " s");
             }

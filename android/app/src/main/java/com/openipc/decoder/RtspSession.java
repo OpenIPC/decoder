@@ -140,6 +140,9 @@ class RtspSession {
     /** RTSP is playing with RTP over UDP or multicast (not TCP, not a udp:// URL). */
     boolean playsOverUdp() { return udpPlaying; }
 
+    /** A udp:// slot listening for a pushed stream (#133): UDP too, without RTSP. */
+    boolean listens() { return listening; }
+
     /**
      * Packets arrive over UDP but the stream cannot be decoded (#113: key frames keep losing
      * a piece). With Auto or Multicast the session goes over to TCP, as when no video comes
