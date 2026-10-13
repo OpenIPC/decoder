@@ -937,16 +937,22 @@ public class Decoder extends Activity
         quadContainer.postDelayed(quadStatsTick, 1000);
     }
 
-    /** Learnt decoder capacity of this device in macroblocks/s, or 0 (#85). */
-    private static final String PREF_DECODER_CAPACITY = "decoder_capacity";
+    /**
+     * Learnt decoder capacity of this device in macroblocks/s, or 0 (#85). "_v2": values
+     * learnt before #89 counted NAL units dropped after a 5 ms wait as overload; not reused.
+     */
+    private static final String PREF_DECODER_CAPACITY = "decoder_capacity_v2";
     /** Smallest load that made the decoder lose frames, or 0: not retried after a restart. */
-    private static final String PREF_DECODER_FAILED = "decoder_failed_load";
+    private static final String PREF_DECODER_FAILED = "decoder_failed_load_v2";
     /** 1080p at 60 fps: the usual declared budget, until the decoder declares its own. */
     private static final long DEFAULT_CAPACITY = DecodePlanner.fullLoad(1920, 1080, 60);
     private DecodePlanner decodePlanner;
 
     private DecodePlanner newPlanner() {
         SharedPreferences pref = getSharedPreferences("settings", MODE_PRIVATE);
+        if (pref.contains("decoder_capacity")) {
+            pref.edit().remove("decoder_capacity").remove("decoder_failed_load").apply();
+        }
         long learnt = pref.getLong(PREF_DECODER_CAPACITY, 0);
         long failed = pref.getLong(PREF_DECODER_FAILED, 0);
         if (learnt > 0) return new DecodePlanner(learnt, true, failed);
