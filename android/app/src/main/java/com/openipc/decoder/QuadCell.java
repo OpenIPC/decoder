@@ -337,10 +337,6 @@ class QuadCell implements RtspSession.Callback {
     float outFps() { return outFps; }
     float lostFps() { return lostFps; }
 
-    /** Something worth showing even without the debug text (D): not playing at full rate. */
-    boolean needsAttention() {
-        return pausedReason != null || problem != null || !"connected".equals(state) || keyFramesOnly;
-    }
     boolean isPaused() { return pausedReason != null; }
 
     /** On key frames only, a frame comes once per GOP, which can be several seconds (#85). */
