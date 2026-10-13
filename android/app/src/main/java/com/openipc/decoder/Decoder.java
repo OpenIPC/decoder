@@ -1076,7 +1076,7 @@ public class Decoder extends Activity
             stuckBanner.setBackgroundColor(0xCC000000);
             int pad = (int) (16 * getResources().getDisplayMetrics().density);
             stuckBanner.setPadding(pad, pad, pad, pad);
-            ((FrameLayout) menuAnchor).addView(stuckBanner, new FrameLayout.LayoutParams(
+            ((FrameLayout) findViewById(R.id.decoder)).addView(stuckBanner, new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                     Gravity.CENTER));
         }
