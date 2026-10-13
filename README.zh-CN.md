@@ -124,6 +124,16 @@ outgoing:
 
 摄像机上的 `/api/v1/outgoing.json` 可查看推流是否正常。Majestic 也可以推送到组播组（`udp://239.1.2.3:5600`），这样多台设备可以同时观看同一台摄像机。在 Wi‑Fi 下，应用加入组播组期间会持有 multicast lock。
 
+## 调试页面（端口 8085）
+
+应用运行时会在 **8085** 端口通过 HTTP 提供调试信息，可在同一网络中用浏览器或 `curl` 访问：
+
+- `http://<设备>:8085/` — 自动刷新的页面：设备、应用版本、模式以及每个画面（分辨率、编码、已解码/已接收帧率、暂停）；
+- `http://<设备>:8085/stats.json` — 相同内容的 JSON，便于脚本使用；
+- `http://<设备>:8085/log` — 应用日志的最后 500 行。
+
+仅响应本地网络中的客户端（loopback、10/8、172.16/12、192.168/16、链路本地地址、IPv6 fc00::/7），其他地址返回 403。不会显示用户名和密码。
+
 ## 已知限制
 
 > [!IMPORTANT]
@@ -185,6 +195,7 @@ export KEY_PASS=your_key_password
 | `CredentialStore`、`KeystoreCipher`      | 摄像机地址加密存储（Android Keystore）                                    |
 | `FramePool`、`Frame`                     | 缓冲区池，减轻垃圾回收压力                                                |
 | `App`、`Crash`                           | 未捕获异常处理与崩溃报告界面                                              |
+| `DebugServer`、`NetInfo`                 | 8085 端口调试页面（仅本地网络）、设备地址                                     |
 
 网络、视频解码和音频分别运行在独立线程中，解码器较慢时也不会阻塞网络读取。
 
@@ -193,6 +204,7 @@ export KEY_PASS=your_key_password
 - 用户名和密码从地址中提取，通过 `Authorization` 头发送：默认使用 Basic，摄像机要求时改用 Digest。不会出现在 RTSP 请求行中。
 - RTSP、UDP 上的 RTP 和 HTTP 均未加密，不支持 RTSPS。若摄像机要求将用户名和密码写在地址路径或参数中（例如 `user=…_password=…`），它们会随每个请求发送。请仅在可信网络中使用，参见 [#16](https://github.com/OpenIPC/decoder/issues/16)。
 - 摄像机地址（含密码）加密保存在应用私有存储中（AES-256-GCM，密钥保存在 Android Keystore，Android 6.0 及以上），在 Android 5.x 或 Keystore 不可用时以明文保存，并已禁用备份（`allowBackup="false"`）。
+- 8085 端口上的调试页面未加密、无密码；仅响应本地网络客户端，且不会显示用户名和密码。
 
 ## 设备兼容性
 

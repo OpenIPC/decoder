@@ -21,6 +21,8 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.util.Log;
@@ -49,14 +51,20 @@ import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class Decoder extends Activity
         implements MenuManager.Listener {
@@ -273,6 +281,7 @@ public class Decoder extends Activity
         }
 
         updateStatus("disconnected");
+        DebugServer.get().setSource(debugSource);
     }
 
     // ====================== MenuManager.Listener ======================
@@ -927,6 +936,110 @@ public class Decoder extends Activity
         }
     }
 
+    // ====================== Debug HTTP server (#96) ======================
+
+    /** How long a request waits for the UI thread before it reports it as not responding. */
+    private static final long DEBUG_UI_TIMEOUT_MS = 1000;
+    private final DebugServer.Source debugSource = this::debugSnapshot;
+
+    /** Called on a server thread: the state is read on the UI thread, which owns it. */
+    private Map<String, Object> debugSnapshot() {
+        AtomicReference<Map<String, Object>> ref = new AtomicReference<>();
+        CountDownLatch done = new CountDownLatch(1);
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try {
+                ref.set(debugState());
+            } finally {
+                done.countDown();
+            }
+        });
+        boolean answered;
+        try {
+            answered = done.await(DEBUG_UI_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            answered = false;
+        }
+        Map<String, Object> m = ref.get();
+        if (!answered || m == null) {
+            // A stuck UI thread is itself the news (ANR, #76): report what needs no UI state
+            m = debugDevice();
+            m.put("ui_thread", "not responding within " + DEBUG_UI_TIMEOUT_MS + " ms");
+        }
+        return m;
+    }
+
+    /** Device and app facts, safe to read from any thread. */
+    private Map<String, Object> debugDevice() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("app", "OpenIPC Decoder " + mVersion + " (" + BuildConfig.GIT_HASH + ")");
+        String soc = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                ? Build.SOC_MANUFACTURER + " " + Build.SOC_MODEL : Build.HARDWARE;
+        m.put("device", Build.MANUFACTURER + " " + Build.MODEL + " \u00b7 " + soc
+                + " \u00b7 board " + Build.BOARD);
+        m.put("android", Build.VERSION.RELEASE + " (SDK " + Build.VERSION.SDK_INT + ")");
+        m.put("screen", getResources().getDisplayMetrics().widthPixels + "x"
+                + getResources().getDisplayMetrics().heightPixels);
+        List<String> urls = new ArrayList<>();
+        for (String ip : NetInfo.addresses()) urls.add("http://" + ip + ":" + DebugServer.PORT + "/");
+        m.put("addresses", urls);
+        m.put("uptime_s", SystemClock.elapsedRealtime() / 1000);
+        return m;
+    }
+
+    /** The state behind the on-screen texts; UI thread only. */
+    private Map<String, Object> debugState() {
+        Map<String, Object> m = debugDevice();
+        m.put("ui_thread", "ok");
+        m.put("mode", !mResumed ? "paused" : udpViewShown ? "udp"
+                : quadEnabled ? "multi-view" : "single");
+        m.put("active_slot", mActive + 1);
+        if (udpViewShown) {
+            Map<String, Object> udp = new LinkedHashMap<>();
+            udp.put("port", UDP_RTP_PORT);
+            udp.put("status", "no receiver yet (#87)");
+            m.put("udp", udp);
+        } else if (!quadEnabled) {
+            Map<String, Object> single = new LinkedHashMap<>();
+            single.put("url", DebugServer.redact(mHost));
+            single.put("transport", mTransports[mActive] != null ? mTransports[mActive].name() : null);
+            single.put("status", statusText != null ? statusText.getText().toString() : null);
+            single.put("codec", codecH265 ? "H.265" : "H.264");
+            single.put("audio", audioCodec);
+            if (mVideoWidth > 0) single.put("video", mVideoWidth + "x" + mVideoHeight);
+            m.put("single", single);
+        }
+        QuadCell[] cells = quadCells;
+        if (quadEnabled && cells != null) {
+            List<Object> list = new ArrayList<>();
+            for (int i = 0; i < CAM_COUNT; i++) {
+                if (quadViews[i] == null) continue;
+                Map<String, Object> c = new LinkedHashMap<>();
+                c.put("slot", i + 1);
+                QuadCell cell = cells[i];
+                if (cell == null) {
+                    c.put("text", "not configured");
+                } else {
+                    c.put("url", DebugServer.redact(mHosts[i]));
+                    c.put("transport", mTransports[i] != null ? mTransports[i].name() : null);
+                    TextView v = quadStats[i];
+                    c.put("text", v != null ? v.getText().toString() : null);
+                    c.put("in_fps", cell.inFps());
+                    c.put("lost_fps", cell.lostFps());
+                    // Seconds in a row the decoder made this cell lose frames; at
+                    // OVERLOAD_SAMPLES the grid is relieved (#83)
+                    c.put("behind_s", cell.behindSamples);
+                    c.put("paused", cell.isPaused());
+                    c.put("audio", i == quadAudio);
+                }
+                list.add(c);
+            }
+            m.put("cells", list);
+            m.put("overload_after_s", OVERLOAD_SAMPLES);
+        }
+        return m;
+    }
+
     // ====================== Screen / zoom ======================
 
     private static final int REQUEST_STORAGE_FOR_SCREENSHOT = 1;
@@ -1189,6 +1302,7 @@ public class Decoder extends Activity
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        DebugServer.get().clearSource(debugSource);
         audioManager.shutdown();
     }
 
