@@ -304,7 +304,7 @@ public class DecodePlannerTest {
     }
 
     @Test
-    public void lossesBelowTheFloorAreNotRemembered() {
+    public void lossesBelowTheFloorCountOnlyForThisSession() {
         DecodePlanner p = new DecodePlanner(BUDGET, false, 0, P1080_30);
         List<DecodePlanner.Cell> cells = keyCells(1, P1080_30 / 2);
         long t = 0;
@@ -316,7 +316,17 @@ public class DecodePlannerTest {
             d = p.step(cells, t);
         }
         assertEquals(DecodePlanner.Action.DEMOTE, d.action);
-        assertEquals("a load below the floor is not a decoder limit", 0, p.failedLoad());
+        // Remembered for this session, so the cell is not promoted again at once
+        assertEquals(P1080_30 / 2, p.failedLoad());
         assertTrue(p.capacity() >= P1080_30);
+        // After a restart the stored value at or below the floor is not trusted
+        assertEquals(0, new DecodePlanner(p.capacity(), true, p.failedLoad(), P1080_30).failedLoad());
+    }
+
+    @Test
+    public void aDeclaredBudgetBelowTheFloorIsRaised() {
+        DecodePlanner p = new DecodePlanner(BUDGET, false, 0, P1080_30);
+        p.offerDeclared(P1080_30 / 3);
+        assertEquals(P1080_30, p.capacity());
     }
 }

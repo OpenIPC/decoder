@@ -1047,14 +1047,21 @@ public class Decoder extends Activity
         if (planner == null) return;
         // No cell decoded anything this second although some play: the decoder (or the media
         // service) stands still. Nothing to learn from that (#126)
+        // Decoder losses (queue overflow, no input buffer) mean overload, not a stall: those
+        // seconds are planned as usual (Qodo on #129)
         boolean anyPlaying = false;
         boolean anyOutput = false;
+        boolean anyLosses = false;
         for (QuadCell c : cells) {
             if (c == null || !c.isPlaying()) continue;
             anyPlaying = true;
             if (c.outFps() > 0) anyOutput = true;
+            if (c.lostFps() > 0) anyLosses = true;
         }
-        if (anyPlaying && !anyOutput && countFullRate(cells) > 0) return;
+        if (anyPlaying && !anyOutput && !anyLosses && countFullRate(cells) > 0) {
+            planner.skipped(now);
+            return;
+        }
         planner.offerDeclared(MediaCodecManager.declaredBlocksPerSec);
         long before = planner.capacity();
         long failedBefore = planner.failedLoad();

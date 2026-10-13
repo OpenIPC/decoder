@@ -129,7 +129,15 @@ final class DecodePlanner {
 
     /** The decoder's declared budget, once known; ignored when a learnt value exists. */
     void offerDeclared(long declared) {
-        if (!learnt && declared > 0) capacity = declared;
+        if (!learnt && declared > 0) capacity = Math.max(declared, minCapacity);
+    }
+
+    /**
+     * A second not planned because nothing decoded at all (#126): the time without frames
+     * must not count as a quiet, proven period, so the quiet and probe timers start again.
+     */
+    void skipped(long nowMs) {
+        quietSinceMs = nowMs;
     }
 
     static long fullLoad(int width, int height, float fps) {
@@ -172,8 +180,9 @@ final class DecodePlanner {
                 Cell c = cells.get(i);
                 if (c.full && !c.paused && c.playing && c.known) {
                     // Losses at this load: the capacity is below it, but not below a proven load.
-                    // Below the floor it is not the decoder's limit (#126): not remembered
-                    if (load > minCapacity) failedLoad = Math.min(failedLoad, load);
+                    // Remembered for this session even below the floor; only stored values at
+                    // or below it are distrusted after a restart (#126)
+                    failedLoad = Math.min(failedLoad, load);
                     // A "proven" load at or above a failing one was not proven after all
                     if (proven >= load) proven = Math.round(load * FAILED_MARGIN);
                     probeWaitMs = Math.min(probeWaitMs * 2, PROBE_MAX_WAIT_MS);
