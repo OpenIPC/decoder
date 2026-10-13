@@ -8,6 +8,7 @@
 package com.openipc.decoder;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
@@ -50,7 +51,8 @@ public class QuadGridTest {
     @Test
     public void udpCellHintNamesPortAndAddress() {
         String t = Decoder.udpHintText(java.util.Arrays.asList("192.168.1.20"), 5600);
-        assertTrue(t.contains("UDP RTP"));
+        assertTrue(t, t.startsWith("Waiting for a stream"));
+        assertFalse(t, t.contains("UDP RTP"));
         assertTrue(t.contains("192.168.1.20:5600"));
         // Without a known address the hint still tells where to send the stream
         assertTrue(Decoder.udpHintText(java.util.Collections.emptyList(), 5600)
@@ -69,9 +71,9 @@ public class QuadGridTest {
         String none = Decoder.udpHintText(java.util.Collections.emptyList(), 5600);
         assertTrue(none, none.endsWith("\nthis device:5600"));
         String one = Decoder.udpHintText(java.util.Arrays.asList("172.17.32.144"), 5600);
-        assertTrue(one, one.endsWith("output to\n172.17.32.144:5600"));
+        assertTrue(one, one.endsWith("output to\n\n172.17.32.144:5600"));
         String two = Decoder.udpHintText(
                 java.util.Arrays.asList("172.17.32.144", "192.168.1.20"), 5600);
-        assertTrue(two, two.endsWith("output to\n172.17.32.144:5600\n192.168.1.20:5600"));
+        assertTrue(two, two.endsWith("output to\n\n172.17.32.144:5600\n192.168.1.20:5600"));
     }
 }

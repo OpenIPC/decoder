@@ -863,13 +863,15 @@ public class Decoder extends Activity
         if (!text.contentEquals(hint.getText())) hint.setText(text);
     }
 
-    /** Hint of the U cell: every usable IPv4 address of the device, one per line (#87). */
+    /**
+     * Hint of the U cell: every usable IPv4 address of the device, one per line (#87). The
+     * addresses carry the port, so no separate port line.
+     */
     static String udpHintText(List<String> ips, int port) {
         StringBuilder target = new StringBuilder();
         for (String ip : ips) target.append('\n').append(ip).append(':').append(port);
         if (target.length() == 0) target.append("\nthis device:").append(port);
-        return "UDP RTP \u00b7 port " + port + "\nWaiting for a stream\u2026\n\n"
-                + "Send the camera's RTP/UDP output to" + target;
+        return "Waiting for a stream\u2026\n\nSend the camera's RTP/UDP output to\n" + target;
     }
 
 
