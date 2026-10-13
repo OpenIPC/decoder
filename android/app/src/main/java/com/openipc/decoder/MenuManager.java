@@ -140,12 +140,11 @@ class MenuManager {
                 // While the layout itself has the focus (opened by touch, #65), a D-pad key
                 // finds no item: they all lie inside it, not beside it. The first key moves
                 // the focus to the active item instead (#91)
-                if (findFocus() == this && isNavigationKey(event.getKeyCode())) {
+                if (findFocus() == this && isNavigationKey(event.getKeyCode())
+                        && event.getAction() == KeyEvent.ACTION_DOWN) {
                     TextView item = mFocusItem;
-                    if (event.getAction() == KeyEvent.ACTION_DOWN && item != null) {
-                        item.requestFocus();
-                    }
-                    return true;
+                    // Consumed only if the focus really moved; otherwise the key goes on
+                    if (item != null && item.requestFocus()) return true;
                 }
                 return super.dispatchKeyEvent(event);
             }

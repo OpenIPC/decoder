@@ -38,7 +38,7 @@ Two identical boxes with the same firmware (checked 2026-10-13):
 
 | | Aceline-1 | Aceline-2 |
 |---|---|---|
-| Address | `172.17.32.144:5555` (Ethernet); Wi‑Fi is also up as `172.17.32.146` | `172.17.32.145:5555` (Ethernet) |
+| Address | `172.17.32.144:5555` (Ethernet; Wi‑Fi switched off) | `172.17.32.145:5555` (Ethernet) |
 | Display | **none** (headless): only `screencap`, the debug page and the logs show what is on screen | **monitor** Philips 226VL over HDMI (HDMI audio active); for checks that need a real picture or a person looking |
 | Serial | `KFB442005119` | `KFB442001288` |
 | Extra apps | Yandex Browser TV, Faceter, Record Radio | VK TV, Wink, VLC, Nova; autostart `com.oranth.atvapplist` |
@@ -254,6 +254,7 @@ The script uninstalls first. To test an upgrade that keeps the settings, use `$A
 | UDP socket leak | `$ADB shell cat /proc/$(pidof com.openipc.decoder)/net/udp`, count lines before and after |
 | CPU per thread | `$ADB shell top -H -p <pid>` (a spinning `rtsp-audio` thread was found this way) |
 | Screen off / on | `input keyevent KEYCODE_SLEEP` / `KEYCODE_WAKEUP` |
+| Menu with a remote (#91) | `input keyevent KEYCODE_DPAD_CENTER` opens the menu with the focus on the active item (slot, Q or U); `DPAD_RIGHT` ×n, `DPAD_DOWN` (Exit), `DPAD_UP`, then `DPAD_CENTER` must switch to that slot; `KEYCODE_BACK` closes it. The focused item: `uiautomator dump /sdcard/m.xml` and look for `focused="true"`. Check in single view and multi-view |
 | 4:3 screen | `wm size 960x720`, back with `wm size reset` |
 | Audio playback (sound cannot be heard remotely) | `dumpsys media.audio_flinger`: server position of the app's track; frames/s ≈ sample rate, no underruns |
 | Screenshot | `$ADB exec-out screencap -p > shot.png`; long-press screenshot in the app saves to `Pictures/OpenIPC/` |
