@@ -162,7 +162,9 @@ public class JpegAssemblerTest {
     public void sixteenBitTables() {
         assertTrue(JpegAssembler.tablesFit(128, 0));
         assertTrue(JpegAssembler.tablesFit(192, 1));
-        assertTrue(!JpegAssembler.tablesFit(128, 1));
+        assertTrue(JpegAssembler.tablesFit(128, 1));
+        assertTrue(!JpegAssembler.tablesFit(160, 1));
+        assertTrue(!JpegAssembler.tablesFit(100, 0));
         byte[] h = JpegAssembler.headers(0, 64, 32, new byte[192], 1, 0);
         int dqt = indexOf(h, (byte) 0xFF, (byte) 0xDB);
         assertEquals(3 + 128, ((h[dqt + 2] & 0xFF) << 8) | (h[dqt + 3] & 0xFF));
