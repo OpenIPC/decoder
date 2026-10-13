@@ -1460,6 +1460,9 @@ public class Decoder extends Activity
             single.put("codec", rtspClient != null && rtspClient.isJpeg() ? "MJPEG"
                     : codecH265 ? "H.265" : "H.264");
             single.put("audio", audioCodec);
+            // Frames shown so far and the playback mode of S (#153)
+            single.put("frames_out", videoDecoder.framesOut() + jpegFramesOut);
+            single.put("decode", slides ? "key frames" : "full");
             m.put("single", single);
         }
         QuadCell[] cells = quadCells;
