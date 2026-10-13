@@ -243,11 +243,15 @@ final class DebugServer {
 
     private static final java.util.regex.Pattern AUTH_HEADER =
             java.util.regex.Pattern.compile("(?i)(authorization:\\s*\\w+)\\s+\\S.*");
+    /** Logins in the URL path or query, e.g. user=admin_password=... (XM cameras). */
+    private static final java.util.regex.Pattern USER_PARAM =
+            java.util.regex.Pattern.compile("(?i)\\b(user(?:name)?|login|usr)=[^_&;/?\\s]*");
 
-    /** Like the log (#55), plus Authorization headers: never a login or password. */
+    /** Like the log (#55), plus logins and Authorization headers: never a login or password. */
     static String redact(String s) {
         if (s == null) return null;
         s = RtspSession.redact(s);
+        s = USER_PARAM.matcher(s).replaceAll("$1=***");
         return AUTH_HEADER.matcher(s).replaceAll("$1 ***");
     }
 

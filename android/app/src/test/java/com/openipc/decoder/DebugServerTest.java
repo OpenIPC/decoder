@@ -67,6 +67,11 @@ public class DebugServerTest {
 
         r = DebugServer.redact("http://cam/onvif?user=admin&password=secret");
         assertFalse(r, r.contains("secret"));
+        assertFalse(r, r.contains("admin"));
+
+        r = DebugServer.redact("rtsp://172.17.32.53/user=admin_password=12345_channel=1_stream=0.sdp");
+        assertEquals("rtsp://172.17.32.53/user=***_password=***_channel=1_stream=0.sdp", r);
+        assertEquals("login=*** username=***", DebugServer.redact("login=root username=root"));
 
         r = DebugServer.redact("D OpenIPCDecoder: > Authorization: Basic cm9vdDoxMjM0NQ==");
         assertFalse(r, r.contains("cm9vdDoxMjM0NQ"));
