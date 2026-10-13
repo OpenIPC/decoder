@@ -1611,7 +1611,7 @@ public class Decoder extends Activity
         Surface s = mVideoSurface;
         if (s == null || !s.isValid()) return;
         // The hardware JPEG decoder first, where there is one (#132)
-        if (!hwJpegFailed && !jpegDrawn && JpegCodec.find() != null) {
+        if (!hwJpegFailed && !jpegDrawn && JpegCodec.candidate() != null) {
             int[] size = JpegAssembler.size(frame.data(), frame.length());
             if (size != null) {
                 try {

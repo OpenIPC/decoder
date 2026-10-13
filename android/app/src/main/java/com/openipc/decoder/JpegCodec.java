@@ -27,6 +27,15 @@ final class JpegCodec {
     private static final String TAG = "OpenIPCDecoder";
     private static final String[] MIMES = {"video/jpeg", "video/mjpeg", "video/x-motion-jpeg"};
     private static volatile String[] found;
+    /**
+     * Vendor JPEG decoders a platform may leave out of its codec list although it can create
+     * them by name: the AG-216 declares this one in /vendor/etc/media_codecs.xml, but Android
+     * 10 does not list video/jpeg (#132). Tried once when the list has none.
+     */
+    private static final String[][] BY_NAME = {{"OMX.allwinner.video.decoder.mjpeg", "video/jpeg"}};
+    private static volatile boolean byNameTried;
+    /** The decoder that worked, once one did. */
+    private static volatile String[] chosen;
 
     private MediaCodec codec;
     private Surface surface;
@@ -81,9 +90,21 @@ final class JpegCodec {
      * the size or surface changes. Returns true when a frame was rendered. Throws when the
      * decoder cannot be used: the caller then switches to the software path.
      */
-    synchronized boolean decode(Frame frame, Surface target, int w, int h) throws Exception {
+    /** A listed decoder, or one of BY_NAME once; null when there is none at all. */
+    static String[] candidate() {
+        if (chosen != null) return chosen;
         String[] dec = find();
-        if (dec == null) throw new IllegalStateException("no JPEG decoder");
+        if (dec != null) return dec;
+        return byNameTried ? null : BY_NAME[0];
+    }
+
+    synchronized boolean decode(Frame frame, Surface target, int w, int h) throws Exception {
+        String[] dec = chosen != null ? chosen : find();
+        if (dec == null) {
+            if (byNameTried) throw new IllegalStateException("no JPEG decoder");
+            byNameTried = true;
+            dec = BY_NAME[0];
+        }
         if (codec == null || target != surface || w != width || h != height) {
             releaseLocked();
             MediaCodec c = MediaCodec.createByCodecName(dec[0]);
@@ -98,6 +119,7 @@ final class JpegCodec {
                 throw e;
             }
             codec = c;
+            chosen = dec;
             surface = target;
             width = w;
             height = h;
