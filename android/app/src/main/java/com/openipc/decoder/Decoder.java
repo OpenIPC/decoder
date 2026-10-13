@@ -1331,6 +1331,8 @@ public class Decoder extends Activity
         for (String ip : NetInfo.addresses()) urls.add("http://" + ip + ":" + DebugServer.PORT + "/");
         m.put("addresses", urls);
         m.put("server", DebugServer.get().state());
+        // The video decoders and what they can do: instances, adaptive playback (#88)
+        m.put("decoders", CodecInfo.videoDecoders());
         return m;
     }
 
