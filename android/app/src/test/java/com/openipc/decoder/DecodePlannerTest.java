@@ -294,4 +294,29 @@ public class DecodePlannerTest {
             assertEquals(DecodePlanner.Action.NONE, p.step(cells, t).action);
         }
     }
+
+    @Test
+    public void storedValuesBelowTheFloorAreNotTrusted() {
+        // Learnt during a stalled media service (#126): below one 1080p30 stream
+        DecodePlanner p = new DecodePlanner(P1080_30 / 2, true, P1080_30 / 2, P1080_30);
+        assertEquals(P1080_30, p.capacity());
+        assertEquals(0, p.failedLoad());
+    }
+
+    @Test
+    public void lossesBelowTheFloorAreNotRemembered() {
+        DecodePlanner p = new DecodePlanner(BUDGET, false, 0, P1080_30);
+        List<DecodePlanner.Cell> cells = keyCells(1, P1080_30 / 2);
+        long t = 0;
+        apply(cells, p.step(cells, t));
+        assertEquals(1, full(cells));
+        cells.get(0).lossy = true;
+        DecodePlanner.Decision d = DecodePlanner.Decision.NONE;
+        for (int i = 0; i < 6 && d.action != DecodePlanner.Action.DEMOTE; i++, t += 1000) {
+            d = p.step(cells, t);
+        }
+        assertEquals(DecodePlanner.Action.DEMOTE, d.action);
+        assertEquals("a load below the floor is not a decoder limit", 0, p.failedLoad());
+        assertTrue(p.capacity() >= P1080_30);
+    }
 }
