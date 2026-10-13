@@ -226,6 +226,8 @@ class QuadCell implements RtspSession.Callback {
 
     @Override
     public void onStatus(String status) {
+        // A new connection (or a lost one) starts the UDP stall count afresh (Qodo on #125)
+        if (!status.equals(state)) udpStallSamples = 0;
         state = status;
         // A connection that works again clears the last connection error
         if ("connected".equals(status) && problem != null && !problem.startsWith("Decoder")) {
@@ -338,28 +340,48 @@ class QuadCell implements RtspSession.Callback {
     String transportLabel() { return Transport.label(session.transportInUse(), transport); }
 
     /** Samples (seconds) in a row with packets but no decoded frame over UDP (#113). */
-    private int udpStallSamples;
+    private volatile int udpStallSamples;
     /** Longer than the key frame interval of any lab camera (up to ~5 s on .167). */
     static final int UDP_STALL_SAMPLES = 8;
+    /** Video RTP packets received, for the stall check (frames need a marker bit). */
+    private volatile int videoPackets;
+    private int lastVideoPackets;
+    private int lastLossCount;
 
     /**
      * Over UDP a lost packet drops the whole NAL unit; on key frames only (#85) a camera that
      * keeps losing a piece of every key frame shows nothing at all although its packets arrive.
-     * After UDP_STALL_SAMPLES such seconds the session is told; with Auto it goes to TCP.
+     * A second counts when packets arrive, nothing is decoded, NAL units are lost to packet
+     * loss and the decoder itself is fine (no decoder error, a surface). After
+     * UDP_STALL_SAMPLES such seconds the session is told; with Auto it goes to TCP.
      */
     private void checkUdpStall() {
+        int packets = videoPackets;
+        int loss = nalAssembler.lossCount();
+        boolean arriving = packets - lastVideoPackets >= 10;
+        boolean losing = loss > lastLossCount;
+        lastVideoPackets = packets;
+        lastLossCount = loss;
+        Surface s = surface;
         boolean stalled = session.playsOverUdp() && "connected".equals(state)
-                && pausedReason == null && inFps >= 5 && outFps == 0;
-        udpStallSamples = stalled ? udpStallSamples + 1 : 0;
+                && pausedReason == null && problem == null && s != null && s.isValid()
+                && arriving && outFps == 0;
+        if (!stalled) {
+            udpStallSamples = 0;
+            return;
+        }
+        // Silent seconds (between key frames) keep the count; only a lossless decoded stream
+        // or a non-stalled sample resets it. Loss must have been seen within the window
+        if (losing || udpStallSamples > 0) udpStallSamples++;
         if (udpStallSamples >= UDP_STALL_SAMPLES) {
             udpStallSamples = 0;
             session.reportUdpBroken("packets but no decoded frame for " + UDP_STALL_SAMPLES
-                    + " s (" + nalAssembler.droppedCount() + " NAL units dropped)");
+                    + " s (" + loss + " NAL units lost)");
         }
     }
 
     /** NAL units dropped so far because a packet of them was lost (#113). */
-    int nalDropped() { return nalAssembler.droppedCount(); }
+    int nalDropped() { return nalAssembler.lossCount(); }
 
     float inFps() { return inFps; }
     float outFps() { return outFps; }
@@ -399,6 +421,7 @@ class QuadCell implements RtspSession.Callback {
 
     @Override
     public void onSdp(Sdp sdp) {
+        udpStallSamples = 0;
         nalAssembler.reset();
         lastUnknownPayload = -1;
         videoPt = sdp.videoPt;
@@ -433,6 +456,7 @@ class QuadCell implements RtspSession.Callback {
             return false;
         }
         // The marker bit ends an access unit: one received frame
+        videoPackets++;
         if ((buf[offset + 1] & 0x80) != 0) framesIn++;
 
         return nalAssembler.assemble(buf, offset, length, codecH265, nalSink);
