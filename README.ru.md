@@ -227,7 +227,7 @@ export KEY_PASS=your_key_password
 
 ## Совместимость с устройствами
 
-Проверили приложение на своём устройстве? [**Отправьте Device report**](https://github.com/OpenIPC/decoder/issues/new?template=device_report.yml) — это займёт минуту и поможет другим пользователям.
+Проверили приложение на своём устройстве? [**Отправьте Device report**](https://github.com/OpenIPC/decoder/issues/new?template=device_report.yml) — это займёт минуту и поможет другим пользователям. Проверили камеру? [**Отправьте Camera report**](https://github.com/OpenIPC/decoder/issues/new?template=camera_report.yml): производитель, модель, адрес RTSP (без пароля), кодеки и что работает.
 
 ### Проверенные устройства
 

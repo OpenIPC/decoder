@@ -227,7 +227,7 @@ Network, video decoding and audio run on separate threads, so a slow decoder nev
 
 ## Device compatibility
 
-Tested the app on your device? Please [**submit a Device report**](https://github.com/OpenIPC/decoder/issues/new?template=device_report.yml). It takes a minute and helps other users.
+Tested the app on your device? Please [**submit a Device report**](https://github.com/OpenIPC/decoder/issues/new?template=device_report.yml). It takes a minute and helps other users. Tested a camera? [**Submit a Camera report**](https://github.com/OpenIPC/decoder/issues/new?template=camera_report.yml): manufacturer, model, RTSP URL (without the password), codecs and what works.
 
 ### Verified devices
 
