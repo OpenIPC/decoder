@@ -73,8 +73,24 @@ class QuadCell implements RtspSession.Callback {
     private float outAvg;
     /** Decode only key frames and parameter sets (#85): a fraction of the load. */
     private volatile boolean keyFramesOnly = true;
-    /** The camera sends MJPEG, which the grid does not decode yet (#119). */
+    /** The camera sends MJPEG (#119): whole JPEG frames go to the queue instead of NAL units. */
     private volatile boolean jpeg;
+    // MJPEG in multi-view (#132)
+    private final JpegAssembler jpegAssembler;
+    private final JpegRenderer jpegRenderer = new JpegRenderer();
+    /** JPEG frames shown, the MJPEG counterpart of the decoder's output count. */
+    private volatile int jpegFramesOut;
+    private volatile int jpegWidth;
+    private volatile int jpegHeight;
+    private volatile long lastJpegShownMs;
+    /** A JPEG frame was shown since the stream started. */
+    private volatile boolean jpegShowing;
+    /** The last JPEG decoded on key frames only: then one per JPEG_REDUCED_MS (#85). */
+    private long lastJpegDecodeMs;
+    /** MJPEG has no key frames: its cheap mode decodes one frame per second instead. */
+    static final long JPEG_REDUCED_MS = 1000;
+    /** A new surface is being made after MJPEG was drawn with lockCanvas(): no decoder yet. */
+    private volatile boolean surfacePending;
     /** Just promoted to full rate: skip until the next key frame, the references are missing. */
     private volatile boolean waitingKeyFrame;
 
@@ -138,6 +154,7 @@ class QuadCell implements RtspSession.Callback {
             nalQueue.clear();
             decoder.closeDecoder();
         }, pool);
+        this.jpegAssembler = new JpegAssembler(pool);
     }
 
     void start() {
@@ -162,6 +179,9 @@ class QuadCell implements RtspSession.Callback {
         public void surfaceCreated(SurfaceHolder holder) {
             // The surface belongs to the SurfaceView: it is used, never released, here
             surface = holder.getSurface();
+            // A new surface: nothing drawn into it with lockCanvas() yet (#132)
+            jpegRenderer.takeCanvasDrawn();
+            surfacePending = false;
             if (!threadsStarted) startThreads();
         }
         @Override
@@ -173,6 +193,7 @@ class QuadCell implements RtspSession.Callback {
             // a new one when the next surface is there
             surface = null;
             decoder.closeDecoder();
+            jpegRenderer.release();
         }
     };
 
@@ -214,6 +235,10 @@ class QuadCell implements RtspSession.Callback {
         audioSink = null;
         session.stop();
         nalAssembler.reset();
+        jpegAssembler.reset();
+        jpegRenderer.release();
+        jpegShowing = false;
+        lastJpegShownMs = 0;
         // Disabling releases the decoder and stops the decode thread from creating another,
         // so there is nothing to wait for on the UI thread (#32)
         decoder.setEnabled(false);
@@ -270,7 +295,7 @@ class QuadCell implements RtspSession.Callback {
      */
     String sample(long nowMs) {
         int in = framesIn;
-        int out = decoder.framesOut();
+        int out = decoder.framesOut() + jpegFramesOut;
         int lost = queueFullDrops + decoder.inputDropped();
         if (lastSampleMs > 0 && nowMs > lastSampleMs) {
             float sec = (nowMs - lastSampleMs) / 1000f;
@@ -294,14 +319,15 @@ class QuadCell implements RtspSession.Callback {
             if ("disconnected".equals(st)) return "Disconnected";
             return "buffering".equals(st) ? "Buffering…" : "Connecting…";
         }
-        int w = decoder.outWidth();
-        int h = decoder.outHeight();
+        int w = width();
+        int h = height();
         String size = w > 0 ? w + "×" + h + " " : "";
-        String codec = codecH265 ? "H.265" : "H.264";
+        String codec = jpeg ? "MJPEG" : codecH265 ? "H.265" : "H.264";
         if (keyFramesOnly) {
             String rate = outAvg < 10 ? String.format(java.util.Locale.ROOT, "%.1f", outAvg)
                     : String.valueOf(Math.round(outAvg));
-            return size + codec + " key frames · " + rate + " fps"
+            // MJPEG has no key frames: its cheap mode shows one frame per second (#132)
+            return size + codec + (jpeg ? " reduced" : " key frames") + " · " + rate + " fps"
                     + (decoder.isSoftware() ? " · software" : "");
         }
         return size + codec + " " + Math.round(outFps) + "/" + Math.round(inFps) + " fps";
@@ -323,17 +349,17 @@ class QuadCell implements RtspSession.Callback {
 
     /** Resolution and frame rate are known, so the full-rate load can be estimated. */
     boolean knowsLoad() {
-        return decoder.outWidth() > 0 && inAvg > 0;
+        return width() > 0 && inAvg > 0;
     }
 
     /** Macroblocks per second at full rate (#85). */
     long fullLoad() {
-        return DecodePlanner.fullLoad(decoder.outWidth(), decoder.outHeight(), inAvg);
+        return DecodePlanner.fullLoad(width(), height(), inAvg);
     }
 
     /** Macroblocks per second it costs now on key frames only (#85). */
     long keyLoad() {
-        return DecodePlanner.fullLoad(decoder.outWidth(), decoder.outHeight(), outAvg);
+        return DecodePlanner.fullLoad(width(), height(), outAvg);
     }
 
     /** A parameter set or a key frame (H.264 IDR; H.265 IRAP). */
@@ -408,18 +434,33 @@ class QuadCell implements RtspSession.Callback {
      */
     boolean showsVideo(long ms) {
         long window = keyFramesOnly ? Math.max(ms, KEY_FRAMES_LIVE_MS) : ms;
-        return pausedReason == null && "connected".equals(state) && decoder.renderedWithin(window);
+        return pausedReason == null && "connected".equals(state) && renderedWithin(window);
     }
+
+    private boolean renderedWithin(long ms) {
+        if (!jpeg) return decoder.renderedWithin(ms);
+        long shown = lastJpegShownMs;
+        return shown > 0 && System.nanoTime() / 1_000_000 - shown < ms;
+    }
+
+    /** A decoder is set up, or MJPEG frames are being shown (#132). */
+    private boolean decoding() {
+        return jpeg ? jpegShowing : decoder.hasDecoder();
+    }
+
+    /** Size of the picture shown (video decoder or MJPEG). */
+    private int width() { return jpeg ? jpegWidth : decoder.outWidth(); }
+    private int height() { return jpeg ? jpegHeight : decoder.outHeight(); }
 
     /** Connected and decoding: its load is real, so demoting or pausing it helps (#85). */
     boolean isPlaying() {
-        return pausedReason == null && "connected".equals(state) && decoder.hasDecoder();
+        return pausedReason == null && "connected".equals(state) && decoding();
     }
 
     /** Playing long enough for its decode rate to mean something (#83). */
     boolean isSettled(long nowMs) {
         long started = decoderStartedMs;
-        return pausedReason == null && "connected".equals(state) && decoder.hasDecoder()
+        return pausedReason == null && "connected".equals(state) && decoding()
                 && started > 0 && nowMs - started > 5000;
     }
 
@@ -431,16 +472,34 @@ class QuadCell implements RtspSession.Callback {
 
     @Override
     public void onSdp(Sdp sdp) {
-        // MJPEG plays in the single view only for now (#119)
-        jpeg = sdp.videoJpeg;
-        if (jpeg) {
-            // Paused rather than pulling a stream it cannot show (Qodo on #131)
-            problem = "Decoder: MJPEG in the single view only";
-            View v = view;
-            if (v != null) v.post(() -> pause("MJPEG: single view only"));
+        boolean wasJpeg = jpeg;
+        if (sdp.videoJpeg != wasJpeg || sdp.videoH265 != codecH265) {
+            // Frames of the previous codec must not reach the new path (Qodo on #131)
+            Frame f;
+            while ((f = nalQueue.poll()) != null) cellFramePool.recycle(f);
         }
+        if (sdp.videoJpeg) {
+            // MJPEG has its own decoder or is drawn by the app (#132): the video decoder must
+            // not hold the surface
+            decoder.closeDecoder();
+        } else {
+            jpegRenderer.release();
+            if (jpegRenderer.takeCanvasDrawn()) {
+                // A surface drawn with lockCanvas() cannot take a decoder any more: hide and
+                // show the view for a new one, no decoder until it is there (Qodo on #131)
+                surfacePending = true;
+                SurfaceView v = view;
+                if (v != null) v.post(() -> {
+                    v.setVisibility(View.GONE);
+                    v.post(() -> v.setVisibility(View.VISIBLE));
+                });
+            }
+        }
+        jpeg = sdp.videoJpeg;
+        lastJpegDecodeMs = 0;
         udpStallSamples = 0;
         nalAssembler.reset();
+        jpegAssembler.reset();
         lastUnknownPayload = -1;
         videoPt = sdp.videoPt;
         codecH265 = sdp.videoH265;
@@ -465,7 +524,6 @@ class QuadCell implements RtspSession.Callback {
             return false;
         }
         if (channel != RtspSession.CHANNEL_VIDEO) return false;
-        if (jpeg) return true; // dropped, but no reconnect loop before the pause
         int pt = buf[offset + 1] & 0x7F;
         if (pt != videoPt) {
             if (pt != lastUnknownPayload) {
@@ -478,12 +536,17 @@ class QuadCell implements RtspSession.Callback {
         videoPackets++;
         if ((buf[offset + 1] & 0x80) != 0) framesIn++;
 
+        if (jpeg) return jpegAssembler.assemble(buf, offset, length, nalSink::onNal);
         return nalAssembler.assemble(buf, offset, length, codecH265, nalSink);
     }
 
 
     private void decode(Frame buffer) {
-        if (buffer.length() < 5) return;
+        if (jpeg) {
+            decodeJpeg(buffer);
+            return;
+        }
+        if (buffer.length() < 5 || surfacePending) return;
         if (keyFramesOnly || waitingKeyFrame) {
             int type = NalAssembler.fragment(buffer.data()[4], codecH265);
             if (!isKeyNal(type, codecH265)) return;
@@ -496,6 +559,29 @@ class QuadCell implements RtspSession.Callback {
             decoder.createDecoder(codecH265);
             // Feed the frame that triggered creation (often the SPS) to the new decoder
             decoder.decodeFrame(buffer, codecH265, 0);
+        }
+    }
+
+    /** One JPEG frame onto the cell's surface; on key frames only, one per second (#132). */
+    private void decodeJpeg(Frame frame) {
+        long now = System.nanoTime() / 1_000_000;
+        if (keyFramesOnly && lastJpegDecodeMs > 0 && now - lastJpegDecodeMs < JPEG_REDUCED_MS) {
+            return;
+        }
+        Surface s = surface;
+        int[] size = jpegRenderer.render(frame, s,
+                () -> running && jpeg && s == surface);
+        if (size == null) return;
+        lastJpegDecodeMs = now;
+        jpegWidth = size[0];
+        jpegHeight = size[1];
+        lastJpegShownMs = now;
+        jpegFramesOut++;
+        if (!jpegShowing) {
+            jpegShowing = true;
+            problem = null;
+            decoderStartedMs = now;
+            if (listener != null) listener.onRemoveOverlay(index);
         }
     }
 }
