@@ -53,6 +53,8 @@ class MenuManager {
     /** The UDP RTP view is shown: neither a slot nor multi-view is active. */
     private boolean udpShown;
     private boolean mMenuIsCached;
+    /** The item a remote starts from: the active slot, Q or U (#91). */
+    private TextView mFocusItem;
     private TextView mSettingsBtn;
     private TextView mWebUiBtn;
     TextView[] camButtons;
@@ -121,7 +123,8 @@ class MenuManager {
             int margin = dp(12);
             mMenuPopup.showAtLocation(anchor, Gravity.TOP | Gravity.START, margin, margin);
             mMenuPopup.setOnDismissListener(() -> mMenuPopup = null);
-            focusForKeys(mMenuLayout);
+            mFocusItem = focusItem(quadEnabled, mActive);
+            focusForKeys(mMenuLayout, mFocusItem);
             return;
         }
 
@@ -133,6 +136,15 @@ class MenuManager {
                 if (event.getKeyCode() == KeyEvent.KEYCODE_ESCAPE) {
                     if (event.getAction() == KeyEvent.ACTION_UP) dismissPopup();
                     return true;
+                }
+                // While the layout itself has the focus (opened by touch, #65), a D-pad key
+                // finds no item: they all lie inside it, not beside it. The first key moves
+                // the focus to the active item instead (#91)
+                if (findFocus() == this && isNavigationKey(event.getKeyCode())
+                        && event.getAction() == KeyEvent.ACTION_DOWN) {
+                    TextView item = mFocusItem;
+                    // Consumed only if the focus really moved; otherwise the key goes on
+                    if (item != null && item.requestFocus()) return true;
                 }
                 return super.dispatchKeyEvent(event);
             }
@@ -146,7 +158,6 @@ class MenuManager {
         popup.showAtLocation(anchor, Gravity.TOP | Gravity.START, margin, margin);
         mMenuPopup = popup;
         popup.setOnDismissListener(() -> mMenuPopup = null);
-        focusForKeys(layout);
 
         LinearLayout camRow = new LinearLayout(activity);
         camRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -256,6 +267,8 @@ class MenuManager {
 
         mMenuLayout = layout;
         mMenuIsCached = true;
+        mFocusItem = focusItem(quadEnabled, mActive);
+        focusForKeys(layout, mFocusItem);
     }
 
     private void updateCachedMenu(boolean quadEnabled, int mActive, String[] mHosts) {
@@ -290,11 +303,37 @@ class MenuManager {
 
     /**
      * A menu opened by touch has no focused view, so keys never reach the layout and Escape
-     * did not close it. In touch mode the layout itself takes focus; with a remote, focus
-     * stays on the menu items as before.
+     * did not close it. In touch mode the layout itself takes focus (#65); opened with a
+     * remote, the active item does (#91).
      */
-    private static void focusForKeys(View layout) {
-        if (layout.isInTouchMode()) layout.requestFocus();
+    private static void focusForKeys(View layout, View item) {
+        if (layout.isInTouchMode() || item == null) layout.requestFocus();
+        else item.requestFocus();
+    }
+
+    /** The highlighted item of the slot row: the active slot, Q in multi-view, U. */
+    private TextView focusItem(boolean quadEnabled, int mActive) {
+        if (udpShown && mCachedUdpBtn != null) return mCachedUdpBtn;
+        if (quadEnabled && mCachedQuadBtn != null) return mCachedQuadBtn;
+        if (camButtons != null && mActive >= 0 && mActive < camButtons.length) {
+            return camButtons[mActive];
+        }
+        return null;
+    }
+
+    static boolean isNavigationKey(int keyCode) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_DPAD_UP:
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+            case KeyEvent.KEYCODE_ENTER:
+            case KeyEvent.KEYCODE_TAB:
+                return true;
+            default:
+                return false;
+        }
     }
 
     private TextView createItem(String title) {
@@ -303,6 +342,8 @@ class MenuManager {
         text.setPadding(dp(8), dp(6), dp(8), dp(6));
         text.setTextColor(Color.WHITE);
         text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        // Reachable with a remote (#91); not only by the clickable default of newer Androids
+        text.setFocusable(true);
         focusChange(text);
         return text;
     }
