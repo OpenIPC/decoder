@@ -417,8 +417,9 @@ final class DebugServer {
             + ".meta{display:flex;flex-wrap:wrap;gap:4px 14px;color:#999;font-size:13px;"
             + "font-variant-numeric:tabular-nums}"
             + ".meta span{white-space:nowrap}#err{color:#ff5a5a}"
-            + "nav{display:flex;align-items:center;gap:6px;margin-left:auto;white-space:nowrap;"
-            + "font-size:13px;color:#999}"
+            // The controls wrap as groups on a narrow screen, none goes off it (Qodo on #142)
+            + "nav{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-left:auto;"
+            + "font-size:13px;color:#999}nav>*{white-space:nowrap}"
             + ".btn,.seg button{font:inherit;color:#cde;background:#222;border:1px solid #363636;"
             + "border-radius:6px;padding:3px 10px;text-decoration:none;cursor:pointer}"
             + ".btn:hover,.seg button:hover{background:#2c2c2c}"
