@@ -181,6 +181,8 @@ public class Decoder extends Activity
         mUserAgent = "User-Agent: OpenIPC-Decoder/" + mVersion + "\r\n";
         mDensity = getResources().getDisplayMetrics().density;
         credentials = CredentialStore.create();
+        // The decoder list for /stats.json, built off the UI thread (#88)
+        CodecInfo.warmUp();
 
         // --- Create managers ---
         videoDecoder = new MediaCodecManager(new MediaCodecManager.Listener() {
@@ -1332,7 +1334,8 @@ public class Decoder extends Activity
         m.put("addresses", urls);
         m.put("server", DebugServer.get().state());
         // The video decoders and what they can do: instances, adaptive playback (#88)
-        m.put("decoders", CodecInfo.videoDecoders());
+        List<Map<String, Object>> decoders = CodecInfo.videoDecodersIfReady();
+        m.put("decoders", decoders != null ? decoders : "loading");
         return m;
     }
 

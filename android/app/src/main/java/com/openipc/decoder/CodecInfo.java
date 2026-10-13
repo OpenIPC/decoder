@@ -26,13 +26,32 @@ final class CodecInfo {
 
     private CodecInfo() {}
 
-    static List<Map<String, Object>> videoDecoders() {
+    /** The list, or null while it is still being built (Qodo on #137: never on the UI thread). */
+    static List<Map<String, Object>> videoDecodersIfReady() {
+        return cached;
+    }
+
+    /** Builds the list on a background thread, once. */
+    static void warmUp() {
+        if (cached != null) return;
+        Thread t = new Thread(CodecInfo::videoDecoders, "codec-info");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    static synchronized List<Map<String, Object>> videoDecoders() {
         List<Map<String, Object>> c = cached;
         if (c != null) return c;
         List<Map<String, Object>> out = new ArrayList<>();
+        MediaCodecInfo[] infos;
         try {
-            for (MediaCodecInfo ci : new MediaCodecList(MediaCodecList.ALL_CODECS)
-                    .getCodecInfos()) {
+            infos = new MediaCodecList(MediaCodecList.ALL_CODECS).getCodecInfos();
+        } catch (RuntimeException e) {
+            return out; // not cached: the next request tries again
+        }
+        for (MediaCodecInfo ci : infos) {
+            // One broken entry must not hide the others (Qodo on #137)
+            try {
                 if (ci.isEncoder()) continue;
                 for (String type : ci.getSupportedTypes()) {
                     if (!type.startsWith("video/")) continue;
@@ -59,8 +78,9 @@ final class CodecInfo {
                     }
                     out.add(m);
                 }
+            } catch (RuntimeException ignored) {
+                // Skip this codec
             }
-        } catch (RuntimeException ignored) {
         }
         cached = out;
         return out;
