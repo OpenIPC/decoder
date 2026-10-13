@@ -1015,6 +1015,8 @@ public class Decoder extends Activity
     private static final String PREF_DECODER_FAILED = "decoder_failed_load_v2";
     /** 1080p at 60 fps: the usual declared budget, until the decoder declares its own. */
     private static final long DEFAULT_CAPACITY = DecodePlanner.fullLoad(1920, 1080, 60);
+    /** One 1080p30 stream: never learnt below that (#126). */
+    static final long MIN_CAPACITY = DecodePlanner.fullLoad(1920, 1080, 30);
     private DecodePlanner decodePlanner;
 
     private DecodePlanner newPlanner() {
@@ -1024,9 +1026,10 @@ public class Decoder extends Activity
         }
         long learnt = pref.getLong(PREF_DECODER_CAPACITY, 0);
         long failed = pref.getLong(PREF_DECODER_FAILED, 0);
-        if (learnt > 0) return new DecodePlanner(learnt, true, failed);
+        if (learnt > 0) return new DecodePlanner(learnt, true, failed, MIN_CAPACITY);
         long declared = MediaCodecManager.declaredBlocksPerSec;
-        return new DecodePlanner(declared > 0 ? declared : DEFAULT_CAPACITY, false, failed);
+        return new DecodePlanner(declared > 0 ? declared : DEFAULT_CAPACITY, false, failed,
+                MIN_CAPACITY);
     }
 
     /**
@@ -1043,6 +1046,23 @@ public class Decoder extends Activity
         }
         DecodePlanner planner = decodePlanner;
         if (planner == null) return;
+        // No cell decoded anything this second although some play: the decoder (or the media
+        // service) stands still. Nothing to learn from that (#126)
+        // Decoder losses (queue overflow, no input buffer) mean overload, not a stall: those
+        // seconds are planned as usual (Qodo on #129)
+        boolean anyPlaying = false;
+        boolean anyOutput = false;
+        boolean anyLosses = false;
+        for (QuadCell c : cells) {
+            if (c == null || !c.isPlaying()) continue;
+            anyPlaying = true;
+            if (c.outFps() > 0) anyOutput = true;
+            if (c.lostFps() > 0) anyLosses = true;
+        }
+        if (anyPlaying && !anyOutput && !anyLosses && countFullRate(cells) > 0) {
+            planner.skipped(now);
+            return;
+        }
         planner.offerDeclared(MediaCodecManager.declaredBlocksPerSec);
         long before = planner.capacity();
         long failedBefore = planner.failedLoad();
@@ -1096,6 +1116,12 @@ public class Decoder extends Activity
             Log.i(TAG, "Decoder capacity of this device: " + planner.capacity()
                     + " blocks/s, failed at " + planner.failedLoad());
         }
+    }
+
+    private static int countFullRate(QuadCell[] cells) {
+        int n = 0;
+        for (QuadCell c : cells) if (c != null && c.isPlaying() && !c.isKeyFramesOnly()) n++;
+        return n;
     }
 
     private static DecodePlanner.Cell plannerCell(int index, QuadCell c, long now) {

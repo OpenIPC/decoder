@@ -97,15 +97,29 @@ final class DecodePlanner {
     private long quietSinceMs = -1;
     private long lastChangeMs = -1;
 
+    /**
+     * Never learnt below this (#126): losses at a lower load come from a stalled system (a hung
+     * media service), not from the decoder's means, and would keep every cell on key frames.
+     */
+    private final long minCapacity;
+
     DecodePlanner(long capacity, boolean learnt) {
-        this(capacity, learnt, 0);
+        this(capacity, learnt, 0, 0);
     }
 
-    /** With the failed load stored with the learnt capacity (0: none), not tried again. */
     DecodePlanner(long capacity, boolean learnt, long failedLoad) {
-        this.capacity = capacity;
+        this(capacity, learnt, failedLoad, 0);
+    }
+
+    /**
+     * With the failed load stored with the learnt capacity (0: none), not tried again; stored
+     * values below minCapacity are not trusted.
+     */
+    DecodePlanner(long capacity, boolean learnt, long failedLoad, long minCapacity) {
+        this.minCapacity = Math.max(0, minCapacity);
+        this.capacity = Math.max(capacity, this.minCapacity);
         this.learnt = learnt;
-        this.failedLoad = failedLoad > 0 ? failedLoad : Long.MAX_VALUE;
+        this.failedLoad = failedLoad > this.minCapacity ? failedLoad : Long.MAX_VALUE;
     }
 
     long capacity() { return capacity; }
@@ -115,7 +129,15 @@ final class DecodePlanner {
 
     /** The decoder's declared budget, once known; ignored when a learnt value exists. */
     void offerDeclared(long declared) {
-        if (!learnt && declared > 0) capacity = declared;
+        if (!learnt && declared > 0) capacity = Math.max(declared, minCapacity);
+    }
+
+    /**
+     * A second not planned because nothing decoded at all (#126): the time without frames
+     * must not count as a quiet, proven period, so the quiet and probe timers start again.
+     */
+    void skipped(long nowMs) {
+        quietSinceMs = nowMs;
     }
 
     static long fullLoad(int width, int height, float fps) {
@@ -157,13 +179,16 @@ final class DecodePlanner {
             for (int i = cells.size() - 1; i >= 0; i--) {
                 Cell c = cells.get(i);
                 if (c.full && !c.paused && c.playing && c.known) {
-                    // Losses at this load: the capacity is below it, but not below a proven load
+                    // Losses at this load: the capacity is below it, but not below a proven load.
+                    // Remembered for this session even below the floor; only stored values at
+                    // or below it are distrusted after a restart (#126)
                     failedLoad = Math.min(failedLoad, load);
                     // A "proven" load at or above a failing one was not proven after all
                     if (proven >= load) proven = Math.round(load * FAILED_MARGIN);
                     probeWaitMs = Math.min(probeWaitMs * 2, PROBE_MAX_WAIT_MS);
                     // Never raised by a failure; not below a proven load
-                    capacity = Math.max(proven, Math.min(capacity, Math.round(load * 0.9)));
+                    capacity = Math.max(minCapacity,
+                            Math.max(proven, Math.min(capacity, Math.round(load * 0.9))));
                     learnt = true;
                     return change(nowMs, Action.DEMOTE, c.index);
                 }
