@@ -472,7 +472,6 @@ class RtspSession {
             }
             listener = l;
             listening = true;
-            inUse = u.multicast() ? "multicast push" : "UDP push";
             // No RTSP here: nothing of an older connection may be sent by the watchdog
             keepalive = null;
             lastPacketMs = System.nanoTime() / 1_000_000;
@@ -492,6 +491,7 @@ class RtspSession {
                 // packets), and report "connected" again with the next usable one
                 if (!first[0] && System.nanoTime() / 1_000_000 - lastPacketMs > watchdogMs) {
                     first[0] = true;
+                    inUse = null; // listening, but nothing is being pushed (Qodo on #117)
                     status(gen, "disconnected");
                 }
                 return true;
@@ -517,6 +517,8 @@ class RtspSession {
                     lastPacketMs = System.nanoTime() / 1_000_000;
                     if (first[0]) {
                         first[0] = false;
+                        // In use only once something arrives: a quiet port is not a stream
+                        inUse = u.multicast() ? "multicast push" : "UDP push";
                         status(gen, "connected");
                     }
                 }
