@@ -41,7 +41,6 @@ Two identical boxes with the same firmware (checked 2026-10-13):
 | Address | `172.17.32.144:5555` (Ethernet); Wi‑Fi is also up as `172.17.32.146` | `172.17.32.145:5555` (Ethernet) |
 | Display | **none** (headless): only `screencap`, the debug page and the logs show what is on screen | **monitor** Philips 226VL over HDMI (HDMI audio active); for checks that need a real picture or a person looking |
 | Serial | `KFB442005119` | `KFB442001288` |
-| Locale | `en-GB` | `ru-RU` |
 | Extra apps | Yandex Browser TV, Faceter, Record Radio | VK TV, Wink, VLC, Nova; autostart `com.oranth.atvapplist` |
 
 Common to both:
@@ -62,16 +61,20 @@ Check the firmware of a box: `$ADB shell getprop ro.build.description`. If it ch
 
 #### Developer settings
 
-Same on both boxes: developer options and ADB on, stay awake while plugged in (`stay_on_while_plugged_in=3`, screen-off timeout never), animation scales 1.0, unknown sources allowed. Differences found on 2026-10-13:
+Both boxes are kept in sync (aligned on 2026-10-13). Check with `$ADB shell settings get <namespace> <key>`:
 
-| Setting | Aceline-1 | Aceline-2 | Effect |
-|---|---|---|---|
-| `system pointer_location`, `system show_touches` | off | **on** | The pointer overlay is drawn on top of the app and ends up in screenshots |
-| `secure anr_show_background` | off | **on** | Shows ANR dialogs of background apps (useful for #76) |
-| `global package_verifier_enable` / `verifier_verify_adb_installs` | 0 / 0 | **1** / default | Aceline-2 may verify `adb install`s, which slows them down or asks on screen |
-| `global debug_view_attributes`, `force_allow_on_external`, `force_resizable_activities` | on | off | Not used by the app |
-| `global hdmi_control_auto_device_off_enabled` (CEC) | on | off | Only matters with a display |
-| Locale | `en-GB` | `ru-RU` | Language of the system UI and of the app's strings in screenshots |
+| Setting | Value | Why |
+|---|---|---|
+| Developer options, ADB | on | |
+| `global stay_on_while_plugged_in` | `3`; screen-off timeout never | the screen never sleeps during a run |
+| Animation scales | 1.0 | |
+| `system pointer_location`, `system show_touches` | 0 | the pointer overlay would be drawn on top of the app and end up in screenshots |
+| `secure anr_show_background` | 1 | ANR dialogs of background apps are shown (#76) |
+| `global package_verifier_enable`, `verifier_verify_adb_installs` | 0, 0 | `adb install` is not verified (no delay, no prompt on screen) |
+| `global hdmi_control_enabled` / `hdmi_control_auto_device_off_enabled` | 1 / 0 | CEC on, but the box does not switch the display off |
+| Locale | `en-GB` | system UI and app strings in English, also in screenshots |
+
+Set without root: `settings put …` for the keys; the locale via Settings → Language (`am start -a android.settings.LOCALE_SETTINGS`, D-pad to *English (United Kingdom)*). Left as they are, not used by the app: `debug_view_attributes`, `force_allow_on_external`, `force_resizable_activities` (on only on Aceline-1).
 
 Not available in the lab yet: a phone or tablet (rotation, #31), a Wi‑Fi Android device (multicast lock), Android 5.
 
