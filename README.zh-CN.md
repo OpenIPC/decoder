@@ -24,6 +24,8 @@
 | `decoder-v2.apk` | **当前版本**，推荐使用 |
 | `decoder.apk`    | `basic` 分支的旧版本   |
 
+每个 2.xx 版本另有独立的发布 — [`v2.01`](https://github.com/OpenIPC/decoder/releases/tag/v2.01) 及之后的版本，见[发布页面](https://github.com/OpenIPC/decoder/releases) — 包含该版本的 APK 以及相对上一版本的更改。
+
 [Google Play](https://play.google.com/apps/internaltest/4701231141824898735) 上提供测试渠道。如需加入，请通过 [OpenIPC Telegram 频道](https://openipc.org/our-channels)发送您的电子邮箱。
 
 ## 功能

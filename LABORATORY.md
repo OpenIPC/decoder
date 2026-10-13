@@ -205,6 +205,7 @@ $ADB shell getprop ro.product.model   # AG-216
 ### Builds
 
 - `v2` / `basic`: `gh release download latest -R OpenIPC/decoder -p decoder-v2.apk -p decoder.apk`
+- A given 2.xx version: `gh release download v2.01 -R OpenIPC/decoder` (`decoder-v2-2.01.apk`). CI creates the release `v<versionName>` on the first v2 build of each version (#157).
 - Branches: `build.yml` builds signed APKs only on **push** runs (not `pull_request`); artifact name is `decoder-<branch with / → ->`:
   ```sh
   B=feat/rtsp-multicast
