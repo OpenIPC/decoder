@@ -50,10 +50,12 @@ final class NetInfo {
      * A client on the local network: loopback, private IPv4 (10/8, 172.16/12, 192.168/16),
      * link-local (169.254/16, fe80::/10) or IPv6 unique-local (fc00::/7). An IPv4 client on a
      * dual-stack socket arrives as ::ffff:a.b.c.d, which Java already turns into IPv4.
+     * The deprecated IPv6 site-local range (fec0::/10) is not local here.
      */
     static boolean isLocalClient(InetAddress a) {
         if (a == null) return false;
-        if (a.isLoopbackAddress() || a.isSiteLocalAddress() || a.isLinkLocalAddress()) return true;
+        if (a.isLoopbackAddress() || a.isLinkLocalAddress()) return true;
+        if (a instanceof Inet4Address) return a.isSiteLocalAddress();
         return a instanceof Inet6Address && (a.getAddress()[0] & 0xfe) == 0xfc;
     }
 }

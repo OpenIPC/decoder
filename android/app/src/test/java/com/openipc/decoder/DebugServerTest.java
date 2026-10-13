@@ -40,7 +40,7 @@ public class DebugServerTest {
     @Test
     public void otherClientsAreRejected() throws Exception {
         for (String a : new String[] {"8.8.8.8", "172.15.0.1", "172.32.0.1", "100.64.0.1",
-                "2001:db8::1", "2a00:1450::1", "::ffff:8.8.8.8"}) {
+                "2001:db8::1", "2a00:1450::1", "::ffff:8.8.8.8", "fec0::1"}) {
             assertFalse(a, NetInfo.isLocalClient(ip(a)));
         }
         assertFalse(NetInfo.isLocalClient(null));
@@ -102,6 +102,19 @@ public class DebugServerTest {
                 + "\"cells\":[{\"slot\":1,\"in_fps\":24.50,\"paused\":false,"
                 + "\"text\":\"1920×1080 \\\"H.264\\\"\\n\\u003cb\\u003e\"}]}",
                 DebugServer.toJson(m));
+    }
+
+    @Test
+    public void logBufferKeepsTheLastLinesRedacted() {
+        LogBuffer log = new LogBuffer(3);
+        log.add("one");
+        log.add("rtsp://root:12345@cam/stream=0");
+        log.add("three");
+        log.add("four");
+        String text = log.text();
+        assertFalse(text, text.contains("one"));
+        assertFalse(text, text.contains("12345"));
+        assertTrue(text, text.contains("rtsp://***@cam/stream=0\nthree\nfour\n"));
     }
 
     private static String head(String raw) throws IOException {

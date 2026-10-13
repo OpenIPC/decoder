@@ -9,22 +9,21 @@ package com.openipc.decoder;
 
 import android.util.Log;
 
-import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
@@ -41,6 +40,8 @@ final class DebugServer {
     /** Lines of the app's log served by /log. */
     static final int LOG_LINES = 500;
     private static final int SOCKET_TIMEOUT_MS = 3000;
+    /** Whole request, writing included: a client that stops reading cannot hold a worker. */
+    private static final long REQUEST_DEADLINE_MS = 5000;
     private static final int MAX_HEADER_BYTES = 8192;
     private static final long REBIND_DELAY_MS = 10_000;
 
@@ -61,6 +62,12 @@ final class DebugServer {
                 t.setDaemon(true);
                 return t;
             });
+    private final ScheduledThreadPoolExecutor deadlines = new ScheduledThreadPoolExecutor(1, r -> {
+        Thread t = new Thread(r, "debug-http-deadline");
+        t.setDaemon(true);
+        return t;
+    });
+    private final LogBuffer log = new LogBuffer(LOG_LINES);
 
     private DebugServer() {}
 
@@ -68,6 +75,7 @@ final class DebugServer {
     static synchronized DebugServer get() {
         if (instance == null) {
             instance = new DebugServer();
+            instance.log.startReader();
             Thread t = new Thread(instance::acceptLoop, "debug-http-accept");
             t.setDaemon(true);
             t.start();
@@ -112,6 +120,9 @@ final class DebugServer {
     }
 
     private void handle(Socket s) {
+        // Socket writes have no timeout of their own: closing the socket ends a blocked write
+        ScheduledFuture<?> deadline = deadlines.schedule(() -> closeQuietly(s),
+                REQUEST_DEADLINE_MS, TimeUnit.MILLISECONDS);
         try (Socket socket = s) {
             socket.setSoTimeout(SOCKET_TIMEOUT_MS);
             OutputStream out = socket.getOutputStream();
@@ -142,7 +153,7 @@ final class DebugServer {
                     reply(out, 200, "application/json; charset=utf-8", toJson(snapshot()));
                     break;
                 case "/log":
-                    reply(out, 200, "text/plain; charset=utf-8", readLog(LOG_LINES));
+                    reply(out, 200, "text/plain; charset=utf-8", log.text());
                     break;
                 default:
                     reply(out, 404, "text/plain", "Not found\n");
@@ -151,6 +162,8 @@ final class DebugServer {
             // The client went away or was too slow: nothing to report
         } catch (RuntimeException e) {
             Log.w(TAG, "Debug HTTP request failed", e);
+        } finally {
+            deadline.cancel(false);
         }
     }
 
@@ -210,34 +223,6 @@ final class DebugServer {
             case 404: return "Not Found";
             case 405: return "Method Not Allowed";
             default:  return "Error";
-        }
-    }
-
-    /**
-     * The last lines of the app's log. Without READ_LOGS logcat shows only this app's own
-     * lines; each one is redacted, as the RTSP layer may have logged a URL or a header.
-     */
-    static String readLog(int lines) {
-        Process p = null;
-        try {
-            p = new ProcessBuilder("logcat", "-d", "-v", "threadtime", "-t", String.valueOf(lines))
-                    .redirectErrorStream(true).start();
-            ArrayDeque<String> tail = new ArrayDeque<>(lines);
-            try (BufferedReader r = new BufferedReader(
-                    new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = r.readLine()) != null) {
-                    if (tail.size() == lines) tail.removeFirst();
-                    tail.addLast(line);
-                }
-            }
-            StringBuilder sb = new StringBuilder();
-            for (String line : tail) sb.append(redact(line)).append('\n');
-            return sb.toString();
-        } catch (IOException e) {
-            return "Cannot read the log: " + e.getMessage() + "\n";
-        } finally {
-            if (p != null) p.destroy();
         }
     }
 

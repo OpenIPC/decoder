@@ -994,7 +994,12 @@ public class Decoder extends Activity
         m.put("mode", !mResumed ? "paused" : udpViewShown ? "udp"
                 : quadEnabled ? "multi-view" : "single");
         m.put("active_slot", mActive + 1);
-        if (!quadEnabled) {
+        if (udpViewShown) {
+            Map<String, Object> udp = new LinkedHashMap<>();
+            udp.put("port", UDP_RTP_PORT);
+            udp.put("status", "no receiver yet (#87)");
+            m.put("udp", udp);
+        } else if (!quadEnabled) {
             Map<String, Object> single = new LinkedHashMap<>();
             single.put("url", DebugServer.redact(mHost));
             single.put("transport", mTransports[mActive] != null ? mTransports[mActive].name() : null);
@@ -1021,12 +1026,16 @@ public class Decoder extends Activity
                     c.put("text", v != null ? v.getText().toString() : null);
                     c.put("in_fps", cell.inFps());
                     c.put("lost_fps", cell.lostFps());
+                    // Seconds in a row the decoder made this cell lose frames; at
+                    // OVERLOAD_SAMPLES the grid is relieved (#83)
+                    c.put("behind_s", cell.behindSamples);
                     c.put("paused", cell.isPaused());
                     c.put("audio", i == quadAudio);
                 }
                 list.add(c);
             }
             m.put("cells", list);
+            m.put("overload_after_s", OVERLOAD_SAMPLES);
         }
         return m;
     }
