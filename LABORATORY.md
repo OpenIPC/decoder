@@ -208,6 +208,7 @@ $ADB shell getprop ro.product.model   # AG-216
   RUN=$(gh run list -R OpenIPC/decoder -b $B -e push -L 1 --json databaseId -q '.[0].databaseId')
   gh run download $RUN -R OpenIPC/decoder -n decoder-${B//\//-}
   ```
+- Versions: `v2` is **2.xx** (from 2.00, #152). Every PR that changes the app bumps `android/app/build.gradle` as its last commit before the merge: `versionName` +0.01 (2.00 → 2.01 → …), `versionCode` +1. Docs-only PRs do not. `basic` keeps its 1.07.x line. The installed version shows in the menu (`Exit [v…]`) and in `/stats.json`.
 - Every build is `com.openipc.decoder` with the release signature. Switching from a debug build needs `adb uninstall` first, which wipes the settings.
 
 ### Setting a camera without the UI

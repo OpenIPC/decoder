@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         Thanks for testing! Reports are collected into the **Verified devices** table in the README.
-        The app version and build hash are shown in the menu next to **Exit**, for example `v1.28, a9ac8df`.
+        The app version and build hash are shown in the menu next to **Exit**, for example `v2.00, a9ac8df`.
 
   - type: dropdown
     id: device_type
@@ -52,7 +52,7 @@ body:
     attributes:
       label: App version
       description: Shown in the menu next to Exit
-      placeholder: "v1.28, a9ac8df"
+      placeholder: "v2.00, a9ac8df"
     validations:
       required: true
 
