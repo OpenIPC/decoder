@@ -32,16 +32,46 @@ A new round opens a new issue with the same structure as #53, links to this file
 
 ## Devices
 
-### AG-216 Android TV box
+### AG-216 Android TV boxes
+
+Two identical boxes with the same firmware (checked 2026-10-13):
+
+| | Aceline-1 | Aceline-2 |
+|---|---|---|
+| Address | `172.17.32.144:5555` (Ethernet); Wi‑Fi is also up as `172.17.32.146` | `172.17.32.145:5555` (Ethernet) |
+| Display | **none** (headless): only `screencap`, the debug page and the logs show what is on screen | **monitor** Philips 226VL over HDMI (HDMI audio active); for checks that need a real picture or a person looking |
+| Serial | `KFB442005119` | `KFB442001288` |
+| Locale | `en-GB` | `ru-RU` |
+| Extra apps | Yandex Browser TV, Faceter, Record Radio | VK TV, Wink, VLC, Nova; autostart `com.oranth.atvapplist` |
+
+Common to both:
 
 | | |
 |---|---|
-| Address | `172.17.32.144:5555`, lab network, ADB over TCP, no authorization prompt, shell uid 2000 (no root) |
-| Android | 10 (API 29), `armeabi-v7a` |
-| Screen | 1280×720 (16:9) |
-| HW video decoder | `OMX.allwinner.video.decoder.avc` (the board reports itself as Amlogic, but the codec is Allwinner); H.265 is decoded as `video/hevc` |
-| Network | Ethernet |
+| Access | ADB over TCP on port 5555, no authorization prompt, shell uid 2000 (no root) |
+| Model | `AG-216` (`ro.product.brand`/`manufacturer` say Amlogic, product `p281`); the SoC is **Allwinner** `sun50iw9p1` (H313/H616 family), platform `cupid` / `homlet` |
+| Firmware | `eros_p1-userdebug 10 QP1A.191105.004 251022 release-keys`, built 2025-10-22, kernel 4.9.170, security patch 2019-12-05 |
+| Fingerprint | `Amlogic/p281/p281:10/QP1A.191105.004/251022:userdebug/release-keys` |
+| Android | 10 (API 29), `armeabi-v7a` (32-bit userspace on a 64-bit CPU) |
+| RAM / storage | 2 GB / `/data` 11 GB |
+| Screen | 1280×720 (16:9), 60 Hz, 160 dpi, `television` UI mode, no touch |
+| HW video decoder | `OMX.allwinner.video.decoder.avc`; H.265 is decoded as `video/hevc` |
 | Quirks | The vendor firmware sometimes shows its own "Update Alert!!" dialog after screen off/on; unrelated to the app |
+
+Check the firmware of a box: `$ADB shell getprop ro.build.description`. If it changes, update the table above.
+
+#### Developer settings
+
+Same on both boxes: developer options and ADB on, stay awake while plugged in (`stay_on_while_plugged_in=3`, screen-off timeout never), animation scales 1.0, unknown sources allowed. Differences found on 2026-10-13:
+
+| Setting | Aceline-1 | Aceline-2 | Effect |
+|---|---|---|---|
+| `system pointer_location`, `system show_touches` | off | **on** | The pointer overlay is drawn on top of the app and ends up in screenshots |
+| `secure anr_show_background` | off | **on** | Shows ANR dialogs of background apps (useful for #76) |
+| `global package_verifier_enable` / `verifier_verify_adb_installs` | 0 / 0 | **1** / default | Aceline-2 may verify `adb install`s, which slows them down or asks on screen |
+| `global debug_view_attributes`, `force_allow_on_external`, `force_resizable_activities` | on | off | Not used by the app |
+| `global hdmi_control_auto_device_off_enabled` (CEC) | on | off | Only matters with a display |
+| Locale | `en-GB` | `ru-RU` | Language of the system UI and of the app's strings in screenshots |
 
 Not available in the lab yet: a phone or tablet (rotation, #31), a Wi‑Fi Android device (multicast lock), Android 5.
 
@@ -147,8 +177,9 @@ Rebooting a test camera or restarting Majestic on it is fine when it misbehaves.
 ```sh
 curl -sSLO https://dl.google.com/android/repository/platform-tools-latest-linux.zip
 unzip -q platform-tools-latest-linux.zip
+$PWD/platform-tools/adb connect 172.17.32.144:5555   # Aceline-1, no display
+$PWD/platform-tools/adb connect 172.17.32.145:5555   # Aceline-2, with a monitor
 export ADB="$PWD/platform-tools/adb -s 172.17.32.144:5555"
-$PWD/platform-tools/adb connect 172.17.32.144:5555
 $ADB shell getprop ro.product.model   # AG-216
 ```
 
