@@ -357,7 +357,7 @@ class QuadCell implements RtspSession.Callback {
 
     /** Corner note while damaged key frames are decoded (#133). */
     private String damaged() {
-        return nalAssembler.salvaging() ? " · damaged" : "";
+        return !jpeg && nalAssembler.salvaging() ? " · damaged" : "";
     }
 
     boolean isKeyFramesOnly() { return keyFramesOnly; }
@@ -446,7 +446,7 @@ class QuadCell implements RtspSession.Callback {
             udpStallSamples = 0;
             // Every key frame loses a piece: decode them damaged rather than not at all. A
             // pushed stream has no TCP to go to; over RTSP, Auto goes to TCP anyway (#133)
-            if (!nalAssembler.salvaging()) {
+            if (!jpeg && !nalAssembler.salvaging()) {
                 nalAssembler.setSalvage(true);
                 Log.w(TAG, tag + ": no complete key frame over UDP, decoding damaged ones");
             }
