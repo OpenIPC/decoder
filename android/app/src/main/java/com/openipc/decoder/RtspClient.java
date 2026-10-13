@@ -69,6 +69,10 @@ class RtspClient implements RtspSession.Callback {
     }
 
     boolean isActive() { return session.isActive(); }
+    /** RTP over UDP or multicast at the moment (#128). */
+    boolean playsOverUdp() { return session.playsOverUdp(); }
+    /** Packets arrive but nothing decodes: with Auto the session goes over to TCP. */
+    void reportUdpBroken(String why) { session.reportUdpBroken(why); }
     /** Transport the stream really uses now, or null (#115). */
     String transportInUse() { return session.transportInUse(); }
     long getStreamBytes() { return session.getStreamBytes(); }

@@ -32,6 +32,14 @@ class Transport {
             }
             return TCP;
         }
+
+        /**
+         * The transport of a slot from the settings: Auto when none is stored yet (a new
+         * install or slot, #112), an unknown value TCP as before.
+         */
+        static Mode stored(String s) {
+            return s == null ? AUTO : parse(s);
+        }
     }
 
     /**

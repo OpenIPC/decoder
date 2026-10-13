@@ -331,7 +331,16 @@ class RtspSession {
                 }
             }
 
-            int videoPort = rx != null && !mc ? rx.addTrack(CHANNEL_VIDEO) : -1;
+            int videoPort = -1;
+            if (rx != null && !mc) {
+                try {
+                    videoPort = rx.addTrack(CHANNEL_VIDEO);
+                } catch (IOException e) {
+                    // No local UDP ports: with Auto the next attempt goes over TCP (Qodo on #128)
+                    if (fallback) markUdpFailed(m);
+                    throw e;
+                }
+            }
             String transport = rx == null ? Transport.tcpRequest(CHANNEL_VIDEO)
                     : mc ? Transport.multicastRequest() : Transport.udpRequest(videoPort);
             r = exchange(c, "SETUP", sdp.videoUrl, "Transport: " + transport + "\r\n");
@@ -381,7 +390,12 @@ class RtspSession {
                         "Transport: " + transport + "\r\n" +
                         "Session: " + session + "\r\n");
                 Transport audioReply = Transport.parse(r.header("transport"));
-                if (!r.ok()) {
+                if (!r.ok() && auto && rx != null) {
+                    // Auto: rather TCP for both tracks than UDP video without sound (#128)
+                    markUdpFailed(m);
+                    throw new IOException("audio SETUP over UDP failed (" + r.code
+                            + "), using TCP");
+                } else if (!r.ok()) {
                     // Not fatal: play video without audio
                     Log.w(TAG, tag + ": audio SETUP failed (" + r.code + "), no audio");
                     audio = false;
@@ -394,6 +408,10 @@ class RtspSession {
                     }
                 } else if (rx != null && (audioReply.tcp
                         || !udpReplyUsable(audioReply, audioPort))) {
+                    if (auto) {
+                        markUdpFailed(m);
+                        throw new IOException("audio not over UDP like video, using TCP");
+                    }
                     // Video over UDP, audio elsewhere: the UDP loop cannot play it
                     Log.w(TAG, tag + ": audio not over UDP like video, no audio");
                     audio = false;

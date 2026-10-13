@@ -89,6 +89,10 @@ public class TransportTest {
         assertEquals(Transport.Mode.TCP, Transport.Mode.parse(null));
         assertEquals(Transport.Mode.TCP, Transport.Mode.parse("quic"));
         assertEquals(Transport.Mode.MULTICAST, Transport.Mode.parse("multicast"));
+        // A slot without a stored transport is Auto (#112); stored values stay as they are
+        assertEquals(Transport.Mode.AUTO, Transport.Mode.stored(null));
+        assertEquals(Transport.Mode.TCP, Transport.Mode.stored("TCP"));
+        assertEquals(Transport.Mode.UDP, Transport.Mode.stored("udp"));
     }
 
     @Test

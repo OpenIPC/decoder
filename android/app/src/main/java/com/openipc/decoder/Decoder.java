@@ -515,7 +515,8 @@ public class Decoder extends Activity
             String url = credentials.open(stored);
             mHosts[i] = url != null ? url : DEFAULT_URL;
             mUnreadable[i] = url == null && stored != null ? stored : null;
-            mTransports[i] = Transport.Mode.parse(pref.getString("transport_" + i, null));
+            // Auto for a slot that has never stored one (#112)
+            mTransports[i] = Transport.Mode.stored(pref.getString("transport_" + i, null));
             // Plain URLs from older versions are re-saved encrypted right away
             if (credentials.needsMigration(stored)) {
                 if (migrate == null) migrate = pref.edit();
@@ -1588,7 +1589,39 @@ public class Decoder extends Activity
         stopStreams();
     }
 
+    /**
+     * Single view over UDP (#128, like the multi-view cells in #125): packets arrive but no
+     * frame is decoded for UDP_STALL_SECONDS — a lossy UDP path keeps breaking the key
+     * frames. With Auto the session then goes over to TCP. Checked once a second.
+     */
+    private static final int UDP_STALL_SECONDS = 8;
+    private int singleStallSeconds;
+    private int lastSingleFrames;
+    private long lastSingleBytes;
+    private final Runnable singleUdpCheck = new Runnable() {
+        @Override
+        public void run() {
+            if (!mResumed) return;
+            RtspClient client = rtspClient;
+            int frames = videoDecoder.framesOut();
+            long bytes = client != null ? client.getStreamBytes() : 0;
+            boolean stalled = !quadEnabled && !udpViewShown && client != null
+                    && client.playsOverUdp() && "connected".equals(singleState)
+                    && bytes - lastSingleBytes > 10_000 && frames == lastSingleFrames;
+            lastSingleFrames = frames;
+            lastSingleBytes = bytes;
+            singleStallSeconds = stalled ? singleStallSeconds + 1 : 0;
+            if (singleStallSeconds >= UDP_STALL_SECONDS) {
+                singleStallSeconds = 0;
+                client.reportUdpBroken("packets but no decoded frame for " + UDP_STALL_SECONDS
+                        + " s");
+            }
+            mSurface.postDelayed(this, 1000);
+        }
+    };
+
     private void stopStreams() {
+        mSurface.removeCallbacks(singleUdpCheck);
         // The single view's stream ends here: it is no longer "connected" for the debug page
         singleState = "disconnected";
         if (quadCells != null) {
@@ -1654,6 +1687,9 @@ public class Decoder extends Activity
     private boolean mResumed;
 
     private void startStreams() {
+        singleStallSeconds = 0;
+        mSurface.removeCallbacks(singleUdpCheck);
+        mSurface.postDelayed(singleUdpCheck, 1000);
         loadSettings();
         videoDecoder.setEnabled(true);
         audioManager.setEnabled(true);
