@@ -150,7 +150,12 @@ public class SdpParserTest {
                 "a=rtpmap:98 VP8/90000\r\na=rtpmap:99 H265/90000\r\n", "rtsp://x");
         assertEquals(99, sdp.videoPt);
         assertTrue(sdp.videoH265);
-        assertEquals(-1, parse("m=video 0 RTP/AVP 26\r\na=rtpmap:26 JPEG/90000\r\n",
+        // MJPEG only when nothing better is offered (#119); VP8 is not supported
+        Sdp mjpeg = parse("m=video 0 RTP/AVP 26\r\na=rtpmap:26 JPEG/90000\r\n", "rtsp://x");
+        assertEquals(26, mjpeg.videoPt);
+        assertTrue(mjpeg.videoJpeg);
+        assertTrue(parse("m=video 0 RTP/AVP 26\r\n", "rtsp://x").videoJpeg);
+        assertEquals(-1, parse("m=video 0 RTP/AVP 98\r\na=rtpmap:98 VP8/90000\r\n",
                 "rtsp://x").videoPt);
     }
 
