@@ -33,7 +33,8 @@ final class JpegCodec {
      * 10 does not list video/jpeg (#132). Tried once when the list has none.
      */
     private static final String[][] BY_NAME = {{"OMX.allwinner.video.decoder.mjpeg", "video/jpeg"}};
-    private static volatile boolean byNameTried;
+    /** The BY_NAME decoder could not be created: no hardware JPEG decoder on this device. */
+    private static volatile boolean byNameFailed;
     /** The decoder that worked, once one did. */
     private static volatile String[] chosen;
 
@@ -51,7 +52,7 @@ final class JpegCodec {
         try {
             for (MediaCodecInfo ci : new MediaCodecList(MediaCodecList.ALL_CODECS)
                     .getCodecInfos()) {
-                if (ci.isEncoder()) continue;
+                if (ci.isEncoder() || softwareOnly(ci)) continue;
                 for (String type : ci.getSupportedTypes()) {
                     for (String m : MIMES) {
                         if (m.equalsIgnoreCase(type) && result.length == 0) {
@@ -86,6 +87,16 @@ final class JpegCodec {
     }
 
     /**
+     * A software codec does no better than BitmapFactory and its load is not the hardware's:
+     * the software path takes the stream instead (Qodo on #139).
+     */
+    private static boolean softwareOnly(MediaCodecInfo ci) {
+        if (android.os.Build.VERSION.SDK_INT >= 29) return ci.isSoftwareOnly();
+        String n = ci.getName().toLowerCase(java.util.Locale.ROOT);
+        return n.startsWith("omx.google.") || n.startsWith("c2.android.");
+    }
+
+    /**
      * Decodes one JPEG of {@code w}×{@code h} to {@code target}; (re)creates the decoder when
      * the size or surface changes. Returns true when a frame was rendered. Throws when the
      * decoder cannot be used: the caller then switches to the software path.
@@ -95,12 +106,17 @@ final class JpegCodec {
         if (chosen != null) return chosen;
         String[] dec = find();
         if (dec != null) return dec;
-        return byNameTried ? null : BY_NAME[0];
+        // Also while another stream is still trying it (Qodo on #139)
+        return byNameFailed ? null : BY_NAME[0];
     }
 
     /** Frames queued in a row without any output: the decoder is not working (Qodo on #135). */
     static final int MAX_SILENT_FRAMES = 15;
     private int silentFrames;
+    /** Frames the decoder had no input buffer for: decoder losses for the planner (#85). */
+    private volatile int inputDropped;
+
+    int inputDropped() { return inputDropped; }
 
     /** Checked under the lock: false once the stream that called decode() has stopped. */
     interface Current {
@@ -110,27 +126,40 @@ final class JpegCodec {
     synchronized boolean decode(Frame frame, Surface target, int w, int h, Current current)
             throws Exception {
         if (!current.holds()) return false;
-        String[] dec = chosen != null ? chosen : find();
-        if (dec == null) {
-            if (byNameTried) throw new IllegalStateException("no JPEG decoder");
-            byNameTried = true;
-            dec = BY_NAME[0];
-        }
         if (codec == null || target != surface || w != width || h != height) {
             releaseLocked();
-            MediaCodec c = MediaCodec.createByCodecName(dec[0]);
-            try {
-                MediaFormat format = MediaFormat.createVideoFormat(dec[1], w, h);
-                format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, Math.max(frame.length() * 2,
-                        512 * 1024));
-                c.configure(format, target, null, 0);
-                c.start();
-            } catch (Exception e) {
-                c.release();
-                throw e;
+            MediaCodec c;
+            String[] dec;
+            // One stream at a time chooses the decoder, so the cells that start together do
+            // not take a probe in progress for "no decoder" (Qodo on #139)
+            synchronized (JpegCodec.class) {
+                dec = chosen != null ? chosen : find();
+                boolean byName = dec == null;
+                if (byName) {
+                    if (byNameFailed) throw new IllegalStateException("no JPEG decoder");
+                    dec = BY_NAME[0];
+                }
+                try {
+                    c = MediaCodec.createByCodecName(dec[0]);
+                } catch (Exception e) {
+                    if (byName) byNameFailed = true;
+                    throw e;
+                }
+                try {
+                    MediaFormat format = MediaFormat.createVideoFormat(dec[1], w, h);
+                    format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE,
+                            Math.max(frame.length() * 2, 512 * 1024));
+                    c.configure(format, target, null, 0);
+                    c.start();
+                } catch (Exception e) {
+                    c.release();
+                    // Never worked on this device: the name is not a usable decoder
+                    if (byName && chosen == null) byNameFailed = true;
+                    throw e;
+                }
+                chosen = dec;
             }
             codec = c;
-            chosen = dec;
             silentFrames = 0;
             surface = target;
             width = w;
@@ -149,6 +178,8 @@ final class JpegCodec {
             b.clear();
             b.put(frame.data(), 0, frame.length());
             codec.queueInputBuffer(in, 0, frame.length(), System.nanoTime() / 1000, 0);
+        } else {
+            inputDropped++;
         }
         boolean rendered = false;
         int out;

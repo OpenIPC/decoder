@@ -403,10 +403,13 @@ class MenuManager {
         return text;
     }
 
-    /** On / active (D on, Q, U, the active slot): orange, unlike the blue focus (#114). */
-    private static final int ACTIVE_BORDER = 0xFFFF9800;
-    private static final int ACTIVE_FILL = 0xFF4A2C00;
-    private static final int FOCUS_BORDER = Color.BLUE;
+    /**
+     * One cue per state (#143): on / active (D on, Q, S, U, the active slot) is the fill, an
+     * orange button like a pressed key; the focus is the frame only, thick and light blue. A
+     * coloured border for both read as the same selector on a phone (#114).
+     */
+    private static final int ACTIVE_FILL = 0xFFB85C00;
+    private static final int FOCUS_BORDER = 0xFF40C4FF;
     private final Set<View> activeItems = new HashSet<>();
 
     private void highlightItem(TextView item) {
@@ -421,15 +424,14 @@ class MenuManager {
     }
 
     /**
-     * Active items have an orange fill and border, the focused item a thick blue border; an
-     * item that is both keeps the orange fill under the blue border, so neither state hides.
+     * Active items are filled orange, the focused item has a thick light blue frame; an item
+     * that is both keeps the orange fill inside the blue frame, so neither state hides.
      */
     private void paintItem(View item, boolean focused) {
         boolean active = activeItems.contains(item);
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(active ? ACTIVE_FILL : Color.BLACK);
-        if (focused) bg.setStroke(dp(2), FOCUS_BORDER);
-        else if (active) bg.setStroke(dp(2), ACTIVE_BORDER);
+        if (focused) bg.setStroke(dp(3), FOCUS_BORDER);
         else bg.setStroke(1, Color.GRAY);
         item.setBackground(bg);
     }
