@@ -227,7 +227,7 @@ export KEY_PASS=your_key_password
 
 ## 设备兼容性
 
-在您的设备上测试过本应用？请[**提交 Device report**](https://github.com/OpenIPC/decoder/issues/new?template=device_report.yml)，只需一分钟，可以帮助其他用户。
+在您的设备上测试过本应用？请[**提交 Device report**](https://github.com/OpenIPC/decoder/issues/new?template=device_report.yml)，只需一分钟，可以帮助其他用户。 测试过某款摄像机？请[**提交 Camera report**](https://github.com/OpenIPC/decoder/issues/new?template=camera_report.yml)：厂商、型号、RTSP 地址（去掉密码）、编码以及哪些功能正常。
 
 ### 已验证设备
 

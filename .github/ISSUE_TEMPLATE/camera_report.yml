@@ -1,0 +1,184 @@
+name: Camera report
+description: Report how OpenIPC Decoder plays a camera (IP camera, NVR channel, encoder, RTSP server)
+title: "[Camera]: "
+labels: ["camera-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing! Camera reports help other users and show which streams need work.
+        **Remove the password from the URL** (write `user:***`) and do not post public IP addresses.
+        The app version and build hash are shown in the menu next to **Exit**, for example `v1.28, 1dda076`.
+
+  - type: input
+    id: manufacturer
+    attributes:
+      label: Manufacturer
+      placeholder: "Hikvision, Dahua, XM (Xiongmai), OpenIPC board, ..."
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: Model as printed on the label or shown in the camera's web interface
+      placeholder: "DS-2CD1023G0-I, IPC-HFW1230S, SSC335 board, ..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: firmware_kind
+    attributes:
+      label: Firmware
+      options:
+        - OpenIPC (Majestic)
+        - OpenIPC (other streamer)
+        - Stock / vendor firmware
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: firmware_version
+    attributes:
+      label: Firmware version (optional)
+      description: "OpenIPC: `cat /etc/os-release` or the web interface; vendor firmware: version and date"
+      placeholder: "OpenIPC 2.6.10.12 lite / V5.5.0 build 180206"
+
+  - type: input
+    id: soc
+    attributes:
+      label: Processor / SoC (optional)
+      placeholder: "SigmaStar SSC335, HiSilicon Hi3516EV300, Goke GK7205V300, Ingenic T31, ..."
+
+  - type: input
+    id: sensor
+    attributes:
+      label: Image sensor (optional)
+      placeholder: "SC2336, IMX307, GC2053, ..."
+
+  - type: input
+    id: url
+    attributes:
+      label: RTSP URL
+      description: The URL that works in the app, with the password replaced by `***`. The path matters most (`/stream=0`, `/Streaming/Channels/101`, `/cam/realmonitor?channel=1&subtype=0`, ...)
+      placeholder: "rtsp://admin:***@192.168.1.10:554/stream=0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: other_urls
+    attributes:
+      label: Other streams (optional)
+      description: Substream, MJPEG or other paths of the same camera, one per line
+      placeholder: |
+        rtsp://admin:***@192.168.1.10:554/stream=1 — substream 704x576
+        rtsp://admin:***@192.168.1.10:554/stream=2 — MJPEG
+
+  - type: dropdown
+    id: video_codec
+    attributes:
+      label: Video codec
+      multiple: true
+      options:
+        - H.264
+        - H.265
+        - MJPEG
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: video_format
+    attributes:
+      label: Resolution, frame rate, bitrate (optional)
+      placeholder: "1920x1080, 25 fps, 4 Mbit/s, key frame every 1 s"
+
+  - type: dropdown
+    id: audio_codec
+    attributes:
+      label: Audio codec
+      options:
+        - No audio
+        - AAC
+        - Opus
+        - G.711 (PCMU / PCMA)
+        - L16 / PCM
+        - G.726
+        - Other / unknown
+
+  - type: checkboxes
+    id: transports
+    attributes:
+      label: Transports that work
+      description: Menu → slot URL dialog (single view) → TCP / UDP / Auto / Multicast; "UDP push" = the camera sends RTP to a `udp://` slot or the U cell
+      options:
+        - label: TCP
+        - label: UDP
+        - label: Auto
+        - label: Multicast
+        - label: UDP push (udp:// slot / U cell)
+
+  - type: dropdown
+    id: auth
+    attributes:
+      label: Authentication
+      options:
+        - None
+        - Basic
+        - Digest
+        - Credentials in the URL path (e.g. user=…_password=…)
+        - Unknown
+
+  - type: checkboxes
+    id: limits
+    attributes:
+      label: Camera limits
+      options:
+        - label: Accepts only one RTSP client at a time
+        - label: Needs a reconnect after the camera reboots (the app does not recover by itself)
+
+  - type: input
+    id: app_device
+    attributes:
+      label: App version and device
+      description: App version from the menu, and the device it ran on
+      placeholder: "v1.28, 1dda076 on AG-216 (Android 10)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: result
+    attributes:
+      label: Overall result
+      options:
+        - Works
+        - Works with issues
+        - Does not work
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: works
+    attributes:
+      label: What works
+      options:
+        - label: Picture in single view
+        - label: Picture in multi-view
+        - label: Audio
+        - label: WebUI
+        - label: Debug page shows the stream (http://<device>:8085/)
+
+  - type: textarea
+    id: comment
+    attributes:
+      label: Comment (optional)
+      description: Anything that did not work or looked wrong, settings you had to change on the camera, delay, picture artefacts, ...
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log (optional)
+      description: "With USB/network debugging enabled: `adb logcat -d -s OpenIPCDecoder`, or `http://<device>:8085/log`. Check that no password is in it."
+      render: text
