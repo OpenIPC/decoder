@@ -137,20 +137,30 @@ jobs:
           has_apk() {
             gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null | grep -qx "$APK"
           }
+          # Only the build of the tagged commit may add the missing APK (Qodo on #158)
+          repair_apk() {
+            TAGGED=$(gh api "repos/${{ github.repository }}/commits/$TAG" -q .sha)
+            if [ "$TAGGED" = "$(git rev-parse HEAD)" ]; then
+              gh release upload "$TAG" "$APK" --clobber
+            else
+              echo "::warning::$TAG has no $APK and points to ${TAGGED:0:7}, not this build"
+            fi
+          }
           if gh release view "$TAG" >/dev/null 2>&1; then
             if has_apk; then
               echo "Release $TAG exists: only latest was updated"
             else
-              echo "Release $TAG has no $APK: uploading it"
-              gh release upload "$TAG" "$APK" --clobber
+              repair_apk
             fi
             exit 0
           fi
           # The previous version by number, not by date: a manual build of an older commit may
           # publish after a newer one (Qodo on #158)
-          PREV=$(gh api --paginate "repos/${{ github.repository }}/releases?per_page=100" \
-            -q '.[].tag_name' | grep '^v2\.' | sed 's/^v//' | { cat; echo "$VER"; } | sort -V -u \
-            | grep -B1 -x "$VER" | grep -v -x "$VER" || true)
+          # A failed lookup fails the step rather than publishing first-release notes
+          TAGS=$(gh api --paginate "repos/${{ github.repository }}/releases?per_page=100" \
+            -q '.[].tag_name')
+          PREV=$(printf '%s\n' "$TAGS" | grep '^v2\.' | sed 's/^v//' | { cat; echo "$VER"; } \
+            | sort -V -u | grep -B1 -x "$VER" | grep -v -x "$VER" || true)
           if [ -n "$PREV" ]; then
             NOTES=(--generate-notes --notes-start-tag "v$PREV")
           else
@@ -161,7 +171,7 @@ jobs:
             # Another build of the same version created it meanwhile, or the upload failed:
             # the release must exist and carry the APK, else the step fails
             gh release view "$TAG" >/dev/null
-            has_apk || gh release upload "$TAG" "$APK" --clobber
+            has_apk || repair_apk
           fi
 
       - name: Telegram
