@@ -1454,9 +1454,8 @@ public class Decoder extends Activity
             single.put("codec", rtspClient != null && rtspClient.isJpeg() ? "MJPEG"
                     : codecH265 ? "H.265" : "H.264");
             single.put("audio", audioCodec);
-            // Frames shown since the app started (all single-view streams; the rate is the
-            // difference of two samples) and the playback mode of S (#153)
-            single.put("frames_out", videoDecoder.framesOut() + jpegFramesOut);
+            // Frames shown in the last second and the playback mode of S (#153)
+            single.put("out_fps", singleOutFps);
             single.put("decode", slides ? "key frames" : "full");
             m.put("single", single);
         }
@@ -1691,10 +1690,11 @@ public class Decoder extends Activity
      * One JPEG frame of an MJPEG stream into the single view, on the decode thread, drawn over
      * the whole surface; the view's fit transform keeps the aspect ratio, as for video.
      */
-    private void drawJpeg(Frame frame, int gen) {
+    private boolean drawJpeg(Frame frame, int gen) {
         Surface s = mVideoSurface;
         int[] size = jpegRenderer.render(frame, s, () -> gen == listenerGen && s == mVideoSurface);
         if (size != null) jpegShown(size[0], size[1]);
+        return size != null;
     }
 
     /** A JPEG frame is on screen (hardware or software path). */
@@ -1741,17 +1741,20 @@ public class Decoder extends Activity
                 try {
                     Frame buffer = nalQueue.poll(5, TimeUnit.MILLISECONDS);
                     if (buffer != null && rtspClient.isJpeg()) {
-                        // S: MJPEG has no key frames, one frame per second instead (#153)
+                        // S: MJPEG has no key frames, one frame per second instead (#153); the
+                        // second counts from a frame really shown (Qodo on #155)
                         long now = System.nanoTime() / 1_000_000;
-                        if (!slides || now - lastSlideJpegMs >= QuadCell.JPEG_REDUCED_MS) {
+                        if ((!slides || now - lastSlideJpegMs >= QuadCell.JPEG_REDUCED_MS)
+                                && drawJpeg(buffer, gen)) {
                             lastSlideJpegMs = now;
-                            drawJpeg(buffer, gen);
                         }
-                        framePool.recycle(buffer);
-                    } else if (buffer != null && skipForKeyFrames(buffer)) {
                         framePool.recycle(buffer);
                     } else if (buffer != null && surfacePending) {
                         // Waiting for a fresh surface after MJPEG; the next key frame follows
+                        framePool.recycle(buffer);
+                    } else if (buffer != null && skipForKeyFrames(buffer)) {
+                        // After surfacePending: a key frame dropped there must not end the wait
+                        // for one (Qodo on #155)
                         framePool.recycle(buffer);
                     } else if (buffer != null) {
                         if (videoDecoder.decodeFrame(buffer, codecH265, 0)) {
@@ -1818,6 +1821,7 @@ public class Decoder extends Activity
     private static final int UDP_STALL_SECONDS = 8;
     private int singleStallSeconds;
     private int lastSingleFrames;
+    private volatile int singleOutFps;
     private long lastSingleBytes;
     private final Runnable singleUdpCheck = new Runnable() {
         @Override
@@ -1831,6 +1835,8 @@ public class Decoder extends Activity
                     && (client.playsOverUdp() || client.listens())
                     && "connected".equals(singleState)
                     && bytes - lastSingleBytes > 10_000 && frames == lastSingleFrames;
+            // Frames shown in the last second, for /stats.json (#153)
+            singleOutFps = Math.max(0, frames - lastSingleFrames);
             lastSingleFrames = frames;
             lastSingleBytes = bytes;
             singleStallSeconds = stalled ? singleStallSeconds + 1 : 0;
