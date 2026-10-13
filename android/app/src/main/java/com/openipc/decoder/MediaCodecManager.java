@@ -17,6 +17,7 @@ import android.view.Surface;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 class MediaCodecManager {
     private static final String TAG = "OpenIPCDecoder";
@@ -62,6 +63,8 @@ class MediaCodecManager {
     private volatile long lastFrameMs;
     /** NAL units not fed because the decoder had no free input buffer: it is not keeping up. */
     private volatile int inputDropped;
+    /** closeDecoder() calls waiting for decoderLock: the input wait gives way to them. */
+    private final AtomicInteger closeWaiting = new AtomicInteger();
     private volatile int outWidth;
     private volatile int outHeight;
     /** MIME type whose instance slot this manager holds while it has a decoder (#83). */
@@ -195,6 +198,15 @@ class MediaCodecManager {
 
     /** Release the decoder on purpose (codec switch, camera switch): no back-off. */
     void closeDecoder() {
+        closeWaiting.incrementAndGet();
+        try {
+            closeDecoderLocked();
+        } finally {
+            closeWaiting.decrementAndGet();
+        }
+    }
+
+    private void closeDecoderLocked() {
         synchronized (decoderLock) {
             retry.onSuccess();
             MediaCodec codec = decoder;
@@ -328,7 +340,9 @@ class MediaCodecManager {
                     // Dropping a NAL unit corrupts the picture until the next key frame (#89)
                     int inputBufferId = codec.dequeueInputBuffer(INPUT_POLL_US);
                     long waitUntil = nowMs() + INPUT_WAIT_MS;
-                    while (inputBufferId < 0 && nowMs() < waitUntil) {
+                    // A close or a pause waiting for the lock ends the wait at once (UI thread)
+                    while (inputBufferId < 0 && nowMs() < waitUntil && enabled
+                            && closeWaiting.get() == 0) {
                         drainOutput(codec);
                         inputBufferId = codec.dequeueInputBuffer(INPUT_POLL_US);
                     }
