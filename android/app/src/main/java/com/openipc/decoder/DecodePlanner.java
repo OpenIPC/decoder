@@ -107,6 +107,8 @@ final class DecodePlanner {
     private long startMs = -1;
     /** Quiet time before a paused cell gets another try; doubles with every pause (#148). */
     private long resumeWaitMs = PROBE_QUIET_MS;
+    /** The last lossy sample; promotions do not move it, unlike quietSinceMs. */
+    private long lastLossMs = -1;
 
     /** No loss-based decision for this long after the first step (#148). */
     void setWarmup(long ms) { warmupMs = ms; }
@@ -179,9 +181,11 @@ final class DecodePlanner {
         while (!lossyTimes.isEmpty() && nowMs - lossyTimes.peekFirst() >= LOSS_WINDOW_MS) {
             lossyTimes.pollFirst();
         }
+        if (lastLossMs < 0) lastLossMs = nowMs;
         if (anyLossy) {
             lossyTimes.addLast(nowMs);
             quietSinceMs = nowMs;
+            lastLossMs = nowMs;
         } else if (nowMs - quietSinceMs >= PROBE_QUIET_MS && load > proven) {
             // A load that played without losses long enough is within this device's means
             proven = load;
@@ -231,10 +235,11 @@ final class DecodePlanner {
 
         // A paused cell gets another try on key frames after a quiet period, the highest
         // priority first: a pause is not for ever (#148)
-        if (nowMs - quietSinceMs >= resumeWaitMs) {
+        if (nowMs - lastLossMs >= resumeWaitMs) {
             for (Cell c : cells) {
                 if (c.paused) {
                     quietSinceMs = nowMs;
+                    lastLossMs = nowMs;
                     return change(nowMs, Action.RESUME, c.index);
                 }
             }
