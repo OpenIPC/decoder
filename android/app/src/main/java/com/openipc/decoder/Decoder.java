@@ -35,6 +35,7 @@ import android.view.Surface;
 import android.view.SurfaceView;
 import android.view.TextureView;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
@@ -103,11 +104,10 @@ public class Decoder extends Activity
     private final TextView[] quadAudioBadges = new TextView[CAM_COUNT];
     /** Small text in each cell's corner: stats while playing, otherwise the status (#80, #82). */
     private final TextView[] quadStats = new TextView[CAM_COUNT];
-    /** Samples (seconds) a cell may fall behind before the grid is relieved (#83). */
-    private static final int OVERLOAD_SAMPLES = 5;
-    /** After pausing a cell, time for the load to settle before the next decision. */
-    private static final long RELIEF_COOLDOWN_MS = 10_000;
-    private long lastReliefMs;
+    /** Debug text in every cell (menu D); without it only cells needing attention show text. */
+    private boolean showStats;
+    /** With the debug text on: where the debug page is (#96). */
+    private TextView debugUrls;
     private volatile int quadAudioGen;
     private ExecutorService quadAudioExecutor;
 
@@ -205,6 +205,7 @@ public class Decoder extends Activity
         mSurface = findViewById(R.id.video_surface);
         mSurface.setKeepScreenOn(true);
         statusText = findViewById(R.id.status_text);
+        debugUrls = findViewById(R.id.debug_urls);
 
         mSurface.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
             @Override public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture st, int w, int h) {
@@ -326,6 +327,44 @@ public class Decoder extends Activity
     }
 
     @Override
+    public void onToggleStats() {
+        showStats = !showStats;
+        getSharedPreferences("settings", MODE_PRIVATE).edit()
+                .putBoolean("show_stats", showStats).apply();
+        menuManager.setStatsShown(showStats);
+        updateDebugUrls();
+        // Apply at once instead of at the next second
+        QuadCell[] cells = quadCells;
+        for (int i = 0; i < quadStats.length; i++) {
+            QuadCell c = cells != null ? cells[i] : null;
+            if (quadStats[i] == null || c == null) continue;
+            quadStats[i].setVisibility(showStats || c.needsAttention() ? View.VISIBLE : View.GONE);
+        }
+        Toast.makeText(this, showStats ? "Debug text on" : "Debug text off",
+                Toast.LENGTH_SHORT).show();
+    }
+
+    /** One line http://<address>:8085/ per device address while the debug text is on. */
+    private void updateDebugUrls() {
+        if (debugUrls == null) return;
+        if (!showStats) {
+            debugUrls.setVisibility(View.GONE);
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String ip : NetInfo.addresses()) {
+            if (sb.length() > 0) sb.append('\n');
+            sb.append("http://").append(ip).append(':').append(DebugServer.PORT).append('/');
+        }
+        if (sb.length() == 0) sb.append("Debug page: no network");
+        if (!sb.toString().contentEquals(debugUrls.getText())) debugUrls.setText(sb);
+        debugUrls.setVisibility(View.VISIBLE);
+        // Above the grid and its overlays, which are added later
+        ViewGroup parent = (ViewGroup) debugUrls.getParent();
+        if (parent.getChildAt(parent.getChildCount() - 1) != debugUrls) debugUrls.bringToFront();
+    }
+
+    @Override
     public void onShowUdp() {
         if (udpViewShown) return;
         if (quadEnabled) {
@@ -408,6 +447,8 @@ public class Decoder extends Activity
         // Restore the last camera and mode (#22); both are saved but were never read back
         mActive = clampSlot(pref.getInt("active", 0));
         quadEnabled = pref.getBoolean("quad_enabled", false);
+        showStats = pref.getBoolean("show_stats", false);
+        if (menuManager != null) menuManager.setStatsShown(showStats);
         SharedPreferences.Editor migrate = null;
         for (int i = 0; i < CAM_COUNT; i++) {
             String stored = pref.getString("host_" + i, null);
@@ -880,53 +921,113 @@ public class Decoder extends Activity
                 if (c == null || v == null) continue;
                 String line = c.sample(now);
                 v.setText(line);
-                v.setVisibility(View.VISIBLE);
+                // Without the debug text (D) only what needs attention is shown
+                v.setVisibility(showStats || c.needsAttention() ? View.VISIBLE : View.GONE);
                 if (log) Log.i(TAG, "Quad-" + i + ": " + line);
             }
-            relieveDecoder(cells, now);
+            planDecoding(cells, now);
+            updateDebugUrls();
             quadContainer.postDelayed(this, 1000);
         }
     };
 
     private void startStatsTick() {
         quadContainer.removeCallbacks(quadStatsTick);
+        decodePlanner = newPlanner();
         quadContainer.postDelayed(quadStatsTick, 1000);
     }
 
     /**
-     * Load is judged by measurement, not by the declared budget: a cell falls behind when the
-     * decoder makes it lose frames (its queue overflows, or the decoder has no free input
-     * buffer). Frames lost on the network do not count: they lower decoded/received in the
-     * corner text but say nothing about the decoder. When a cell keeps falling behind, the
-     * highest-numbered playing cell is paused, then the load is given time to settle (#83).
+     * Learnt decoder capacity of this device in macroblocks/s, or 0 (#85). "_v2": values
+     * learnt before #89 counted NAL units dropped after a 5 ms wait as overload; not reused.
      */
-    private void relieveDecoder(QuadCell[] cells, long now) {
-        boolean overloaded = false;
-        int active = 0;
-        int last = -1;
+    private static final String PREF_DECODER_CAPACITY = "decoder_capacity_v2";
+    /** Smallest load that made the decoder lose frames, or 0: not retried after a restart. */
+    private static final String PREF_DECODER_FAILED = "decoder_failed_load_v2";
+    /** 1080p at 60 fps: the usual declared budget, until the decoder declares its own. */
+    private static final long DEFAULT_CAPACITY = DecodePlanner.fullLoad(1920, 1080, 60);
+    private DecodePlanner decodePlanner;
+
+    private DecodePlanner newPlanner() {
+        SharedPreferences pref = getSharedPreferences("settings", MODE_PRIVATE);
+        if (pref.contains("decoder_capacity")) {
+            pref.edit().remove("decoder_capacity").remove("decoder_failed_load").apply();
+        }
+        long learnt = pref.getLong(PREF_DECODER_CAPACITY, 0);
+        long failed = pref.getLong(PREF_DECODER_FAILED, 0);
+        if (learnt > 0) return new DecodePlanner(learnt, true, failed);
+        long declared = MediaCodecManager.declaredBlocksPerSec;
+        return new DecodePlanner(declared > 0 ? declared : DEFAULT_CAPACITY, false, failed);
+    }
+
+    /**
+     * Every camera stays on screen: cells decode every frame while the decoder keeps up and
+     * only key frames otherwise. Decoder losses (queue overflow, no free input buffer) are the
+     * signal; frames lost on the network do not count. The capacity learnt this way is kept
+     * for this device (#83, #85).
+     */
+    private void planDecoding(QuadCell[] cells, long now) {
+        DecodePlanner planner = decodePlanner;
+        if (planner == null) return;
+        planner.offerDeclared(MediaCodecManager.declaredBlocksPerSec);
+        long before = planner.capacity();
+        long failedBefore = planner.failedLoad();
+        boolean learntBefore = planner.isLearnt();
+
+        java.util.List<DecodePlanner.Cell> order = new java.util.ArrayList<>();
+        // Priority: the cell whose sound plays, then slot order
+        if (quadAudio >= 0 && quadAudio < cells.length && cells[quadAudio] != null) {
+            order.add(plannerCell(quadAudio, cells[quadAudio], now));
+        }
         for (int i = 0; i < cells.length; i++) {
-            QuadCell c = cells[i];
-            if (c == null || c.isPaused()) continue;
-            active++;
-            last = i;
-            if (c.isSettled(now) && c.inFps() >= 5) {
-                boolean behind = c.lostFps() >= Math.max(2f, 0.1f * c.inFps());
-                c.behindSamples = behind ? c.behindSamples + 1 : 0;
-                if (c.behindSamples >= OVERLOAD_SAMPLES) overloaded = true;
-            } else {
-                c.behindSamples = 0;
+            if (cells[i] != null && i != quadAudio) order.add(plannerCell(i, cells[i], now));
+        }
+        DecodePlanner.Decision d = planner.step(order, now);
+        if (d.action != DecodePlanner.Action.NONE) {
+            QuadCell c = cells[d.index];
+            switch (d.action) {
+                case PROMOTE:
+                    c.setKeyFramesOnly(false);
+                    Log.i(TAG, "Quad-" + d.index + ": full rate");
+                    break;
+                case DEMOTE:
+                    c.setKeyFramesOnly(true);
+                    Log.w(TAG, "Decoder losses: Quad-" + d.index + " to key frames, capacity "
+                            + planner.capacity() + " blocks/s");
+                    break;
+                case PAUSE:
+                    String reason = "Paused: decoder overloaded";
+                    Log.w(TAG, "Decoder losses even on key frames: pausing Quad-" + d.index);
+                    c.pause(reason);
+                    showQuadOverlay(d.index);
+                    if (quadStats[d.index] != null) quadStats[d.index].setText(reason);
+                    break;
+                default:
+                    break;
             }
         }
-        if (!overloaded || active < 2 || now - lastReliefMs < RELIEF_COOLDOWN_MS) return;
-        lastReliefMs = now;
-        String reason = "Paused: decoder overloaded";
-        Log.w(TAG, "Decoder overloaded with " + active + " streams: pausing Quad-" + last);
-        cells[last].pause(reason);
-        showQuadOverlay(last);
-        if (quadStats[last] != null) quadStats[last].setText(reason);
-        for (QuadCell c : cells) {
-            if (c != null) c.behindSamples = 0;
+        boolean capacityChanged = planner.isLearnt()
+                && (!learntBefore || planner.capacity() != before);
+        if (capacityChanged || planner.failedLoad() != failedBefore) {
+            SharedPreferences.Editor e = getSharedPreferences("settings", MODE_PRIVATE).edit();
+            if (planner.isLearnt()) e.putLong(PREF_DECODER_CAPACITY, planner.capacity());
+            e.putLong(PREF_DECODER_FAILED, planner.failedLoad()).apply();
+            Log.i(TAG, "Decoder capacity of this device: " + planner.capacity()
+                    + " blocks/s, failed at " + planner.failedLoad());
         }
+    }
+
+    private static DecodePlanner.Cell plannerCell(int index, QuadCell c, long now) {
+        // At full rate a few lost frames per second are noise; on key frames, a cell decodes
+        // one frame per GOP, so every decoder loss counts, whatever the frame rate
+        boolean lossy = c.isSettled(now) && (c.isKeyFramesOnly() ? c.lostFps() > 0
+                : c.inFps() >= 5 && c.lostFps() >= Math.max(2f, 0.1f * c.inFps()));
+        DecodePlanner.Cell pc = new DecodePlanner.Cell(index, !c.isKeyFramesOnly(),
+                c.knowsLoad(), c.knowsLoad() ? c.fullLoad() : 0, lossy);
+        pc.paused = c.isPaused();
+        pc.playing = c.isPlaying();
+        if (c.knowsLoad()) pc.keyLoad = c.keyLoad();
+        return pc;
     }
 
     private void removeQuadOverlay(int index) {
@@ -1103,7 +1204,15 @@ public class Decoder extends Activity
         m.put("mode", !mResumed ? "paused" : udpViewShown ? "udp"
                 : quadEnabled ? "multi-view" : "single");
         m.put("active_slot", mActive + 1);
-        if (quadEnabled) m.put("overload_after_s", OVERLOAD_SAMPLES);
+        DecodePlanner planner = decodePlanner;
+        if (quadEnabled && planner != null) {
+            // Decoder capacity in macroblocks/s: declared, or learnt on this device (#85)
+            Map<String, Object> dec = new LinkedHashMap<>();
+            dec.put("capacity", planner.capacity());
+            dec.put("learnt", planner.isLearnt());
+            dec.put("failed_load", planner.failedLoad());
+            m.put("decoder", dec);
+        }
         if (udpViewShown) {
             Map<String, Object> udp = new LinkedHashMap<>();
             udp.put("port", UDP_RTP_PORT);
@@ -1142,9 +1251,10 @@ public class Decoder extends Activity
                     c.put("out_fps", cell.outFps());
                     c.put("in_fps", cell.inFps());
                     c.put("lost_fps", cell.lostFps());
-                    // Seconds in a row the decoder made this cell lose frames; at
-                    // OVERLOAD_SAMPLES the grid is relieved (#83)
-                    c.put("behind_s", cell.behindSamples);
+                    // Every frame, or key frames only while the decoder has no room (#85)
+                    c.put("decode", cell.isKeyFramesOnly() ? "key frames" : "full");
+                    if (cell.knowsLoad()) c.put("load", cell.isKeyFramesOnly()
+                            ? cell.keyLoad() : cell.fullLoad());
                     c.put("paused", cell.isPaused());
                     c.put("audio", i == quadAudio);
                 }
@@ -1442,6 +1552,7 @@ public class Decoder extends Activity
         super.onResume();
         mResumed = true;
         startStreams();
+        updateDebugUrls();
     }
 
     private boolean mResumed;

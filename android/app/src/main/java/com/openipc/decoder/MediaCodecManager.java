@@ -102,7 +102,8 @@ class MediaCodecManager {
         static synchronized boolean tryAcquire(String mime) {
             int u = used.containsKey(mime) ? used.get(mime) : 0;
             Integer max = limit.get(mime);
-            if (max != null && u >= max) return false;
+            // Until the first decoder of a type has told its limit, start one at a time
+            if (max == null ? u > 0 : u >= max) return false;
             used.put(mime, u + 1);
             return true;
         }
@@ -128,28 +129,52 @@ class MediaCodecManager {
         }
     }
 
-    /** Give the instance slot back; called wherever the decoder is detached (decoderLock held). */
-    private void releaseSlot() {
-        if (heldMime != null) {
-            InstanceBudget.release(heldMime);
-            heldMime = null;
-        }
+    /**
+     * The decoder's declared throughput in 16x16 macroblocks per second, from the first decoder
+     * created (0 while unknown). The starting capacity for multi-view planning (#85).
+     */
+    static volatile long declaredBlocksPerSec;
+
+    /**
+     * Detach the instance slot from this manager (decoderLock held). The caller gives it back
+     * with {@link InstanceBudget#release} only after the codec itself is released, so another
+     * cell cannot start a decoder while the device still holds the maximum.
+     */
+    private String takeSlot() {
+        String m = heldMime;
+        heldMime = null;
+        return m;
+    }
+
+    private static void releaseSlot(String mime) {
+        if (mime != null) InstanceBudget.release(mime);
     }
 
     /** Learn the codec's instance limit and log its declared throughput, once per type. */
     private static void learnLimits(MediaCodec codec, String mime) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
         if (InstanceBudget.limit(mime) >= 0) return;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            InstanceBudget.learn(mime, Integer.MAX_VALUE); // not declared before Android 6
+            return;
+        }
         try {
             MediaCodecInfo.CodecCapabilities caps = codec.getCodecInfo().getCapabilitiesForType(mime);
             int max = caps.getMaxSupportedInstances();
             InstanceBudget.learn(mime, max);
             MediaCodecInfo.VideoCapabilities video = caps.getVideoCapabilities();
-            String fps1080 = video != null && video.isSizeSupported(1920, 1080)
-                    ? String.valueOf(video.getSupportedFrameRatesFor(1920, 1080).getUpper()) : "?";
+            String fps1080 = "?";
+            if (video != null && video.isSizeSupported(1920, 1080)) {
+                double fps = video.getSupportedFrameRatesFor(1920, 1080).getUpper();
+                fps1080 = String.valueOf(fps);
+                long blocks = DecodePlanner.fullLoad(1920, 1080, (float) fps);
+                if (declaredBlocksPerSec == 0 || blocks < declaredBlocksPerSec) {
+                    declaredBlocksPerSec = blocks;
+                }
+            }
             Log.i(TAG, "Decoder " + codec.getName() + " (" + mime + "): up to " + max
                     + " instances, declared 1080p frame rate in total " + fps1080);
         } catch (Exception e) {
+            InstanceBudget.learn(mime, Integer.MAX_VALUE);
             Log.w(TAG, "Decoder limits unknown: " + e.getMessage());
         }
     }
@@ -177,13 +202,15 @@ class MediaCodecManager {
         final MediaCodec target = decoder;
         if (target == null) return;
         new Thread(() -> {
+            String slot;
             synchronized (decoderLock) {
                 if (decoder != target) return; // already replaced or released
                 decoder = null;
-                releaseSlot();
+                slot = takeSlot();
                 retry.onSuccess();
             }
             releaseNow(target);
+            releaseSlot(slot);
         }, "decoder-release").start();
     }
 
@@ -214,7 +241,7 @@ class MediaCodecManager {
             lastFrameMs = 0;
             if (codec == null) return;
             decoder = null;
-            releaseSlot();
+            String slot = takeSlot();
             Log.i(TAG, "Close video decoder");
             try {
                 codec.stop();
@@ -222,6 +249,7 @@ class MediaCodecManager {
             } catch (Exception e) {
                 Log.e(TAG, "Decoder close exception", e);
             }
+            releaseSlot(slot);
         }
     }
 
@@ -253,6 +281,8 @@ class MediaCodecManager {
             synchronized (decoderLock) {
                 retry.onFailure(nowMs());
             }
+            // Limit still unknown: another cell is creating the first decoder, just retry
+            if (limit < 0) return;
             Log.w(TAG, "Decoder limit reached: " + limit + " × " + type);
             if (listener != null) listener.onDecoderLimit(type, limit);
             return;
@@ -279,6 +309,7 @@ class MediaCodecManager {
                 retry.onFailure(nowMs());
             }
             Log.e(TAG, "Cannot setup decoder (attempt " + retry.failures() + "): " + e.getMessage());
+            if (listener != null) listener.onDecoderFailed();
             return;
         }
 
@@ -361,12 +392,13 @@ class MediaCodecManager {
                     drainOutput(codec);
                 } catch (Exception e) {
                     decoder = null;
-                    releaseSlot();
+                    String slot = takeSlot();
                     retry.onFailure(nowMs());
                     Log.e(TAG, "Codec exception, retry in "
                             + DecoderRetry.delayMs(retry.failures()) + " ms: " + e.getMessage());
                     try { codec.stop(); } catch (Exception ignored) {}
                     try { codec.release(); } catch (Exception ignored) {}
+                    releaseSlot(slot);
                     if (listener != null) listener.onDecoderFailed();
                 }
             }

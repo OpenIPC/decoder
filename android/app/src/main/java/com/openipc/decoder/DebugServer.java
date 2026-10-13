@@ -489,8 +489,7 @@ final class DebugServer {
             + "if(r&&+r[1]<0.9*r[2])t=t.replace(r[0],'<span class=\"warn\">'+r[0]+'</span>');\n"
             + "if(c.lost_fps>0)t+=' \u00b7 <span class=\"bad\">lost '+num(c.lost_fps)"
             + "+'/s</span>';\n"
-            + "if(c.behind_s>0)t+=' \u00b7 <span class=\"bad\">behind '+c.behind_s"
-            + "+' s</span>';return t}\n"
+            + "return t}\n"
             // One cell: slot, camera and transport on top; size, fps and losses below
             + "function cell(c){var top='<span class=\"slot\">'+esc(c.slot)+'</span><span"
             + " class=\"dim\">'+where(c)+'</span>';\n"
