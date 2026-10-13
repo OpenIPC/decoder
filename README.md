@@ -102,6 +102,8 @@ Each slot has its own transport, chosen under the URL in **Settings** (or with t
 | **Auto**          | UDP, or TCP when UDP does not work                       | Falls back to TCP when the camera refuses UDP or no video arrives within 3 s, then stays on TCP until the slot is changed                                |
 | **Multicast**     | RTSP multicast (Android 8.0+), or TCP when it is refused | For servers that offer RTSP multicast. OpenIPC Majestic and XM cameras do not: they reply 400 or 451, and the slot plays over TCP in the same connection |
 
+The transport actually in use is shown when a stream starts in single view (`Connected • UDP • H.265 …`), on the debug page and in `/stats.json` (`transport`; the slot's setting is `transport_mode`). After a fallback it reads, for example, `TCP (auto)`.
+
 ### UDP slots (Majestic outgoing)
 
 A slot can also receive RTP that the camera pushes by itself, without RTSP. Put a `udp://` URL into the slot instead of `rtsp://`:

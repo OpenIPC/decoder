@@ -111,4 +111,16 @@ public class TransportTest {
         assertFalse(RtspSession.udpReplyUsable(Transport.parse(
                 "RTP/AVP;multicast;destination=239.1.2.3;port=5000-5001"), 50000));
     }
+
+    @Test
+    public void labelShowsTheTransportInUse() {
+        // Nothing plays yet: the slot's mode
+        assertEquals("AUTO", Transport.label(null, Transport.Mode.AUTO));
+        assertEquals("UDP", Transport.label("UDP", Transport.Mode.AUTO));
+        assertEquals("TCP (auto)", Transport.label("TCP", Transport.Mode.AUTO));
+        assertEquals("TCP (multicast)", Transport.label("TCP", Transport.Mode.MULTICAST));
+        assertEquals("multicast", Transport.label("multicast", Transport.Mode.MULTICAST));
+        assertEquals("TCP", Transport.label("TCP", Transport.Mode.TCP));
+        assertEquals("UDP push", Transport.label("UDP push", Transport.Mode.UDP));
+    }
 }

@@ -102,6 +102,8 @@ adb shell am start -a android.intent.action.SEND -t text/plain \
 | **Auto**               | UDP, а если UDP не работает — TCP               | Переходит на TCP, если камера отказала в UDP или видео не пришло за 3 с, и остаётся на TCP, пока слот не изменят                                |
 | **Multicast**          | RTSP multicast (Android 8.0+), при отказе — TCP | Для серверов с RTSP multicast. OpenIPC Majestic и камеры XM его не поддерживают: отвечают 400 или 451, и слот играет по TCP в том же соединении |
 
+Фактический транспорт показывается при запуске потока в одиночном режиме (`Connected • UDP • H.265 …`), на отладочной странице и в `/stats.json` (`transport`; настройка слота — `transport_mode`). После отката там будет, например, `TCP (auto)`.
+
 ### Слоты UDP (Majestic outgoing)
 
 Слот может принимать и RTP, который камера отправляет сама, без RTSP. Для этого вместо `rtsp://` укажите адрес `udp://`:

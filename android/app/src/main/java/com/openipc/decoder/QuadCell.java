@@ -333,6 +333,9 @@ class QuadCell implements RtspSession.Callback {
         return h265 ? type >= 16 && type <= 21 : type == 5;
     }
 
+    /** Transport in use, with the mode after a fallback (#112). */
+    String transportLabel() { return Transport.label(session.transportInUse(), transport); }
+
     float inFps() { return inFps; }
     float outFps() { return outFps; }
     float lostFps() { return lostFps; }

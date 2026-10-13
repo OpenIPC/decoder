@@ -149,9 +149,19 @@ class RtspSession {
         }
     }
 
+    /**
+     * Transport of the stream that plays now, as negotiated (#112, #115): "TCP", "UDP",
+     * "multicast" for RTSP; "UDP push" / "multicast push" for udp:// URLs; null when not
+     * playing. Unlike the mode of the slot, it shows a fallback (Auto → TCP).
+     */
+    private volatile String inUse;
+
+    String transportInUse() { return inUse; }
+
     /** Stop without waiting: threads exit on their own and deliver no more callbacks. */
     void stop() {
         synchronized (lock) {
+            inUse = null;
             generation++;
             active = false;
             keepalive = null;
@@ -407,8 +417,9 @@ class RtspSession {
                 active = true;
                 keepalive = new Keepalive(c, u.requestUrl, session, keepaliveMs);
                 udpPlaying = rx != null;
+                inUse = rx == null ? "TCP" : mc ? "multicast" : "UDP";
             }
-            Log.i(TAG, tag + ": playing over " + (rx == null ? "TCP" : mc ? "multicast" : "UDP"));
+            Log.i(TAG, tag + ": playing over " + inUse);
             status(gen, "buffering");
             s.setSoTimeout(0); // the watchdog handles silence
             if (rx != null) {
@@ -419,7 +430,10 @@ class RtspSession {
             return true;
         } finally {
             synchronized (lock) {
-                if (socket == s) socket = null;
+                if (socket == s) {
+                    socket = null;
+                    inUse = null;
+                }
                 // A newer connection may own these by now
                 if (udp == rx) {
                     udp = null;
@@ -458,6 +472,7 @@ class RtspSession {
             }
             listener = l;
             listening = true;
+            inUse = u.multicast() ? "multicast push" : "UDP push";
             // No RTSP here: nothing of an older connection may be sent by the watchdog
             keepalive = null;
             lastPacketMs = System.nanoTime() / 1_000_000;
@@ -512,6 +527,7 @@ class RtspSession {
                 if (listener == l) {
                     listener = null;
                     listening = false;
+                    inUse = null;
                 }
             }
             l.close();

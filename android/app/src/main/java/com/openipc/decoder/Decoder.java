@@ -575,7 +575,11 @@ public class Decoder extends Activity
                     / (elapsedNs / 1_000_000_000.0);
             bps = String.format(Locale.US, " • %.1f Mbps", mbps);
         }
-        statusText.setText("Connected • " + videoCodec + aCodec + bps);
+        // The transport the stream really uses, not the slot's setting (#115)
+        String inUse = rtspClient != null ? rtspClient.transportInUse() : null;
+        String transport = inUse != null
+                ? Transport.label(inUse, mTransports[mActive]) + " • " : "";
+        statusText.setText("Connected • " + transport + videoCodec + aCodec + bps);
     }
 
     private void updateStatus(String status) {
@@ -1249,7 +1253,11 @@ public class Decoder extends Activity
         } else if (!quadEnabled) {
             Map<String, Object> single = new LinkedHashMap<>();
             single.put("url", DebugServer.redact(mHost));
-            single.put("transport", mTransports[mActive] != null ? mTransports[mActive].name() : null);
+            // In use (with the mode after a fallback) and the slot's setting (#112)
+            single.put("transport", Transport.label(
+                    rtspClient != null ? rtspClient.transportInUse() : null, mTransports[mActive]));
+            single.put("transport_mode", mTransports[mActive] != null
+                    ? mTransports[mActive].name() : null);
             single.put("video", mResumed && "connected".equals(singleState)
                     && videoDecoder.renderedWithin(SNAPSHOT_LIVE_MS));
             single.put("status", statusText != null && statusText.getVisibility() == View.VISIBLE
@@ -1276,7 +1284,9 @@ public class Decoder extends Activity
                     TextView v = quadStats[i];
                     c.put("text", v != null ? v.getText().toString() : null);
                     c.put("url", u ? UDP_CELL_URL : DebugServer.redact(mHosts[i]));
-                    c.put("transport", u ? "UDP" : mTransports[i] != null
+                    // In use (with the mode after a fallback) and the slot's setting (#112)
+                    c.put("transport", cell.transportLabel());
+                    c.put("transport_mode", u ? "UDP" : mTransports[i] != null
                             ? mTransports[i].name() : null);
                     c.put("out_fps", cell.outFps());
                     c.put("in_fps", cell.inFps());
