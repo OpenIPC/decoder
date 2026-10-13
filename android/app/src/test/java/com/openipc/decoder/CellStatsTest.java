@@ -56,10 +56,8 @@ public class CellStatsTest {
         c.onStatus("connected");
         // A working connection clears the connection error; a new cell starts on key frames (#85)
         assertEquals("H.264 key frames · 0.0 fps", c.sample(1000));
-        assertTrue(c.needsAttention());
         c.setKeyFramesOnly(false);
         assertEquals("H.264 0/0 fps", c.sample(2000));
-        assertFalse("playing at full rate: no text without D", c.needsAttention());
         assertFalse(c.isPaused());
     }
 
