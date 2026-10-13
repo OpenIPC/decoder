@@ -159,6 +159,8 @@ final class DecodePlanner {
                 if (c.full && !c.paused && c.playing && c.known) {
                     // Losses at this load: the capacity is below it, but not below a proven load
                     failedLoad = Math.min(failedLoad, load);
+                    // A "proven" load at or above a failing one was not proven after all
+                    if (proven >= load) proven = Math.round(load * FAILED_MARGIN);
                     probeWaitMs = Math.min(probeWaitMs * 2, PROBE_MAX_WAIT_MS);
                     // Never raised by a failure; not below a proven load
                     capacity = Math.max(proven, Math.min(capacity, Math.round(load * 0.9)));
@@ -201,7 +203,9 @@ final class DecodePlanner {
             // Beyond the capacity only after a quiet period
             boolean probe = nowMs - quietSinceMs >= probeWaitMs;
             if (fits || probe) {
-                if (!fits) quietSinceMs = nowMs; // a probe starts a new quiet period
+                // Every promotion starts a new quiet period: a load counts as proven only
+                // after it has itself played for PROBE_QUIET_MS without losses
+                quietSinceMs = nowMs;
                 return change(nowMs, Action.PROMOTE, c.index);
             }
             return Decision.NONE;

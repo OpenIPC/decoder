@@ -271,4 +271,27 @@ public class DecodePlannerTest {
         assertEquals(DecodePlanner.Action.PAUSE, d.action);
         assertEquals(1, d.index);
     }
+
+    @Test
+    public void aLoadJustReachedIsNotProvenAndTheCellIsNotPromotedAgain() {
+        // Qodo on #86: a fitting promotion after a long quiet period, then losses at that load
+        DecodePlanner p = new DecodePlanner(2 * P1080_30, false);
+        List<DecodePlanner.Cell> cells = keyCells(2, P1080_30);
+        long t = 0;
+        apply(cells, p.step(cells, t));
+        for (t = 1000; t <= DecodePlanner.PROBE_QUIET_MS + 1000; t += 1000) apply(cells, p.step(cells, t));
+        assertEquals(2, full(cells));
+        // The second camera makes the decoder lose frames
+        cells.get(0).lossy = true;
+        DecodePlanner.Decision d = DecodePlanner.Decision.NONE;
+        for (; d.action != DecodePlanner.Action.DEMOTE; t += 1000) {
+            d = p.step(cells, t);
+            apply(cells, d);
+        }
+        cells.get(0).lossy = false;
+        assertTrue("capacity below the failing load", p.capacity() < 2 * P1080_30);
+        for (long end = t + 3 * DecodePlanner.PROBE_QUIET_MS; t < end; t += 1000) {
+            assertEquals(DecodePlanner.Action.NONE, p.step(cells, t).action);
+        }
+    }
 }
