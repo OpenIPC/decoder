@@ -626,6 +626,28 @@ class MenuManager {
         }
         LinearLayout layout = new LinearLayout(activity);
         layout.setOrientation(LinearLayout.VERTICAL);
+        // Android 15 draws apps edge to edge: the window starts under the status bar, which
+        // covered Close (#169). Keep the content inside the system bars and the cutout; the
+        // keyboard is still handled by adjustResize
+        layout.setOnApplyWindowInsetsListener((v, insets) -> {
+            int l, t, r, b;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                android.graphics.Insets bars = insets.getInsets(
+                        android.view.WindowInsets.Type.systemBars()
+                                | android.view.WindowInsets.Type.displayCutout());
+                l = bars.left;
+                t = bars.top;
+                r = bars.right;
+                b = bars.bottom;
+            } else {
+                l = insets.getSystemWindowInsetLeft();
+                t = insets.getSystemWindowInsetTop();
+                r = insets.getSystemWindowInsetRight();
+                b = insets.getSystemWindowInsetBottom();
+            }
+            v.setPadding(l, t, r, b);
+            return insets;
+        });
         // Close for a remote or a touchscreen
         TextView closeBtn = createItem("Close");
         closeBtn.setOnClickListener(v -> dialog.cancel());
