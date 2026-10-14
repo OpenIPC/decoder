@@ -81,6 +81,21 @@ Set without root: `settings put …` for the keys; the locale via Settings → L
 
 Not available in the lab yet: a phone or tablet (rotation, #31), a Wi‑Fi Android device (multicast lock), Android 5.
 
+### TECNO KM4 phone (touch)
+
+Added 2026-10-14: the only device in the lab with a touch screen and an on-screen keyboard. Use it for WebUI and text input (#159, #160) and for anything touch-only.
+
+| | |
+|---|---|
+| Address | `172.17.32.170` (Wi‑Fi); ADB only over **Wireless debugging** (see [adb](#adb)), no port 5555 |
+| Model | TECNO KM4, `TECNO/KM4-RU/TECNO-KM4:15/AP3A.240905.015.A2/180010:user/release-keys` |
+| SoC | Unisoc **UMS9230E** (T606 class), `arm64-v8a`, kernel 5.15 |
+| Android | 15 (API 35); the app runs edge to edge here (target SDK 36), so system bars overlap windows that do not handle insets |
+| RAM | 3 GB |
+| Screen | 720×1600, 280 dpi, touch, on-screen keyboard (Gboard); the app turns it to landscape (1600×720) |
+| HW video decoder | `c2.unisoc.avc.decoder` / `c2.unisoc.hevc.decoder` (10 instances each; 1080p: H.264 106 fps, H.265 212 fps), also as `OMX.sprd.*` |
+| Menu | a tap on the picture; `uiautomator dump` works for finding buttons |
+
 ## Cameras
 
 All cameras are on the lab network `172.17.32.0/24` and reachable from the device.
@@ -201,6 +216,21 @@ $PWD/platform-tools/adb connect 172.17.32.145:5555   # Aceline-2, with a monitor
 export ADB="$PWD/platform-tools/adb -s 172.17.32.144:5555"
 $ADB shell getprop ro.product.model   # AG-216
 ```
+
+With several devices connected, every command needs `-s <ip>:<port>`.
+
+**TECNO KM4 (`.170`): Wireless debugging (Android 11+).** It has no fixed port: `adb connect` fails (`failed to connect`) until the lab host is paired, and the debugging port changes whenever Wireless debugging is restarted or the phone reboots.
+
+1. On the phone: *Settings → Developer options → Wireless debugging*. The main screen shows **IP address & port**: the debugging port, for `connect`.
+2. *Pair device with pairing code*: a **pairing port** (a different one) and a **6-digit code**, valid while that dialog is open. Ask the person at the phone for both.
+3. On the lab host:
+   ```sh
+   $PWD/platform-tools/adb pair 172.17.32.170:<pairing port> <code>   # "Successfully paired"
+   $PWD/platform-tools/adb connect 172.17.32.170:<debugging port>
+   export ADB="$PWD/platform-tools/adb -s 172.17.32.170:<debugging port>"
+   ```
+
+The pairing is kept with the host's adb key (`~/.android/adbkey`): later only `connect` with the current debugging port is needed, and `pair` again only after the key or the phone's pairings were reset.
 
 ### Builds
 
