@@ -66,6 +66,8 @@ class MenuManager {
     /** The item a remote starts from: the active slot, Q or U (#91). */
     private TextView mFocusItem;
     private TextView mSettingsBtn;
+    /** Settings | WebUI, shown in the single view only (#173). */
+    private LinearLayout mSettingsRow;
     private TextView mWebUiBtn;
     TextView[] camButtons;
     private Dialog mBrowserDialog;
@@ -81,8 +83,8 @@ class MenuManager {
         /** D: debug text (resolution, codec, fps) in every multi-view cell on or off. */
         void onToggleStats();
         void onExit();
-        /** Start over: every stored setting cleared, the app restarted as on first start (#171). */
-        void onStartOver();
+        /** Reset: every stored setting cleared, the app restarted as on first start (#171). */
+        void onReset();
         void onShowSettings();
         void onSaveSettings();
         void onWebUI();
@@ -193,16 +195,17 @@ class MenuManager {
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
         mSettingsBtn = createItem("Settings");
-        layout.addView(mSettingsBtn);
-        mSettingsBtn.setVisibility(single ? View.VISIBLE : View.GONE);
 
         final TextView quadBtn = createItem("Q");
         quadBtn.setGravity(Gravity.CENTER);
         quadBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
 
         mWebUiBtn = createItem("WebUI");
-        layout.addView(mWebUiBtn);
-        mWebUiBtn.setVisibility(single ? View.VISIBLE : View.GONE);
+        // Two items per row keep the menu short (#173); the row is for the single view only
+        mSettingsRow = pairRow(mSettingsBtn, mWebUiBtn);
+        layout.addView(mSettingsRow, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        mSettingsRow.setVisibility(single ? View.VISIBLE : View.GONE);
 
         camButtons = new TextView[CAM_COUNT];
         mCachedCamButtons = new TextView[CAM_COUNT];
@@ -297,18 +300,18 @@ class MenuManager {
         layout.addView(divider, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
 
-        // Two deliberate presses: Start over, then Clear settings in the confirmation (#171)
-        TextView reset = createItem("Start over");
-        layout.addView(reset);
+        // Two deliberate presses: Reset, then Clear settings in the confirmation (#171)
+        TextView reset = createItem("Reset");
         reset.setOnClickListener(v -> {
             PopupWindow p = mMenuPopup;
             if (p != null) p.dismiss();
-            confirmStartOver();
+            confirmReset();
         });
 
         TextView exit = createItem("Exit");
-        layout.addView(exit);
         exit.setText(s);
+        layout.addView(pairRow(exit, reset), new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         exit.setOnClickListener(v -> {
             if (listener != null) listener.onExit();
         });
@@ -333,11 +336,8 @@ class MenuManager {
 
     private void updateCachedMenu(boolean quadEnabled, int mActive, String[] mHosts) {
         boolean single = !quadEnabled && !udpShown;
-        if (mSettingsBtn != null) {
-            mSettingsBtn.setVisibility(single ? View.VISIBLE : View.GONE);
-        }
-        if (mWebUiBtn != null) {
-            mWebUiBtn.setVisibility(single ? View.VISIBLE : View.GONE);
+        if (mSettingsRow != null) {
+            mSettingsRow.setVisibility(single ? View.VISIBLE : View.GONE);
         }
         if (mCachedQuadBtn != null) {
             if (quadEnabled) highlightItem(mCachedQuadBtn);
@@ -402,6 +402,24 @@ class MenuManager {
             default:
                 return false;
         }
+    }
+
+    /**
+     * Two menu items side by side, split by a thin line (#173): the left one takes the free
+     * width, the right one its own. Left / Right move between them with a remote.
+     */
+    private LinearLayout pairRow(TextView left, TextView right) {
+        LinearLayout row = new LinearLayout(activity);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.addView(left, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        View line = new View(activity);
+        line.setBackgroundColor(Color.DKGRAY);
+        row.addView(line, new LinearLayout.LayoutParams(dp(1),
+                LinearLayout.LayoutParams.MATCH_PARENT));
+        row.addView(right, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        return row;
     }
 
     private TextView createItem(String title) {
@@ -525,7 +543,7 @@ class MenuManager {
      * Asks before clearing the settings (#171). Cancel has the focus, so a stray OK on a remote
      * closes the dialog without deleting anything.
      */
-    private void confirmStartOver() {
+    private void confirmReset() {
         AlertDialog dialog = new AlertDialog.Builder(activity)
                 .setTitle("Start with a clean slate?")
                 .setMessage("This clears all camera slots, their transports and the other "
@@ -534,7 +552,7 @@ class MenuManager {
                         + "changed.")
                 .setNegativeButton("Cancel", (d, which) -> d.cancel())
                 .setPositiveButton("Clear settings", (d, which) -> {
-                    if (listener != null) listener.onStartOver();
+                    if (listener != null) listener.onReset();
                 })
                 .create();
         dialog.setOnShowListener(d -> {

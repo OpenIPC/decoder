@@ -479,38 +479,58 @@ public class Decoder extends Activity
     public void onExit() { finishAndRemoveTask(); }
 
     /**
-     * Start over (#171): stops every stream, deletes the stored settings, the key of the
-     * encrypted camera URLs and WebUI's cookies, then starts the app in a new process, so
-     * nothing kept in memory survives either.
+     * Reset (#171): stops every stream, deletes the stored settings, the key of the encrypted
+     * camera URLs and what WebUI kept (cookies, HTTP logins), then starts the app in a new
+     * process, so nothing kept in memory survives either.
      */
     @Override
-    public void onStartOver() {
-        Log.i(TAG, "Start over: clearing all settings");
+    public void onReset() {
+        Log.i(TAG, "Reset: clearing all settings");
+        // commit(), not apply(): the process ends soon after. If the write fails, nothing
+        // else is touched and the app stays as it was, to try again (Qodo on #172)
+        if (!getSharedPreferences("settings", MODE_PRIVATE).edit().clear().commit()) {
+            Log.w(TAG, "Reset: the settings could not be cleared");
+            Toast.makeText(this, "Could not clear the settings, please try again",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
         if (quadEnabled) stopQuad();
         if (rtspClient != null) rtspClient.stop();
         closeDecoder();
         closeAudio();
-        // commit(), not apply(): the process ends right after this
-        getSharedPreferences("settings", MODE_PRIVATE).edit().clear().commit();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             try {
                 KeystoreCipher.deleteKey();
             } catch (Exception e) {
-                Log.w(TAG, "Start over: cannot delete the URL key: " + e.getMessage());
+                // The URLs it encrypted are gone already; the next save reuses the key
+                Log.w(TAG, "Reset: cannot delete the URL key: " + e.getMessage());
             }
         }
         try {
-            android.webkit.CookieManager.getInstance().removeAllCookies(null);
-            android.webkit.CookieManager.getInstance().flush();
+            android.webkit.WebViewDatabase.getInstance(this).clearHttpAuthUsernamePassword();
+            android.webkit.CookieManager cookies = android.webkit.CookieManager.getInstance();
+            // Restarted only once the cookies are really gone (Qodo on #172)
+            cookies.removeAllCookies(removed -> {
+                cookies.flush();
+                restartClean();
+            });
         } catch (Exception e) {
             // No WebView on this device (#15): nothing stored there either
+            restartClean();
         }
+    }
+
+    /** Starts the app again in a new process after a reset (#171). */
+    private void restartClean() {
         Intent restart = getPackageManager().getLaunchIntentForPackage(getPackageName());
         if (restart == null) restart = new Intent(this, Decoder.class);
         restart.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
         startActivity(restart);
         finishAndRemoveTask();
-        Runtime.getRuntime().exit(0);
+        // The system has the new task once startActivity() returns; it starts a process for
+        // it after this one ends. A short delay lets the launch settle first
+        new Handler(android.os.Looper.getMainLooper()).postDelayed(
+                () -> Runtime.getRuntime().exit(0), 300);
     }
 
     @Override
