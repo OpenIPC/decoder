@@ -59,19 +59,27 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 
 ### Menu
 
+The menu is a grid: the eight slots on top, two rows of four below.
+
+```
+[ 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 ]
+[ Settings | WebUI  | Grid   | Slides ]
+[ Exit     | Reset  | Debug  | UDP    ]
+```
+
 | Item         | Action                                                                                                                                                                             |
 |--------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **1**–**8**  | Switch to a camera slot. The active slot's number shows the connection quality: green under 100 ms of jitter, yellow 100–300 ms, red above 300 ms. A grey number is an empty slot. |
-| **U**        | The U cell full-screen: the camera that pushes RTP over UDP to port 5600                                                                                                           |
-| **D**        | Text in the corner of every multi-view cell (resolution, codec, decoded/received fps, key frames, status), or in none                                                              |
-| **Q**        | The view: multi-view (Quad) or the single camera. Q does not change the playback mode (S)                                                                                         |
-| **S**        | The playback mode: every frame, or key frames only (the picture updates once per key frame interval, MJPEG once a second), the lowest decoder load. Works in multi-view and in the single view and never changes the view |
-| **Settings** | Edit the URL and the transport of the active slot (single-camera mode only)                                                                                                        |
-| **WebUI**    | Open the camera's web interface; credentials come from the RTSP URL (single-camera mode only)                                                                                      |
+| **Settings** | Edit the URL and the transport of the active slot (single view only; grey elsewhere)                                                                                                        |
+| **WebUI**    | Open the camera's web interface; credentials come from the RTSP URL (single view only; grey elsewhere)                                                                                      |
+| **Grid**     | The view: multi-view (2×2 or 3×3) or the single camera. Grid does not change the playback mode (Slides) |
+| **Slides**   | The playback mode: every frame, or key frames only (the picture updates once per key frame interval, MJPEG once a second), the lowest decoder load. Works in multi-view and in the single view and never changes the view |
+| **Exit**     | Close the app. The small text under it is the app version and build hash.                                                                                                        |
 | **Reset**    | Clear all settings after a confirmation (**Cancel** has the focus) to set the app up again from scratch: camera slots, transports and the other settings are removed, and the app opens as right after installing. The cameras are not changed |
-| **Exit**     | Close the app. The small text next to it is the app version and build hash.                                                                                                        |
+| **Debug**    | Text in the corner of every multi-view cell (resolution, codec, decoded/received fps, key frames, status), or in none |
+| **UDP**      | The U cell full-screen: the camera that pushes RTP over UDP to port 5600 |
 
-Items that are on — D, Q, S, U and the active slot — have an orange fill; the item the remote is on has a light blue frame.
+Items that are on — Grid, Slides, Debug, UDP and the active slot — have an orange fill; the item the remote is on has a light blue frame.
 
 ### Gestures and keys
 
@@ -95,7 +103,7 @@ adb shell am start -a android.intent.action.SEND -t text/plain \
 
 ### Multi-view (Quad)
 
-Shows the configured slots in a 2×2 grid, or in a 3×3 grid once any of slots 5–8 is used. The ninth cell of the 3×3 grid, the **U** cell, plays a camera that pushes RTP over UDP to port 5600 of the device (`udp://@:5600`, see [udp:// slots](#udp-slots-majestic-outgoing)); until a stream arrives it shows every address of the device to send to. **U** in the menu opens it full-screen. Other ports or multicast groups go into a slot as a `udp://` URL. Each cell has its own connection and decoder, and the device's video decoder has a fixed budget: the AG-216 test box, for example, decodes about two 1080p30 streams at full rate. So the grid adapts: cells start on key frames only, then decode every frame in priority order (the U cell while it receives a stream, the cell whose sound plays, then slot order) while the decoder keeps up. Cells beyond that stay on key frames, with the picture updated once per key frame interval (`key frames` in the corner text, menu **D**). The limit is learnt on each device by measurement. Substreams of the cameras, where available, let more cells play at full rate. A key-frame cell over the hardware decoder's instance limit (the AG-216 has 4 × H.265) uses a software decoder instead (`· software` in the corner); only beyond that budget too does it show `Decoder limit: N × H.265`. When even key frames are too much, the lowest-priority cell is paused (`Paused: decoder overloaded`) and tried again after a quiet period; losses in the first seconds after the grid starts, when every decoder starts at once, do not count. A cell whose UDP stream loses a piece of every key frame shows the frames with the damage concealed (`· damaged`) rather than a black picture. Some cameras accept only one RTSP client at a time. Long-press a cell to play its audio (long-press it again to mute); the selected cell shows an AUDIO badge and is remembered. Tap any cell to open the menu.
+Shows the configured slots in a 2×2 grid, or in a 3×3 grid once any of slots 5–8 is used. The ninth cell of the 3×3 grid, the **U** cell, plays a camera that pushes RTP over UDP to port 5600 of the device (`udp://@:5600`, see [udp:// slots](#udp-slots-majestic-outgoing)); until a stream arrives it shows every address of the device to send to. **UDP** in the menu opens it full-screen. Other ports or multicast groups go into a slot as a `udp://` URL. Each cell has its own connection and decoder, and the device's video decoder has a fixed budget: the AG-216 test box, for example, decodes about two 1080p30 streams at full rate. So the grid adapts: cells start on key frames only, then decode every frame in priority order (the U cell while it receives a stream, the cell whose sound plays, then slot order) while the decoder keeps up. Cells beyond that stay on key frames, with the picture updated once per key frame interval (`key frames` in the corner text, menu **Debug**). The limit is learnt on each device by measurement. Substreams of the cameras, where available, let more cells play at full rate. A key-frame cell over the hardware decoder's instance limit (the AG-216 has 4 × H.265) uses a software decoder instead (`· software` in the corner); only beyond that budget too does it show `Decoder limit: N × H.265`. When even key frames are too much, the lowest-priority cell is paused (`Paused: decoder overloaded`) and tried again after a quiet period; losses in the first seconds after the grid starts, when every decoder starts at once, do not count. A cell whose UDP stream loses a piece of every key frame shows the frames with the damage concealed (`· damaged`) rather than a black picture. Some cameras accept only one RTSP client at a time. Long-press a cell to play its audio (long-press it again to mute); the selected cell shows an AUDIO badge and is remembered. Tap any cell to open the menu.
 
 ## Transports
 
@@ -145,8 +153,8 @@ A slot also takes an HTTP MJPEG URL, such as Majestic's `http://user:password@<c
 
 While the app runs it serves its debug information over HTTP on port **8085**, for a browser or `curl` on the same network:
 
-- `http://<device>:8085/` — the snapshot fills the page, with each cell's camera, size, fps and losses (in red) drawn over it; the header shows the version, the device time and uptime. **Info On / Off** in the header hides the text over the cells (and the list below them on a narrow screen), leaving only the picture; the choice is remembered in the browser. A red note in the header says when the device's video decoder stopped responding (`decoder_stuck`);
-- `http://<device>:8085/snapshot.jpg` (`?labels=0`: frames only) — a picture laid out like the screen, at the screen's resolution (at most 1920×1080), made from the frames the app shows right now; a cell without video is black with its status. Taken only when asked for; the page refreshes it every 3, 5 or 10 s while the tab is visible;
+- `http://<device>:8085/` — the snapshot fills the page, with each cell's camera, size, fps and losses (in red) drawn over it; the header shows the version, the device time and uptime. **Info On / Off** in the header hides the text over the cells (and the list below them on a narrow screen), leaving only the picture; it is **Off** until switched on, and the choice is remembered in the browser. A red note in the header says when the device's video decoder stopped responding (`decoder_stuck`);
+- `http://<device>:8085/snapshot.jpg` (`?labels=0`: frames only) — a picture laid out like the screen, at the screen's resolution (at most 1920×1080), made from the frames the app shows right now; a cell without video is black with its status. Taken only when asked for; the page refreshes it every 3, 5 (default) or 10 s while the tab is visible;
 - `http://<device>:8085/stats.json` — the same as JSON, for scripts;
 - In single view the page and the snapshot still show the whole grid (#100): the camera on screen is framed in blue, every other configured slot gets a short stream check (connect, a few seconds of packets, no decoding) about every 45 s while the page is open, and its cell says what was found, e.g. `Stream OK · H.265 · 25 fps · 3.1 Mbit/s · checked 12 s ago`, or the error. A slot of the camera on screen is never checked (some cameras take one client only), nor a `udp://` slot. `stats.json` has these cells under `slots`;
 - `http://<device>:8085/log` — the last 500 lines of the app's log.
