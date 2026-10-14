@@ -16,6 +16,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.text.InputType;
 import android.text.SpannableString;
+import android.text.style.ForegroundColorSpan;
 import android.text.style.RelativeSizeSpan;
 import android.text.style.SuperscriptSpan;
 import android.util.Log;
@@ -295,10 +296,17 @@ class MenuManager {
             if (listener != null) listener.onToggleSlides();
         });
 
-        String code = "Exit [v" + version + ", " + gitHash + "]";
+        // "Exit" centred in its half (#176): the small version text follows it, and an
+        // invisible copy of it in front balances the line, so the word itself is in the middle
+        String ver = "[v" + version + ", " + gitHash + "]";
+        String code = ver + " Exit " + ver;
+        int exitEnd = ver.length() + 5;
         SpannableString s = new SpannableString(code);
-        s.setSpan(new SuperscriptSpan(), 5, s.length(), 0);
-        s.setSpan(new RelativeSizeSpan(0.5f), 5, s.length(), 0);
+        s.setSpan(new SuperscriptSpan(), 0, ver.length(), 0);
+        s.setSpan(new RelativeSizeSpan(0.5f), 0, ver.length(), 0);
+        s.setSpan(new ForegroundColorSpan(Color.TRANSPARENT), 0, ver.length(), 0);
+        s.setSpan(new SuperscriptSpan(), exitEnd, s.length(), 0);
+        s.setSpan(new RelativeSizeSpan(0.5f), exitEnd, s.length(), 0);
 
         View divider = new View(activity);
         divider.setBackgroundColor(Color.DKGRAY);
@@ -428,6 +436,9 @@ class MenuManager {
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         left.setSingleLine(true);
         right.setSingleLine(true);
+        // Labels in the middle of their halves (#176)
+        left.setGravity(Gravity.CENTER);
+        right.setGravity(Gravity.CENTER);
         return row;
     }
 
