@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   title:
-    if: contains(github.event.issue.labels.*.name, 'device-report') && github.event.issue.title != 'User test report'
+    if: contains(github.event.issue.labels.*.name, 'device-report') && github.event.issue.title != 'User test report / 用户测试报告 / Отчёт о тестировании от пользователя'
     runs-on: ubuntu-latest
     steps:
       - name: Set the title
@@ -19,4 +19,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           NUMBER: ${{ github.event.issue.number }}
-        run: gh issue edit "$NUMBER" --repo "$REPO" --title "User test report"
+          TITLE: User test report / 用户测试报告 / Отчёт о тестировании от пользователя
+        run: gh issue edit "$NUMBER" --repo "$REPO" --title "$TITLE"
