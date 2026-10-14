@@ -434,18 +434,24 @@ class MenuManager {
     /**
      * The left item of every two-item row ends where slot 7 begins, so the dividing lines run
      * on from the gap between slots 6 and 7: the slot buttons differ in width, half the row
-     * is not that gap. Until the slot row is laid out, both halves stay equal.
+     * is not that gap. Until the slot row is laid out, and while it is too wide for the menu,
+     * both halves stay equal.
      */
     private void alignPairs(LinearLayout camRow) {
         if (camButtons == null || camButtons.length < 7 || camButtons[6] == null) return;
         int gap = (camButtons[5].getRight() + camButtons[6].getLeft()) / 2;
         int width = gap - dp(1) / 2;
-        if (gap <= 0 || width <= 0) return;
+        // A slot row wider than the menu scrolls, and its gap moves with it: then plain halves,
+        // which keep both items whole (Qodo on #175)
+        View scroll = (View) camRow.getParent();
+        boolean fits = scroll != null && camRow.getWidth() <= scroll.getWidth();
         for (TextView left : mPairLefts) {
             LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) left.getLayoutParams();
-            if (lp.width == width && lp.weight == 0) continue;
-            lp.width = width;
-            lp.weight = 0;
+            int w = fits && width > 0 ? width : 0;
+            float weight = fits && width > 0 ? 0 : 1;
+            if (lp.width == w && lp.weight == weight) continue;
+            lp.width = w;
+            lp.weight = weight;
             left.setLayoutParams(lp);
         }
     }
