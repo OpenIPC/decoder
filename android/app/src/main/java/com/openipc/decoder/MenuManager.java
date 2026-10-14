@@ -548,23 +548,43 @@ class MenuManager {
             scheme = "http";
         }
 
-        AlertDialog.Builder b = new AlertDialog.Builder(activity);
-        b.setView(view);
-        b.setNegativeButton("Close", (dialog, which) -> dialog.cancel());
-        Dialog dialog = b.create();
+        // Full screen, not an AlertDialog around the page (#160): a small dialog barely moved
+        // for the on-screen keyboard, which covered the page's fields, and it relaid out as
+        // the keyboard came and went. The theme has no windowFullscreen, so the window resizes
+        // above the keyboard and the page scrolls its focused field into view
+        Dialog dialog = new Dialog(activity, android.R.style.Theme_Black_NoTitleBar) {
+            @SuppressWarnings("deprecation")
+            @Override
+            public void onBackPressed() {
+                if (view.canGoBack()) view.goBack();
+                else cancel();
+            }
+        };
+        LinearLayout layout = new LinearLayout(activity);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        // Close for a remote or a touchscreen; Back goes back in the page first
+        TextView closeBtn = createItem("Close");
+        closeBtn.setOnClickListener(v -> dialog.cancel());
+        layout.addView(closeBtn, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        layout.addView(view, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        dialog.setContentView(layout);
         dialog.setOnDismissListener(d -> {
             mBrowserDialog = null;
             view.destroy();
         });
         mBrowserDialog = dialog;
         dialog.show();
-        // AlertDialog marks its window "no input method" when its content has no EditText,
-        // and a WebView is not one: text fields of the camera's page then got no keyboard
-        // (#120). Clear that, and let the page take the focus for its fields
+        // The page's text fields need the keyboard (#120): the window must take input focus
         android.view.Window w = dialog.getWindow();
         if (w != null) {
+            w.setLayout(WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT);
             w.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                    | WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
+                    | WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
+                    | WindowManager.LayoutParams.FLAG_FULLSCREEN);
             w.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         }
         view.setFocusable(true);
