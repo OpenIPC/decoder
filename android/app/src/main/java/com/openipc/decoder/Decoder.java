@@ -1373,7 +1373,7 @@ public class Decoder extends Activity
         QuadCell cell = quad != null && i < quad.length ? quad[i] : null;
         TextView stats = quadStats[i];
         if (cell == null) {
-            c.label = "not configured";
+            c.label = StreamProbes.NOT_CONFIGURED;
         } else {
             c.label = stats != null ? stats.getText().toString() : "";
             c.live = cell.showsVideo(SNAPSHOT_LIVE_MS);
@@ -1492,7 +1492,7 @@ public class Decoder extends Activity
                 QuadCell cell = cells[i];
                 if (cell == null) {
                     c.put("video", false);
-                    c.put("text", "not configured");
+                    c.put("text", StreamProbes.NOT_CONFIGURED);
                 } else {
                     c.put("video", cell.showsVideo(SNAPSHOT_LIVE_MS));
                     TextView v = quadStats[i];

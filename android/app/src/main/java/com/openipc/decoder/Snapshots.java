@@ -180,8 +180,9 @@ final class Snapshots {
             canvas.drawText(label, x + 4, y + ch - 6, text);
         } else {
             // No video: slot number and status in the middle, in red; a stream found by a
-            // check of a slot not on screen in green (#100)
-            text.setColor(c.ok ? 0xFF7FD07F : 0xFFFF6060);
+            // check of a slot not on screen in green, an empty slot grey (#100)
+            text.setColor(c.ok ? 0xFF7FD07F
+                    : StreamProbes.NOT_CONFIGURED.equals(c.label) ? 0xFF888888 : 0xFFFF6060);
             float w = text.measureText(label);
             canvas.drawText(label, x + Math.max(4, (cw - w) / 2),
                     y + (ch + text.getTextSize()) / 2f, text);

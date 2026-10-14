@@ -32,6 +32,9 @@ import java.util.concurrent.TimeUnit;
  * multi-view, where every cell has its own session.
  */
 final class StreamProbes {
+    /** Status of an empty slot: shown grey, not as an error. */
+    static final String NOT_CONFIGURED = "not configured";
+
     private static final String TAG = "OpenIPCDecoder";
     /** A slot is checked again this long after its last check began. */
     static final long PERIOD_MS = 45_000;
@@ -43,7 +46,7 @@ final class StreamProbes {
 
     /** Why a slot gets no probe, or null if it gets one. */
     static String skipReason(String url, String defaultUrl, String screenUrl) {
-        if (url == null || url.trim().isEmpty() || url.equals(defaultUrl)) return "not configured";
+        if (url == null || url.trim().isEmpty() || url.equals(defaultUrl)) return NOT_CONFIGURED;
         // A listening slot would take the port; the camera pushes to it, nothing to ask
         if (RtpListener.Url.matches(url)) return "UDP listen slot: not checked in single view";
         String e = endpoint(url);

@@ -447,7 +447,7 @@ final class DebugServer {
             + "text-align:center;padding:8px;font-size:clamp(9px,4cqw,14px)}"
             + ".off b{font-size:clamp(16px,14cqh,30px);color:#666}"
             // Single view (#100): the camera on screen framed, a stream found by a check green
-            + ".cell.on{border:2px solid #3d8bff}.off.ok,.ok{color:#7fd07f}"
+            + ".cell.on{border:2px solid #3d8bff}.off.ok,.ok{color:#7fd07f}.off.none{color:#888}"
             + "#list{display:none;width:100%;border-collapse:collapse;font-size:13px}"
             + "#list td{padding:5px 6px;border-top:1px solid #262626;vertical-align:top}"
             + "#list td:first-child{font-weight:700;width:1.5em;color:#fff}"
@@ -506,7 +506,8 @@ final class DebugServer {
             + "function cell(c){var top='<span class=\"slot\">'+esc(c.slot)+'</span><span"
             + " class=\"dim\">'+where(c)+(c.on_screen?' \u00b7 on screen':'')+'</span>',"
             + "cls=c.on_screen?'cell on':'cell';\n"
-            + "if(!c.video)return '<div class=\"'+cls+'\"><div class=\"off'+(ok(c)?' ok':'')+'\">"
+            + "if(!c.video)return '<div class=\"'+cls+'\"><div class=\"off'+(ok(c)?' ok':'')"
+            + "+(c.text==='" + StreamProbes.NOT_CONFIGURED + "'?' none':'')+'\">"
             + "<b>'+esc(c.slot)+'</b><span>'+esc(c.text)+'</span></div><div class=\"top\">'+top+"
             + "'</div></div>';\n"
             + "return '<div class=\"'+cls+'\"><div class=\"top\">'+top+'</div><div"
