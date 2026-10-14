@@ -1553,7 +1553,8 @@ public class Decoder extends Activity
     }
 
     private StreamProbe.Result probeResult(int i) {
-        return i < CAM_COUNT && mHosts[i] != null ? streamProbes.result(i, mHosts[i]) : null;
+        return i < CAM_COUNT && mHosts[i] != null
+                ? streamProbes.result(i, mHosts[i], mTransports[i]) : null;
     }
 
     /** What a cell not on screen says: its last check, or why it has none. */
@@ -1565,6 +1566,22 @@ public class Decoder extends Activity
         StreamProbe.Result r = probeResult(i);
         if (r != null) return r.text(nowMs) + (streamProbes.isRunning(i) ? " \u00b7 checking" : "");
         return streamProbes.isRunning(i) ? "Checking stream\u2026" : "Waiting for a stream check";
+    }
+
+    /**
+     * Transport of a grid cell in single and U view (Qodo on #163): in use for the camera on
+     * screen, otherwise what a check of it goes over.
+     */
+    private String slotTransport(int i, String url) {
+        if (i == U_CELL) return "UDP push";
+        if (onScreen(i)) {
+            return Transport.label(rtspClient != null ? rtspClient.transportInUse() : null,
+                    mTransports[i]);
+        }
+        if (RtpListener.Url.matches(url)) return "UDP listen";
+        if (HttpMjpeg.matches(url)) return "HTTP";
+        Transport.Mode m = StreamProbe.probeMode(mTransports[i]);
+        return "check over " + (m == Transport.Mode.MULTICAST ? "multicast" : m.name());
     }
 
     /**
@@ -1583,7 +1600,9 @@ public class Decoder extends Activity
             String url = u ? UDP_CELL_URL : mHosts[i];
             if (u || (url != null && !url.isEmpty() && !url.equals(DEFAULT_URL))) {
                 c.put("url", u ? UDP_CELL_URL : DebugServer.redact(url));
-                if (!u) c.put("transport_mode", mTransports[i] != null ? mTransports[i].name() : null);
+                c.put("transport", slotTransport(i, url));
+                c.put("transport_mode", u ? "UDP" : mTransports[i] != null
+                        ? mTransports[i].name() : null);
             }
             if (onScreen(i)) {
                 if (udpViewShown) {
@@ -2026,6 +2045,7 @@ public class Decoder extends Activity
     protected void onDestroy() {
         super.onDestroy();
         DebugServer.get().clearSource(debugSource);
+        streamProbes.shutdown();
         audioManager.shutdown();
     }
 

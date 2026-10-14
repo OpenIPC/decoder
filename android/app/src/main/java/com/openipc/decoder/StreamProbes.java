@@ -94,6 +94,8 @@ final class StreamProbes {
     // Guarded by lock: the slots as of the last update
     private String[] urls = new String[0];
     private Transport.Mode[] modes = new Transport.Mode[0];
+    /** {@link StreamProbe#key} per slot: URL and probe transport. */
+    private String[] keys = new String[0];
     private String screenUrl;
     private boolean wanted;
     private long lastUpdateMs;
@@ -101,6 +103,8 @@ final class StreamProbes {
     private final boolean[] running = new boolean[Decoder.CAM_COUNT];
     private final Probe[] probes = new Probe[Decoder.CAM_COUNT];
     private ScheduledFuture<?> ticker;
+    /** After shutdown(): nothing is scheduled any more. */
+    private boolean shut;
 
     private final ConcurrentHashMap<Integer, StreamProbe.Result> results = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler = new ScheduledThreadPoolExecutor(1, r -> {
@@ -123,16 +127,53 @@ final class StreamProbes {
     /** A running probe; cancelled when its camera goes on screen or probing stops. */
     private static final class Probe implements StreamProbe.Cancel {
         final String url;
-        volatile boolean cancelled;
+        /** {@link StreamProbe#key} of the slot's setting when the probe began. */
+        final String key;
+        private volatile boolean cancelled;
+        // Guarded by this
+        private RtspSession session;
 
-        Probe(String url) { this.url = url; }
+        Probe(String url, String key) {
+            this.url = url;
+            this.key = key;
+        }
 
         @Override public boolean cancelled() { return cancelled; }
+
+        @Override
+        public synchronized boolean start(RtspSession s) {
+            if (cancelled) return false;
+            session = s;
+            s.start();
+            return true;
+        }
+
+        /**
+         * Ends the probe now: its socket is closed before this returns, so the camera has no
+         * second client once the TV connects (one-client cameras, Qodo on #163).
+         */
+        synchronized void cancel() {
+            cancelled = true;
+            if (session != null) session.stop();
+        }
     }
 
     StreamProbes(String userAgent) {
         this.userAgent = userAgent;
         ((ThreadPoolExecutor) workers).allowCoreThreadTimeOut(true);
+        // No thread kept while the page is not in use
+        ((ScheduledThreadPoolExecutor) scheduler).setKeepAliveTime(30, TimeUnit.SECONDS);
+        ((ScheduledThreadPoolExecutor) scheduler).allowCoreThreadTimeOut(true);
+    }
+
+    /** The activity goes away: probes end, the threads go (Qodo on #163). */
+    void shutdown() {
+        synchronized (lock) {
+            shut = true;
+        }
+        stopAll();
+        scheduler.shutdownNow();
+        workers.shutdown();
     }
 
     /**
@@ -141,12 +182,23 @@ final class StreamProbes {
      */
     void update(String[] slotUrls, Transport.Mode[] slotModes, String screen, boolean want) {
         synchronized (lock) {
+            if (shut) return;
             urls = slotUrls.clone();
-            modes = slotModes.clone();
+            modes = java.util.Arrays.copyOf(slotModes, urls.length);
+            String[] newKeys = new String[urls.length];
+            for (int i = 0; i < urls.length; i++) newKeys[i] = StreamProbe.key(urls[i], modes[i]);
+            if (lastStartMs.length != urls.length) lastStartMs = new long[urls.length];
+            for (int i = 0; i < urls.length; i++) {
+                // A changed URL or transport: the last check says nothing about it, check soon
+                if (i < keys.length && !java.util.Objects.equals(keys[i], newKeys[i])) {
+                    results.remove(i);
+                    lastStartMs[i] = 0;
+                }
+            }
+            keys = newKeys;
             screenUrl = screen;
             wanted = want;
             lastUpdateMs = SystemClock.elapsedRealtime();
-            if (lastStartMs.length != urls.length) lastStartMs = new long[urls.length];
             cancelStaleLocked();
             if (want && ticker == null) {
                 ticker = scheduler.scheduleWithFixedDelay(this::tick, 0, TICK_MS,
@@ -171,10 +223,10 @@ final class StreamProbes {
         }
     }
 
-    /** The result for a slot, if it was found for the slot's current URL. */
-    StreamProbe.Result result(int slot, String url) {
+    /** The result for a slot, if it was found for the slot's current URL and transport. */
+    StreamProbe.Result result(int slot, String url, Transport.Mode mode) {
         StreamProbe.Result r = results.get(slot);
-        return r != null && r.url.equals(url) ? r : null;
+        return r != null && r.key.equals(StreamProbe.key(url, mode)) ? r : null;
     }
 
     /** The slot is being checked right now. */
@@ -189,10 +241,10 @@ final class StreamProbes {
         String screen = StreamProbes.endpoint(screenUrl);
         for (int i = 0; i < probes.length; i++) {
             Probe p = probes[i];
-            if (p == null) continue;
+            if (p == null || p.cancelled()) continue;
             String e = endpoint(p.url);
-            boolean slotChanged = i >= urls.length || !p.url.equals(urls[i]);
-            if (!wanted || slotChanged || (e != null && e.equals(screen))) p.cancelled = true;
+            boolean slotChanged = i >= keys.length || !p.key.equals(keys[i]);
+            if (!wanted || slotChanged || (e != null && e.equals(screen))) p.cancel();
         }
     }
 
@@ -218,10 +270,16 @@ final class StreamProbes {
             if (slot < 0) return;
             lastStartMs[slot] = now;
             running[slot] = true;
-            Probe p = new Probe(urls[slot]);
+            Probe p = new Probe(urls[slot], keys[slot]);
             probes[slot] = p;
             Transport.Mode mode = slot < modes.length ? modes[slot] : null;
-            workers.execute(() -> runProbe(slot, p, mode));
+            try {
+                workers.execute(() -> runProbe(slot, p, mode));
+            } catch (java.util.concurrent.RejectedExecutionException e) {
+                // Shut down meanwhile
+                probes[slot] = null;
+                running[slot] = false;
+            }
         }
     }
 

@@ -54,12 +54,19 @@ public class StreamProbeTest {
     }
 
     @Test
-    public void otherPayloadTypesAreIgnored() {
+    public void otherPayloadTypesAndEmptyPacketsAreIgnored() {
         StreamProbe.Counter c = counter(96, false, false);
-        feed(c, rtp(97, true, 0x65), 0);
-        feed(c, rtp(96, true, 0x41), 0);
+        byte[] other = rtp(97, true, 0x65);
+        assertFalse(c.onPacket(other, 0, other.length, 0));
+        // A marked header without payload is not a frame (Qodo on #163)
+        byte[] empty = rtp(96, true);
+        assertFalse(c.onPacket(empty, 0, empty.length, 0));
+        byte[] p = rtp(96, true, 0x41);
+        assertTrue(c.onPacket(p, 0, p.length, 0));
         assertEquals(1, c.packets);
         assertEquals(1, c.frames);
+        assertEquals("PLAY OK, but no video",
+                StreamProbe.result("k", 0, true, null, counter(96, false, false)).summary);
     }
 
     @Test
@@ -107,6 +114,19 @@ public class StreamProbeTest {
     public void httpMjpegFramesAndSize() {
         StreamProbe.Counter c = new StreamProbe.Counter();
         byte[] jpeg = JpegAssembler.headers(1, 640, 480, JpegAssembler.tables(50), 0);
+        assertTrue(c.onJpegFrame(jpeg, 0, jpeg.length, 0));
+        assertTrue(c.onJpegFrame(jpeg, 0, jpeg.length, 100));
+        // Not a JPEG: no frame (Qodo on #163)
+        byte[] html = "<html>Login</html>".getBytes();
+        assertFalse(c.onJpegFrame(html, 0, html.length, 150));
+        // SOI with neither a frame header nor EOI
+        byte[] cut = {(byte) 0xFF, (byte) 0xD8, 0, 0, 0, 0};
+        assertFalse(c.onJpegFrame(cut, 0, cut.length, 150));
+        // SOI ... EOI is enough
+        byte[] tiny = {(byte) 0xFF, (byte) 0xD8, 1, 2, (byte) 0xFF, (byte) 0xD9, '\r', '\n'};
+        assertTrue(c.onJpegFrame(tiny, 0, tiny.length, 200));
+        assertEquals(3, c.frames);
+        c = new StreamProbe.Counter();
         c.onJpegFrame(jpeg, 0, jpeg.length, 0);
         c.onJpegFrame(jpeg, 0, jpeg.length, 100);
         assertEquals(2, c.frames);
@@ -133,6 +153,16 @@ public class StreamProbeTest {
         assertTrue(r.text(180_000), r.text(180_000).startsWith("Stream OK · H.264 · 1.0 fps"));
         assertTrue(r.text(180_000).endsWith("checked 3 min ago"));
         assertEquals(1, r.keyFrames);
+    }
+
+    @Test
+    public void resultsBelongToTheUrlAndTheTransportOfTheCheck() {
+        assertEquals("TCP rtsp://a/1", StreamProbe.key("rtsp://a/1", Transport.Mode.AUTO));
+        assertEquals("TCP rtsp://a/1", StreamProbe.key("rtsp://a/1", null));
+        assertEquals("UDP rtsp://a/1", StreamProbe.key("rtsp://a/1", Transport.Mode.UDP));
+        assertNull(StreamProbe.key(null, Transport.Mode.UDP));
+        StreamProbes probes = new StreamProbes("");
+        assertNull(probes.result(0, "rtsp://a/1", Transport.Mode.TCP));
     }
 
     @Test

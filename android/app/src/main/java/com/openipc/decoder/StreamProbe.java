@@ -26,8 +26,8 @@ final class StreamProbe {
 
     /** What one probe found; immutable once made. */
     static final class Result {
-        /** The slot's URL when it was checked: a result for another URL is not shown. */
-        final String url;
+        /** URL and transport of the check ({@link #key}): a result for another setting is not shown. */
+        final String key;
         /** When the probe ended (elapsedRealtime). */
         final long atMs;
         final boolean ok;
@@ -40,8 +40,8 @@ final class StreamProbe {
         final int keyFrames;
         final long kbps;
 
-        Result(String url, long atMs, boolean ok, String summary, Counter c) {
-            this.url = url;
+        Result(String key, long atMs, boolean ok, String summary, Counter c) {
+            this.key = key;
             this.atMs = atMs;
             this.ok = ok;
             this.summary = summary;
@@ -58,6 +58,16 @@ final class StreamProbe {
             return (ok ? "Stream OK \u00b7 " : "") + summary + " \u00b7 checked "
                     + age(nowMs - atMs) + " ago";
         }
+    }
+
+    /** The transport a probe uses: Auto would wait for UDP first, a probe takes TCP. */
+    static Transport.Mode probeMode(Transport.Mode mode) {
+        return mode == null || mode == Transport.Mode.AUTO ? Transport.Mode.TCP : mode;
+    }
+
+    /** What a result belongs to: the URL and the transport it was checked over. */
+    static String key(String url, Transport.Mode mode) {
+        return url == null ? null : probeMode(mode).name() + " " + url;
     }
 
     /** "12 s", "3 min": the age of a result. */
@@ -92,12 +102,15 @@ final class StreamProbe {
             jpeg = sdp.videoJpeg;
         }
 
-        /** One RTP packet of the video channel, at {@code nowMs}. */
-        void onPacket(byte[] buf, int offset, int length, long nowMs) {
+        /**
+         * One RTP packet of the video channel, at {@code nowMs}. Returns false for one that
+         * carries no video: another payload type, or a header without payload (Qodo on #163).
+         */
+        boolean onPacket(byte[] buf, int offset, int length, long nowMs) {
             int header = RtspSession.rtpHeaderLength(buf, offset, length);
-            if (header < 0 || (buf[offset + 1] & 0x7F) != videoPt) return;
+            if (header < 0 || (buf[offset + 1] & 0x7F) != videoPt) return false;
             int end = RtspSession.rtpPayloadEnd(buf, offset, length);
-            if (end < header) return;
+            if (end <= header) return false;
             packets++;
             bytes += length;
             if (firstMs < 0) firstMs = nowMs;
@@ -114,24 +127,40 @@ final class StreamProbe {
             }
             // The marker bit ends an access unit: one frame
             if ((buf[offset + 1] & 0x80) != 0) frameEnd(nowMs);
+            return true;
         }
 
-        /** One whole JPEG of an HTTP MJPEG slot. */
-        void onJpegFrame(byte[] buf, int offset, int length, long nowMs) {
+        /**
+         * One part of an HTTP MJPEG slot; returns false unless it is a JPEG: it starts with
+         * SOI and has a frame header or ends with EOI (Qodo on #163).
+         */
+        boolean onJpegFrame(byte[] buf, int offset, int length, long nowMs) {
+            if (length < 4 || (buf[offset] & 0xFF) != 0xFF || (buf[offset + 1] & 0xFF) != 0xD8) {
+                return false;
+            }
+            byte[] head = offset == 0 ? buf
+                    : java.util.Arrays.copyOfRange(buf, offset, offset + Math.min(length, 4096));
+            int[] size = JpegAssembler.size(head, Math.min(length, head.length));
+            boolean eoi = endsWithEoi(buf, offset, length);
+            if (size == null && !eoi) return false;
             jpeg = true;
             packets++;
             bytes += length;
             if (firstMs < 0) firstMs = nowMs;
-            if (width == 0) {
-                byte[] head = offset == 0 ? buf
-                        : java.util.Arrays.copyOfRange(buf, offset, offset + Math.min(length, 4096));
-                int[] size = JpegAssembler.size(head, Math.min(length, head.length));
-                if (size != null) {
-                    width = size[0];
-                    height = size[1];
-                }
+            if (width == 0 && size != null) {
+                width = size[0];
+                height = size[1];
             }
             frameEnd(nowMs);
+            return true;
+        }
+
+        /** FF D9 at the end, allowing for a few bytes of padding after it. */
+        private static boolean endsWithEoi(byte[] buf, int offset, int length) {
+            for (int i = offset + length - 2; i >= Math.max(offset + 2, offset + length - 8); i--) {
+                if ((buf[i] & 0xFF) == 0xFF && (buf[i + 1] & 0xFF) == 0xD9) return true;
+            }
+            return false;
         }
 
         private void frameEnd(long nowMs) {
@@ -210,21 +239,32 @@ final class StreamProbe {
      * Result of a probe from what it saw: no PLAY (the last error, or no answer), PLAY but no
      * video packets, or the stream.
      */
-    static Result result(String url, long atMs, boolean played, String failure, Counter c) {
+    static Result result(String key, long atMs, boolean played, String failure, Counter c) {
         if (!played) {
-            return new Result(url, atMs, false, failure != null ? QuadCell.shortError(failure)
+            return new Result(key, atMs, false, failure != null ? QuadCell.shortError(failure)
                     : "No answer from camera", null);
         }
         if (c.frames == 0) {
-            return new Result(url, atMs, false, c.packets > 0
+            return new Result(key, atMs, false, c.packets > 0
                     ? "Packets but no whole frame" : "PLAY OK, but no video", c);
         }
-        return new Result(url, atMs, true, c.summary(), c);
+        return new Result(key, atMs, true, c.summary(), c);
     }
 
     /** Asked between steps: the probe stops early, e.g. the TV switched to that camera. */
     interface Cancel {
         boolean cancelled();
+
+        /**
+         * Starts the probe's session unless cancelled already; returns false then. A cancel
+         * after this stops the session at once rather than at the probe's next look at
+         * {@link #cancelled()} (Qodo on #163).
+         */
+        default boolean start(RtspSession session) {
+            if (cancelled()) return false;
+            session.start();
+            return true;
+        }
     }
 
     private StreamProbe() {}
@@ -259,23 +299,19 @@ final class StreamProbe {
             public boolean onPacket(int channel, byte[] buf, int offset, int length) {
                 if (channel != RtspSession.CHANNEL_VIDEO) return false;
                 synchronized (counter) {
-                    counter.onPacket(buf, offset, length, SystemClock.elapsedRealtime());
+                    return counter.onPacket(buf, offset, length, SystemClock.elapsedRealtime());
                 }
-                return true;
             }
 
             @Override
             public boolean onJpegFrame(byte[] buf, int offset, int length) {
                 synchronized (counter) {
-                    counter.onJpegFrame(buf, offset, length, SystemClock.elapsedRealtime());
+                    return counter.onJpegFrame(buf, offset, length, SystemClock.elapsedRealtime());
                 }
-                return true;
             }
         });
-        // Auto would wait for UDP first: a probe takes TCP, the safe choice for any camera
-        Transport.Mode m = mode == null || mode == Transport.Mode.AUTO ? Transport.Mode.TCP : mode;
-        session.configure(url, userAgent, false, m);
-        session.start();
+        session.configure(url, userAgent, false, probeMode(mode));
+        if (!cancel.start(session)) return null;
         boolean ok = false;
         try {
             ok = waitFor(played, CONNECT_WINDOW_MS, cancel);
@@ -285,7 +321,7 @@ final class StreamProbe {
         }
         if (cancel.cancelled()) return null;
         synchronized (counter) {
-            return result(url, SystemClock.elapsedRealtime(), ok, failure[0], counter);
+            return result(key(url, mode), SystemClock.elapsedRealtime(), ok, failure[0], counter);
         }
     }
 
