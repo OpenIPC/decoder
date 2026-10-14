@@ -1,6 +1,6 @@
 name: Device report
 description: Report how OpenIPC Decoder works on your phone, tablet, TV, set-top box or car device
-title: "[Device]: "
+title: "User test report"
 labels: ["device-report"]
 body:
   - type: markdown
