@@ -124,6 +124,11 @@ final class Snapshots {
         Paint frames = new Paint(Paint.FILTER_BITMAP_FLAG);
         Paint grid = new Paint();
         grid.setColor(Color.DKGRAY);
+        // The camera on screen in a grid drawn for the single view (#100)
+        Paint onScreen = new Paint();
+        onScreen.setColor(0xFF3D8BFF);
+        onScreen.setStyle(Paint.Style.STROKE);
+        onScreen.setStrokeWidth(4);
         int copied = 0;
         for (int i = 0; i < n; i++) {
             Cell c = cells.get(i);
@@ -142,11 +147,7 @@ final class Snapshots {
                 canvas.drawRect(x, y, x + cw, y + 1, grid);
                 canvas.drawRect(x, y, x + 1, y + ch, grid);
                 if (c.onScreen && side > 1) {
-                    Paint frame = new Paint();
-                    frame.setColor(0xFF3D8BFF);
-                    frame.setStyle(Paint.Style.STROKE);
-                    frame.setStrokeWidth(4);
-                    canvas.drawRect(x + 2, y + 2, x + cw - 2, y + ch - 2, frame);
+                    canvas.drawRect(x + 2, y + 2, x + cw - 2, y + ch - 2, onScreen);
                 }
             }
         }
