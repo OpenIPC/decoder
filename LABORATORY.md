@@ -259,7 +259,7 @@ The link goes into the active slot and is saved. The transport extra exists from
 - Transport in the UI: menu → URL dialog of the slot → **TCP / UDP / Auto / Multicast** under the URL.
 - udp:// slots (#72) are a URL, not a transport: `udp://@:5600`, `udp://@239.1.2.3:5600`, `udp://<camera ip>@239.1.2.3:5600`, optional `?codec=h265&pt=97`.
 - The share intent writes into the **active** slot (and switches to the single view): select the slot first.
-- Filling slots on the box: tap a menu button by its text rather than by coordinates (from 2.07 the menu is a grid: slots `1`–`8` on top, then `Settings WebUI Grid Slides`, then `Exit Reset Debug UDP`, #177): `uiautomator dump`, take the `bounds` of `text="N"`, `input tap` its centre; the URL dialog of a slot: **Settings** (single view only) → `TCP` / `UDP` / `Auto` / `Multicast` → `SAVE`.
+- Filling slots on the box: tap a menu button by its text rather than by coordinates (from 2.06 the menu is a grid: slots `1`–`8` on top, then `Settings WebUI Grid Slides`, then `Exit Reset Debug UDP`, #177): `uiautomator dump`, take the `bounds` of `text="N"`, `input tap` its centre; the URL dialog of a slot: **Settings** (single view only) → `TCP` / `UDP` / `Auto` / `Multicast` → `SAVE`.
 
 ## Methods
 
@@ -304,9 +304,9 @@ The script uninstalls first. To test an upgrade that keeps the settings, use `$A
 | UDP socket leak | `$ADB shell cat /proc/$(pidof com.openipc.decoder)/net/udp`, count lines before and after |
 | CPU per thread | `$ADB shell top -H -p <pid>` (a spinning `rtsp-audio` thread was found this way) |
 | Screen off / on | `input keyevent KEYCODE_SLEEP` / `KEYCODE_WAKEUP` |
-| Grid ↔ single stress (#76) | loop: menu → tap `4` (grid → single), 4 s, menu → tap `Grid` (single → grid; `Q` before 2.07), 8 s; afterwards count `Davey! duration=` ≥ 1000 ms and `ANR in` in logcat; 8–10 cycles reproduce #76 today |
+| Grid ↔ single stress (#76) | loop: menu → tap `4` (grid → single), 4 s, menu → tap `Grid` (single → grid; `Q` before 2.06), 8 s; afterwards count `Davey! duration=` ≥ 1000 ms and `ANR in` in logcat; 8–10 cycles reproduce #76 today |
 | Transport in use | `/stats.json`: `transport` (in use, e.g. `TCP (auto)` after a fallback) and `transport_mode` (setting) per cell; `nal_dropped` = NAL units lost to packet loss |
-| Menu with a remote (#91) | `input keyevent KEYCODE_DPAD_CENTER` opens the menu with the focus on the active item (slot, Q or U); `DPAD_RIGHT` ×n, `DPAD_DOWN` (Exit), `DPAD_UP`, then `DPAD_CENTER` must switch to that slot; `KEYCODE_BACK` closes it. The focused item: `uiautomator dump /sdcard/m.xml` and look for `focused="true"`. Check in single view and multi-view |
+| Menu with a remote (#91) | `input keyevent KEYCODE_DPAD_CENTER` opens the menu with the focus on the active item (slot, Grid or UDP; Q or U before 2.06); `DPAD_RIGHT` ×n along the slots, `DPAD_DOWN` to the word cell under the slot (Settings, WebUI, Grid or Slides; a grey one passes on to the row below), `DPAD_UP` back to the left slot above it, then `DPAD_CENTER` must switch to that slot; `KEYCODE_BACK` closes it. The focused item: `uiautomator dump /sdcard/m.xml` and look for `focused="true"`. Check in single view and multi-view |
 | 4:3 screen | `wm size 960x720`, back with `wm size reset` |
 | Audio playback (sound cannot be heard remotely) | `dumpsys media.audio_flinger`: server position of the app's track; frames/s ≈ sample rate, no underruns |
 | Screenshot | `$ADB exec-out screencap -p > shot.png`; long-press screenshot in the app saves to `Pictures/OpenIPC/` |

@@ -180,7 +180,11 @@ class MenuManager {
         // exactly two slots wide. Every cell has the width of the widest word, so the columns
         // line up and nothing is clipped
         int cell = wordCellWidth();
-        int half = (cell + 1) / 2;
+        // Never wider than the screen allows (4 cells and the popup's margins): a large font
+        // or a narrow screen shortens the labels with an ellipsis instead (Qodo on #178)
+        int avail = activity.getResources().getDisplayMetrics().widthPixels - 2 * dp(12);
+        if (avail > 0) cell = Math.min(cell, avail / 4);
+        int half = cell / 2;
         cell = half * 2;
 
         LinearLayout camRow = gridRow(layout);
@@ -367,7 +371,8 @@ class MenuManager {
         TextView item = createItem(title);
         item.setGravity(Gravity.CENTER);
         item.setSingleLine(true);
-        item.setPadding(0, dp(8), 0, dp(8));
+        item.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        item.setPadding(dp(2), dp(8), dp(2), dp(8));
         row.addView(item, new LinearLayout.LayoutParams(width,
                 LinearLayout.LayoutParams.MATCH_PARENT));
         return item;
