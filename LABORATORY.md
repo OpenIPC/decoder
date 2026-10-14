@@ -121,7 +121,7 @@ Only for filling grid cells (Quad 2×2, 3×3) and screenshots; not used in strea
 | Slot | Camera |
 |---|---|
 | 1 | `.247` |
-| 2 | `.133` |
+| 2 | `.133`, HTTP MJPEG `http://<.133>/mjpeg` (#121, #139) |
 | 3 | `.126` |
 | 4 | `.201` |
 | 5 | `.248` |
