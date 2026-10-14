@@ -95,6 +95,7 @@ Added 2026-10-14: the only device in the lab with a touch screen and an on-scree
 | Screen | 720×1600, 280 dpi, touch, on-screen keyboard (Gboard); the app turns it to landscape (1600×720) |
 | HW video decoder | `c2.unisoc.avc.decoder` / `c2.unisoc.hevc.decoder` (10 instances each; 1080p: H.264 106 fps, H.265 212 fps), also as `OMX.sprd.*` |
 | Menu | a tap on the picture; `uiautomator dump` works for finding buttons |
+| Checked | 2026-10-14, v2.04, `.133` over RTSP: H.264 1920×1080 at 30 fps (UDP, Opus), 16:9 kept. WebUI full screen (#160): the keyboard shows for the camera's login fields, the page scrolls the focused field above it, typed text stays when the focus moves to another field, Back hides the keyboard and then closes WebUI. Found: **Close** two thirds under the status bar (#169) |
 
 ## Cameras
 

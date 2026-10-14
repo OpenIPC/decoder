@@ -258,9 +258,11 @@ export KEY_PASS=your_key_password
 | 手机     | Samsung Galaxy J7                     | 10                                 | 3.18.150       | 1.0x    |                                                                                         |
 | 手机     | Samsung S8                            | 9                                  | 4.4.153        | 1.0x    |                                                                                         |
 | 手机     | Samsung S23 Ultra                     | 15                                 | 5.15.153       | 1.0x    |                                                                                         |
+| 手机     | TECNO KM4                             | 15                                 | 5.15.194       | v2 2.04 | 实验室触屏设备：已验证 WebUI 与屏幕键盘（[#159](https://github.com/OpenIPC/decoder/issues/159)、[#160](https://github.com/OpenIPC/decoder/issues/160)）；Close 按钮被状态栏遮挡（[#169](https://github.com/OpenIPC/decoder/issues/169)） |
 | 手机     | Xiaomi Redmi 7A                       | 10                                 | 4.9.261        | 1.0x    |                                                                                         |
 | 手机     | Xiaomi Redmi Note 7 (M1901F7G)        | 10                                 | 4.4.192        | 1.0x    |                                                                                         |
 | 手机     | Xiaomi Redmi Note 13 4G               | 13                                 | 5.15.94        | 1.0x    |                                                                                         |
+| 平板     | Lenovo TB-8504X                       | 8.1.0                              | 3.18.71        | v2 2.00 | H.265 与多画面正常；WebUI 输入问题已在 2.02 修复（[#159](https://github.com/OpenIPC/decoder/issues/159)） |
 | 平板     | Lenovo TB-X304L                       | 8.1.0                              | 3.18.71        | 1.0x    | 1.0x 中画面边缘被裁切，v2 已修复（[#17](https://github.com/OpenIPC/decoder/issues/17)） |
 | 平板     | Lenovo TB-X606F                       | 10                                 | —              | 1.0x    | 1.0x 中画面边缘被裁切，v2 已修复（[#17](https://github.com/OpenIPC/decoder/issues/17)） |
 | 平板     | Lenovo Tab P11                        | 11                                 | 4.19.157-perf+ | 1.0x    | 1.0x 中画面边缘被裁切，v2 已修复（[#17](https://github.com/OpenIPC/decoder/issues/17)） |
@@ -272,6 +274,7 @@ export KEY_PASS=your_key_password
 | 电视盒子 | AG-216                                | 10                                 | 4.9.170        | v2 2.00 | v2 测试设备；实测解码能力约为总计 1080p60（全帧率两路 1080p30）                         |
 | 电视盒子 | SberBox SBDV-00001                    | 定制系统                           | 4.9.228        | 1.0x    |                                                                                         |
 | 电视盒子 | X96Q（全志 H313）                     | 10                                 | 4.9.170        | 1.0x    |                                                                                         |
+| 投影仪   | SIBIRLINK HY300 / HY320               | 11                                 | 4.19.323       | v2 2.02 | 1080p H.264 / H.265 正常；2304×1296 和 2560×1440 无法播放（[#165](https://github.com/OpenIPC/decoder/issues/165)、[#166](https://github.com/OpenIPC/decoder/issues/166)） |
 | 电视     | Haier Candy Android TV 2K             | 11                                 | 4.9.243+       | 1.0x    | 应用列表中没有图标                                                                      |
 | 电视     | Yandex TV Novex NVX-55U169TSY         | 7.1.1                              | 4.4.3          | 1.0x    |                                                                                         |
 | 车载     | 多媒体主机 JCAC10003（ac8227/ac8229） | 12                                 | 3.18.79+       | 1.0x    |                                                                                         |
