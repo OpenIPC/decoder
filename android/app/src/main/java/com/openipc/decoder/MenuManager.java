@@ -68,6 +68,8 @@ class MenuManager {
     private TextView mSettingsBtn;
     /** Settings | WebUI, shown in the single view only (#173). */
     private LinearLayout mSettingsRow;
+    /** Left items of the two-item rows, aligned with the slot row's middle (#173). */
+    private final java.util.List<TextView> mPairLefts = new java.util.ArrayList<>();
     private TextView mWebUiBtn;
     TextView[] camButtons;
     private Dialog mBrowserDialog;
@@ -183,6 +185,9 @@ class MenuManager {
 
         LinearLayout camRow = new LinearLayout(activity);
         camRow.setOrientation(LinearLayout.HORIZONTAL);
+        // Not inside the layout pass: changing a size there would be lost or loop
+        camRow.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) ->
+                camRow.post(() -> alignPairs(camRow)));
         // 8 slots + U D Q (#13, #93) may not fit a narrow screen or a large font: the row scrolls,
         // and follows the focus when moving with a remote
         HorizontalScrollView camScroll = new HorizontalScrollView(activity);
@@ -405,14 +410,16 @@ class MenuManager {
     }
 
     /**
-     * Two menu items side by side, split by a thin line exactly in the middle (#173): both get
-     * half the width. Left / Right move between them with a remote.
+     * Two menu items side by side, split by a thin line (#173), which {@link #alignPairs} puts
+     * under the gap between slots 6 and 7 of the row above. Left / Right move between them
+     * with a remote.
      */
     private LinearLayout pairRow(TextView left, TextView right) {
         LinearLayout row = new LinearLayout(activity);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.addView(left, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        mPairLefts.add(left);
         View line = new View(activity);
         line.setBackgroundColor(Color.DKGRAY);
         row.addView(line, new LinearLayout.LayoutParams(dp(1),
@@ -422,6 +429,25 @@ class MenuManager {
         left.setSingleLine(true);
         right.setSingleLine(true);
         return row;
+    }
+
+    /**
+     * The left item of every two-item row ends where slot 7 begins, so the dividing lines run
+     * on from the gap between slots 6 and 7: the slot buttons differ in width, half the row
+     * is not that gap. Until the slot row is laid out, both halves stay equal.
+     */
+    private void alignPairs(LinearLayout camRow) {
+        if (camButtons == null || camButtons.length < 7 || camButtons[6] == null) return;
+        int gap = (camButtons[5].getRight() + camButtons[6].getLeft()) / 2;
+        int width = gap - dp(1) / 2;
+        if (gap <= 0 || width <= 0) return;
+        for (TextView left : mPairLefts) {
+            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) left.getLayoutParams();
+            if (lp.width == width && lp.weight == 0) continue;
+            lp.width = width;
+            lp.weight = 0;
+            left.setLayoutParams(lp);
+        }
     }
 
     private TextView createItem(String title) {

@@ -551,8 +551,9 @@ final class DebugServer {
             + "try{localStorage.setItem('every',every)}catch(x){}};mark();\n"
             + "var img=$('snap');img.onload=img.onerror=function(){later(snap,every*1000)};\n"
             + "function snap(){img.src='/snapshot.jpg?labels=0&t='+Date.now()}\n"
-            // Info on or off (#141), remembered like the interval
-            + "var shown=1,iseg=$('info');try{shown=localStorage.getItem('info')==='0'?0:1}catch(x){}\n"
+            // Info on or off (#141), remembered like the interval; Off until chosen: the page
+            // opens on the clean picture, every 5 s
+            + "var shown=0,iseg=$('info');try{shown=localStorage.getItem('info')==='1'?1:0}catch(x){}\n"
             + "function imark(){[].forEach.call(iseg.children,function(b){b.className=+b.value===sh"
             + "own?'on':''});document.body.classList.toggle('clean',!shown)}\n"
             + "iseg.onclick=function(e){if(!e.target.value)return;shown=+e.target.value;imark();"
