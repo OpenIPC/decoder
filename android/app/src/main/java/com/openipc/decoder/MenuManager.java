@@ -16,9 +16,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.text.InputType;
 import android.text.SpannableString;
-import android.text.style.ForegroundColorSpan;
 import android.text.style.RelativeSizeSpan;
-import android.text.style.SuperscriptSpan;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -30,8 +28,6 @@ import android.webkit.HttpAuthHandler;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.EditText;
-import android.widget.FrameLayout;
-import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.RadioButton;
@@ -64,13 +60,9 @@ class MenuManager {
     /** The UDP RTP view is shown: neither a slot nor multi-view is active. */
     private boolean udpShown;
     private boolean mMenuIsCached;
-    /** The item a remote starts from: the active slot, Q or U (#91). */
+    /** The item a remote starts from: the active slot, Grid or UDP (#91, #177). */
     private TextView mFocusItem;
     private TextView mSettingsBtn;
-    /** Settings | WebUI, shown in the single view only (#173). */
-    private LinearLayout mSettingsRow;
-    /** Left items of the two-item rows, aligned with the slot row's middle (#173). */
-    private final java.util.List<TextView> mPairLefts = new java.util.ArrayList<>();
     private TextView mWebUiBtn;
     TextView[] camButtons;
     private Dialog mBrowserDialog;
@@ -184,35 +176,14 @@ class MenuManager {
         mMenuPopup = popup;
         popup.setOnDismissListener(() -> mMenuPopup = null);
 
-        LinearLayout camRow = new LinearLayout(activity);
-        camRow.setOrientation(LinearLayout.HORIZONTAL);
-        // Not inside the layout pass: changing a size there would be lost or loop
-        camRow.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) ->
-                camRow.post(() -> alignPairs(camRow)));
-        // 8 slots + U D Q (#13, #93) may not fit a narrow screen or a large font: the row scrolls,
-        // and follows the focus when moving with a remote
-        HorizontalScrollView camScroll = new HorizontalScrollView(activity);
-        camScroll.setHorizontalScrollBarEnabled(false);
-        camScroll.addView(camRow, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT));
-        layout.addView(camScroll, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
+        // One grid (#177): the 8 slots on top, two rows of four words below, each word cell
+        // exactly two slots wide. Every cell has the width of the widest word, so the columns
+        // line up and nothing is clipped
+        int cell = wordCellWidth();
+        int half = (cell + 1) / 2;
+        cell = half * 2;
 
-        mSettingsBtn = createItem("Settings");
-
-        final TextView quadBtn = createItem("Q");
-        quadBtn.setGravity(Gravity.CENTER);
-        quadBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
-
-        mWebUiBtn = createItem("WebUI");
-        // Two items per row keep the menu short (#173); the row is for the single view only
-        mSettingsRow = pairRow(mSettingsBtn, mWebUiBtn);
-        layout.addView(mSettingsRow, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        mSettingsRow.setVisibility(single ? View.VISIBLE : View.GONE);
-
+        LinearLayout camRow = gridRow(layout);
         camButtons = new TextView[CAM_COUNT];
         mCachedCamButtons = new TextView[CAM_COUNT];
         for (int i = 0; i < CAM_COUNT; i++) {
@@ -220,18 +191,11 @@ class MenuManager {
             camButtons[i] = createItem(String.valueOf(i + 1));
             mCachedCamButtons[i] = camButtons[i];
             camButtons[i].setGravity(Gravity.CENTER);
-            camButtons[i].setPadding(dp(12), dp(8), dp(12), dp(8));
-            camRow.addView(camButtons[i], new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT));
-
-            if (i == mActive && single) {
-                highlightItem(camButtons[i]);
-                applyQualityColor(camButtons[i], i, !single, mActive, mHosts);
-            } else {
-                applyQualityColor(camButtons[i], i, !single, mActive, mHosts);
-            }
-
+            camButtons[i].setPadding(0, dp(8), 0, dp(8));
+            camRow.addView(camButtons[i], new LinearLayout.LayoutParams(half,
+                    LinearLayout.LayoutParams.MATCH_PARENT));
+            if (i == mActive && single) highlightItem(camButtons[i]);
+            applyQualityColor(camButtons[i], i, !single, mActive, mHosts);
             camButtons[i].setOnClickListener(v -> {
                 if (listener != null) listener.onSwitchCamera(slot);
                 PopupWindow p = mMenuPopup;
@@ -239,41 +203,12 @@ class MenuManager {
             });
         }
 
-        // U after the slots: the reserved UDP RTP cell of the 3x3 grid, full-screen (#68)
-        final TextView udpBtn = createItem("U");
-        udpBtn.setGravity(Gravity.CENTER);
-        udpBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
-        camRow.addView(udpBtn, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-        if (udpShown) highlightItem(udpBtn);
-        mCachedUdpBtn = udpBtn;
-        udpBtn.setOnClickListener(v -> {
-            PopupWindow p = mMenuPopup;
-            if (p != null) p.dismiss();
-            if (listener != null) listener.onShowUdp();
-        });
-
-        // D after U: the debug text in the multi-view cells, highlighted while on
-        final TextView statsBtn = createItem("D");
-        statsBtn.setGravity(Gravity.CENTER);
-        statsBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
-        camRow.addView(statsBtn, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-        if (statsShown) highlightItem(statsBtn);
-        mCachedStatsBtn = statsBtn;
-        statsBtn.setOnClickListener(v -> {
-            PopupWindow p = mMenuPopup;
-            if (p != null) p.dismiss();
-            if (listener != null) listener.onToggleStats();
-        });
-
-        // Q, then S last: 1 2 3 4 5 6 7 8 U D Q S (#93, #108)
-        camRow.addView(quadBtn, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-        // Q is the view, S the playback mode: both may be on (#153)
+        // Settings | WebUI | Grid | Slides
+        LinearLayout modeRow = gridRow(layout);
+        mSettingsBtn = wordItem(modeRow, "Settings", cell);
+        mWebUiBtn = wordItem(modeRow, "WebUI", cell);
+        // Grid is the view, Slides the playback mode: both may be on (#153)
+        final TextView quadBtn = wordItem(modeRow, "Grid", cell);
         if (quadEnabled) highlightItem(quadBtn);
         mCachedQuadBtn = quadBtn;
         quadBtn.setOnClickListener(v -> {
@@ -281,13 +216,8 @@ class MenuManager {
             if (p != null) p.dismiss();
             if (listener != null) listener.onToggleQuad();
         });
-
-        final TextView slidesBtn = createItem("S");
-        slidesBtn.setGravity(Gravity.CENTER);
-        slidesBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
-        camRow.addView(slidesBtn, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
+        // Slides: every cell on key frames only (#108)
+        final TextView slidesBtn = wordItem(modeRow, "Slides", cell);
         if (slidesShown) highlightItem(slidesBtn);
         mCachedSlidesBtn = slidesBtn;
         slidesBtn.setOnClickListener(v -> {
@@ -296,37 +226,42 @@ class MenuManager {
             if (listener != null) listener.onToggleSlides();
         });
 
-        // "Exit" centred in its half (#176): the small version text follows it, and an
-        // invisible copy of it in front balances the line, so the word itself is in the middle
-        String ver = "[v" + version + ", " + gitHash + "]";
-        String code = ver + " Exit " + ver;
-        int exitEnd = ver.length() + 5;
-        SpannableString s = new SpannableString(code);
-        s.setSpan(new SuperscriptSpan(), 0, ver.length(), 0);
-        s.setSpan(new RelativeSizeSpan(0.5f), 0, ver.length(), 0);
-        s.setSpan(new ForegroundColorSpan(Color.TRANSPARENT), 0, ver.length(), 0);
-        s.setSpan(new SuperscriptSpan(), exitEnd, s.length(), 0);
-        s.setSpan(new RelativeSizeSpan(0.5f), exitEnd, s.length(), 0);
-
-        View divider = new View(activity);
-        divider.setBackgroundColor(Color.DKGRAY);
-        layout.addView(divider, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
-
+        // Exit | Reset | Debug | UDP
+        LinearLayout actionRow = gridRow(layout);
+        // The version under Exit, small (#176): beside it, it would widen every cell
+        String ver = "v" + version + ", " + gitHash;
+        SpannableString s = new SpannableString("Exit\n" + ver);
+        s.setSpan(new RelativeSizeSpan(0.5f), 5, s.length(), 0);
+        TextView exit = wordItem(actionRow, "Exit", cell);
+        exit.setSingleLine(false);
+        exit.setText(s);
+        exit.setOnClickListener(v -> {
+            if (listener != null) listener.onExit();
+        });
         // Two deliberate presses: Reset, then Clear settings in the confirmation (#171)
-        TextView reset = createItem("Reset");
+        TextView reset = wordItem(actionRow, "Reset", cell);
         reset.setOnClickListener(v -> {
             PopupWindow p = mMenuPopup;
             if (p != null) p.dismiss();
             confirmReset();
         });
-
-        TextView exit = createItem("Exit");
-        exit.setText(s);
-        layout.addView(pairRow(exit, reset), new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        exit.setOnClickListener(v -> {
-            if (listener != null) listener.onExit();
+        // Debug: the text in the multi-view cells, highlighted while on
+        final TextView statsBtn = wordItem(actionRow, "Debug", cell);
+        if (statsShown) highlightItem(statsBtn);
+        mCachedStatsBtn = statsBtn;
+        statsBtn.setOnClickListener(v -> {
+            PopupWindow p = mMenuPopup;
+            if (p != null) p.dismiss();
+            if (listener != null) listener.onToggleStats();
+        });
+        // UDP: the reserved UDP RTP cell full screen (#68, #87)
+        final TextView udpBtn = wordItem(actionRow, "UDP", cell);
+        if (udpShown) highlightItem(udpBtn);
+        mCachedUdpBtn = udpBtn;
+        udpBtn.setOnClickListener(v -> {
+            PopupWindow p = mMenuPopup;
+            if (p != null) p.dismiss();
+            if (listener != null) listener.onShowUdp();
         });
 
         mSettingsBtn.setOnClickListener(v -> {
@@ -334,12 +269,15 @@ class MenuManager {
             if (p != null) p.dismiss();
             if (listener != null) listener.onShowSettings();
         });
-
         mWebUiBtn.setOnClickListener(v -> {
             PopupWindow p = mMenuPopup;
             if (p != null) p.dismiss();
             if (listener != null) listener.onWebUI();
         });
+        setSingleViewItems(single);
+        linkRemote(camButtons,
+                new TextView[]{mSettingsBtn, mWebUiBtn, quadBtn, slidesBtn},
+                new TextView[]{exit, reset, statsBtn, udpBtn});
 
         mMenuLayout = layout;
         mMenuIsCached = true;
@@ -349,9 +287,7 @@ class MenuManager {
 
     private void updateCachedMenu(boolean quadEnabled, int mActive, String[] mHosts) {
         boolean single = !quadEnabled && !udpShown;
-        if (mSettingsRow != null) {
-            mSettingsRow.setVisibility(single ? View.VISIBLE : View.GONE);
-        }
+        setSingleViewItems(single);
         if (mCachedQuadBtn != null) {
             if (quadEnabled) highlightItem(mCachedQuadBtn);
             else resetItem(mCachedQuadBtn);
@@ -417,53 +353,68 @@ class MenuManager {
         }
     }
 
-    /**
-     * Two menu items side by side, split by a thin line (#173), which {@link #alignPairs} puts
-     * under the gap between slots 6 and 7 of the row above. Left / Right move between them
-     * with a remote.
-     */
-    private LinearLayout pairRow(TextView left, TextView right) {
+    /** A row of the menu grid (#177), as wide as the menu. */
+    private LinearLayout gridRow(LinearLayout menu) {
         LinearLayout row = new LinearLayout(activity);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.addView(left, new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        mPairLefts.add(left);
-        View line = new View(activity);
-        line.setBackgroundColor(Color.DKGRAY);
-        row.addView(line, new LinearLayout.LayoutParams(dp(1),
-                LinearLayout.LayoutParams.MATCH_PARENT));
-        row.addView(right, new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        left.setSingleLine(true);
-        right.setSingleLine(true);
-        // Labels in the middle of their halves (#176)
-        left.setGravity(Gravity.CENTER);
-        right.setGravity(Gravity.CENTER);
+        menu.addView(row, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         return row;
     }
 
+    /** A word cell of the menu grid: one width for all, the label centred (#176, #177). */
+    private TextView wordItem(LinearLayout row, String title, int width) {
+        TextView item = createItem(title);
+        item.setGravity(Gravity.CENTER);
+        item.setSingleLine(true);
+        item.setPadding(0, dp(8), 0, dp(8));
+        row.addView(item, new LinearLayout.LayoutParams(width,
+                LinearLayout.LayoutParams.MATCH_PARENT));
+        return item;
+    }
+
+    /** Width of a word cell: the widest label of the lower rows, or two slots if wider. */
+    private int wordCellWidth() {
+        android.text.TextPaint paint = new android.text.TextPaint();
+        paint.setTextSize(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 18,
+                activity.getResources().getDisplayMetrics()));
+        float widest = 0;
+        for (String w : new String[]{"Settings", "WebUI", "Grid", "Slides",
+                "Exit", "Reset", "Debug", "UDP"}) {
+            widest = Math.max(widest, paint.measureText(w));
+        }
+        int slot = (int) Math.ceil(paint.measureText("8")) + 2 * dp(12);
+        return Math.max((int) Math.ceil(widest) + 2 * dp(10), 2 * slot);
+    }
+
     /**
-     * The left item of every two-item row ends where slot 7 begins, so the dividing lines run
-     * on from the gap between slots 6 and 7: the slot buttons differ in width, half the row
-     * is not that gap. Until the slot row is laid out, and while it is too wide for the menu,
-     * both halves stay equal.
+     * Settings and WebUI work in the single view only. Elsewhere they stay in place, grey and
+     * skipped by the remote, so the grid does not change shape (#177).
      */
-    private void alignPairs(LinearLayout camRow) {
-        if (camButtons == null || camButtons.length < 7 || camButtons[6] == null) return;
-        int gap = (camButtons[5].getRight() + camButtons[6].getLeft()) / 2;
-        int width = gap - dp(1) / 2;
-        // A slot row wider than the menu scrolls, and its gap moves with it: then plain halves,
-        // which keep both items whole (Qodo on #175)
-        View scroll = (View) camRow.getParent();
-        boolean fits = scroll != null && camRow.getWidth() <= scroll.getWidth();
-        for (TextView left : mPairLefts) {
-            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) left.getLayoutParams();
-            int w = fits && width > 0 ? width : 0;
-            float weight = fits && width > 0 ? 0 : 1;
-            if (lp.width == w && lp.weight == weight) continue;
-            lp.width = w;
-            lp.weight = weight;
-            left.setLayoutParams(lp);
+    private void setSingleViewItems(boolean single) {
+        for (TextView item : new TextView[]{mSettingsBtn, mWebUiBtn}) {
+            if (item == null) continue;
+            item.setEnabled(single);
+            item.setFocusable(single);
+            item.setTextColor(single ? Color.WHITE : 0xFF555555);
+        }
+    }
+
+    /**
+     * Remote moves in the grid (#177): Down from a slot to the word cell under it, Up from a
+     * word cell to the left one of its two slots; a grey cell passes the move on.
+     */
+    private static void linkRemote(TextView[] slots, TextView[] mid, TextView[] low) {
+        for (TextView v : slots) v.setId(View.generateViewId());
+        for (TextView v : mid) v.setId(View.generateViewId());
+        for (TextView v : low) v.setId(View.generateViewId());
+        for (int i = 0; i < slots.length; i++) {
+            slots[i].setNextFocusDownId(mid[Math.min(i / 2, mid.length - 1)].getId());
+        }
+        for (int j = 0; j < mid.length; j++) {
+            mid[j].setNextFocusUpId(slots[Math.min(2 * j, slots.length - 1)].getId());
+            mid[j].setNextFocusDownId(low[j].getId());
+            low[j].setNextFocusUpId(mid[j].getId());
         }
     }
 
