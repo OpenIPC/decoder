@@ -1,4 +1,4 @@
-name: Camera report
+name: "Camera report / 摄像机报告 / Отчёт о камере"
 description: Report how OpenIPC Decoder plays a camera (IP camera, NVR channel, encoder, RTSP server)
 title: "[Camera]: "
 labels: ["camera-report"]
@@ -8,12 +8,16 @@ body:
       value: |
         Thanks for testing! Camera reports help other users and show which streams need work.
         **Remove the password from the URL** (write `user:***`) and do not post public IP addresses.
-        The app version and build hash are shown in the menu next to **Exit**, for example `v2.00, 1dda076`.
+        The app version is shown in the menu next to **Exit**, for example `v2.02`.
+
+        感谢测试！可以用中文填写。**请从 URL 中删除密码**（写成 `user:***`），不要公开 IP 地址。
+
+        Спасибо за тестирование! Можно писать по-русски. **Уберите пароль из URL** (`user:***`) и не публикуйте внешние IP-адреса.
 
   - type: input
     id: manufacturer
     attributes:
-      label: Manufacturer
+      label: "Manufacturer / 厂商 / Производитель"
       placeholder: "Hikvision, Dahua, XM (Xiongmai), OpenIPC board, ..."
     validations:
       required: true
@@ -21,7 +25,7 @@ body:
   - type: input
     id: model
     attributes:
-      label: Model
+      label: "Model / 型号 / Модель"
       description: Model as printed on the label or shown in the camera's web interface
       placeholder: "DS-2CD1023G0-I, IPC-HFW1230S, SSC335 board, ..."
     validations:
@@ -30,38 +34,38 @@ body:
   - type: dropdown
     id: firmware_kind
     attributes:
-      label: Firmware
+      label: "Firmware / 固件 / Прошивка"
       options:
         - OpenIPC (Majestic)
         - OpenIPC (other streamer)
         - Stock / vendor firmware
-        - Other
+        - "Other / 其他 / Другое"
     validations:
       required: true
 
   - type: input
     id: firmware_version
     attributes:
-      label: Firmware version (optional)
+      label: "Firmware version (optional) / 固件版本（可选） / Версия прошивки (необязательно)"
       description: "OpenIPC: `cat /etc/os-release` or the web interface; vendor firmware: version and date"
       placeholder: "OpenIPC 2.6.10.12 lite / V5.5.0 build 180206"
 
   - type: input
     id: soc
     attributes:
-      label: Processor / SoC (optional)
+      label: "Processor, SoC (optional) / 处理器、芯片（可选） / Процессор, SoC (необязательно)"
       placeholder: "SigmaStar SSC335, HiSilicon Hi3516EV300, Goke GK7205V300, Ingenic T31, ..."
 
   - type: input
     id: sensor
     attributes:
-      label: Image sensor (optional)
+      label: "Image sensor (optional) / 图像传感器（可选） / Сенсор (необязательно)"
       placeholder: "SC2336, IMX307, GC2053, ..."
 
   - type: input
     id: url
     attributes:
-      label: RTSP URL
+      label: "RTSP URL / RTSP 地址 / RTSP URL"
       description: The URL that works in the app, with the password replaced by `***`. The path matters most (`/stream=0`, `/Streaming/Channels/101`, `/cam/realmonitor?channel=1&subtype=0`, ...)
       placeholder: "rtsp://admin:***@192.168.1.10:554/stream=0"
     validations:
@@ -70,7 +74,7 @@ body:
   - type: textarea
     id: other_urls
     attributes:
-      label: Other streams (optional)
+      label: "Other streams (optional) / 其他码流（可选） / Другие потоки (необязательно)"
       description: Substream, MJPEG or other paths of the same camera, one per line
       placeholder: |
         rtsp://admin:***@192.168.1.10:554/stream=1 — substream 704x576
@@ -79,39 +83,39 @@ body:
   - type: dropdown
     id: video_codec
     attributes:
-      label: Video codec
+      label: "Video codec / 视频编码 / Видеокодек"
       multiple: true
       options:
         - H.264
         - H.265
         - MJPEG
-        - Other
+        - "Other / 其他 / Другое"
     validations:
       required: true
 
   - type: input
     id: video_format
     attributes:
-      label: Resolution, frame rate, bitrate (optional)
+      label: "Resolution, frame rate, bitrate (optional) / 分辨率、帧率、码率（可选） / Разрешение, частота кадров, битрейт (необязательно)"
       placeholder: "1920x1080, 25 fps, 4 Mbit/s, key frame every 1 s"
 
   - type: dropdown
     id: audio_codec
     attributes:
-      label: Audio codec
+      label: "Audio codec / 音频编码 / Аудиокодек"
       options:
-        - No audio
+        - "No audio / 无音频 / Без звука"
         - AAC
         - Opus
         - G.711 (PCMU / PCMA)
         - L16 / PCM
         - G.726
-        - Other / unknown
+        - "Other, unknown / 其他、未知 / Другое, неизвестно"
 
   - type: checkboxes
     id: transports
     attributes:
-      label: Transports that work
+      label: "Transports that work / 可用的传输方式 / Работающие транспорты"
       description: Menu → slot URL dialog (single view) → TCP / UDP / Auto / Multicast; "UDP push" = the camera sends RTP to a `udp://` slot or the U cell
       options:
         - label: TCP
@@ -123,62 +127,62 @@ body:
   - type: dropdown
     id: auth
     attributes:
-      label: Authentication
+      label: "Authentication / 认证 / Аутентификация"
       options:
-        - None
+        - "None / 无 / Нет"
         - Basic
         - Digest
         - Credentials in the URL path (e.g. user=…_password=…)
-        - Unknown
+        - "Unknown / 未知 / Неизвестно"
 
   - type: checkboxes
     id: limits
     attributes:
-      label: Camera limits
+      label: "Camera limits / 摄像机限制 / Ограничения камеры"
       options:
-        - label: Accepts only one RTSP client at a time
-        - label: Needs a reconnect after the camera reboots (the app does not recover by itself)
+        - label: "Accepts only one RTSP client at a time / 同时只接受一个 RTSP 客户端 / Принимает только одного RTSP-клиента"
+        - label: "Needs a reconnect after the camera reboots / 摄像机重启后需要手动重连 / После перезагрузки камеры нужно переподключение"
 
   - type: input
     id: app_device
     attributes:
-      label: App version and device
+      label: "App version and device / 应用版本和设备 / Версия приложения и устройство"
       description: App version from the menu, and the device it ran on
-      placeholder: "v2.00, 1dda076 on AG-216 (Android 10)"
+      placeholder: "v2.02 on AG-216 (Android 10)"
     validations:
       required: true
 
   - type: dropdown
     id: result
     attributes:
-      label: Overall result
+      label: "Overall result / 总体结果 / Общий результат"
       options:
-        - Works
-        - Works with issues
-        - Does not work
+        - "Works / 正常 / Работает"
+        - "Works with issues / 可用但有问题 / Работает с проблемами"
+        - "Does not work / 不能用 / Не работает"
     validations:
       required: true
 
   - type: checkboxes
     id: works
     attributes:
-      label: What works
+      label: "What works / 哪些功能正常 / Что работает"
       options:
-        - label: Picture in single view
-        - label: Picture in multi-view
-        - label: Audio
-        - label: WebUI
-        - label: Debug page shows the stream (http://<device>:8085/)
+        - label: "Picture in single view / 单画面图像 / Картинка в одиночном виде"
+        - label: "Picture in multi-view / 多画面图像 / Картинка в мультивью"
+        - label: "Audio / 音频 / Звук"
+        - label: "WebUI"
+        - label: "Debug page shows the stream (http://<device>:8085/) / 调试页面显示码流 / Отладочная страница показывает поток"
 
   - type: textarea
     id: comment
     attributes:
-      label: Comment (optional)
+      label: "Comment (optional) / 备注（可选） / Комментарий (необязательно)"
       description: Anything that did not work or looked wrong, settings you had to change on the camera, delay, picture artefacts, ...
 
   - type: textarea
     id: logs
     attributes:
-      label: Log (optional)
+      label: "Log (optional) / 日志（可选） / Лог (необязательно)"
       description: "With USB/network debugging enabled: `adb logcat -d -s OpenIPCDecoder`, or `http://<device>:8085/log`. Check that no password is in it."
       render: text

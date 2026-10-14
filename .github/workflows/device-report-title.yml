@@ -1,0 +1,23 @@
+name: Device report title
+
+# Device reports get one fixed title, set here rather than asked from the reporter: the form
+# only pre-fills it and people replaced it with anything from a model to a problem (#120, #159)
+on:
+  issues:
+    types: [opened, edited, labeled]
+
+permissions:
+  issues: write
+
+jobs:
+  title:
+    if: contains(github.event.issue.labels.*.name, 'device-report') && github.event.issue.title != 'User test report / 用户测试报告 / Отчёт о тестировании от пользователя'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set the title
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number }}
+          TITLE: User test report / 用户测试报告 / Отчёт о тестировании от пользователя
+        run: gh issue edit "$NUMBER" --repo "$REPO" --title "$TITLE"
