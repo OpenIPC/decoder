@@ -67,6 +67,11 @@ The menu is a grid: the eight slots on top, two rows of four below.
 [ Exit     | Reset  | Debug  | UDP    ]
 ```
 
+<p align="center">
+  <img src="screenshots/phone_menu.jpg" alt="The menu on a phone" width="400">
+  <img src="screenshots/phone_webui.jpg" alt="WebUI on a phone: the page scrolls the field above the keyboard" width="400">
+</p>
+
 | Item         | Action                                                                                                                                                                             |
 |--------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **1**–**8**  | Switch to a camera slot. The active slot's number shows the connection quality: green under 100 ms of jitter, yellow 100–300 ms, red above 300 ms. A grey number is an empty slot. |
