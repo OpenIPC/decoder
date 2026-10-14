@@ -27,6 +27,10 @@
         tools:targetApi="33">
         <!-- Separate process: it survives the crashed main process being killed -->
         <activity android:name="Crash" android:exported="false" android:process=":crash" />
+        <!-- Reset (#171): ends the main process and opens the app again from another one -->
+        <activity android:name="Restart" android:exported="false" android:process=":restart"
+            android:excludeFromRecents="true" android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <activity
             android:name="Decoder"
             android:launchMode="singleTop"
