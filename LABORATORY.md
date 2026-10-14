@@ -132,6 +132,19 @@ Only for filling grid cells (Quad 2×2, 3×3) and screenshots; not used in strea
 - MJPEG (Majestic): RTSP `rtsp://<user>:<password>@<ip>/stream=2` (RTP/JPEG, `.133`: 1280×720, 5 fps), HTTP `http://<user>:<password>@<ip>/mjpeg` (`multipart/x-mixed-replace`, chunked, Basic auth).
 - XM: `rtsp://<ip>:554/user=<user>_password=<password>_channel=1_stream=0.sdp?real_stream`. The password is in the path, so it also appears in the `Content-Base` header; the app redacts it in logs (#55).
 
+### README screenshots
+
+Retake them with every version that changes what the app looks like, on **both** devices (from 2026-10-14):
+
+| File | Device | What |
+|---|---|---|
+| `quad_menu.jpg` | Aceline-1 (`.144`), `screencap` | 3×3 layout below with the menu open (open it with `DPAD_CENTER` and capture within a second: it closes by itself) |
+| `single_status.jpg` | Aceline-1 | single view right after connecting, with the status line (`screenrecord`, then a frame; the line shows ~3 s) |
+| `debug_page.jpg`, `debug_json.png`, `debug_log.png` | Aceline-1's debug page | headless Chromium, 1440×900 |
+| `phone_menu.jpg`, `phone_single.jpg`, `phone_reset.jpg`, `phone_webui.jpg` | TECNO KM4 (`.170`) | the menu, single view with the status line (`screenrecord --size 1600x720`), the Reset confirmation, WebUI with the keyboard on the camera's login page |
+
+A night picture is fine. Never a password in a shot.
+
 ### 3×3 layout (README screenshots, 8-slot tests)
 
 | Slot | Camera |
