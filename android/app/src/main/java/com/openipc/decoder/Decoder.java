@@ -479,13 +479,13 @@ public class Decoder extends Activity
     public void onExit() { finishAndRemoveTask(); }
 
     /**
-     * Factory reset (#171): stops every stream, deletes the stored settings, the key of the
+     * Start over (#171): stops every stream, deletes the stored settings, the key of the
      * encrypted camera URLs and WebUI's cookies, then starts the app in a new process, so
      * nothing kept in memory survives either.
      */
     @Override
     public void onFactoryReset() {
-        Log.i(TAG, "Factory reset");
+        Log.i(TAG, "Start over: clearing all settings");
         if (quadEnabled) stopQuad();
         if (rtspClient != null) rtspClient.stop();
         closeDecoder();
@@ -496,7 +496,7 @@ public class Decoder extends Activity
             try {
                 KeystoreCipher.deleteKey();
             } catch (Exception e) {
-                Log.w(TAG, "Factory reset: cannot delete the URL key: " + e.getMessage());
+                Log.w(TAG, "Start over: cannot delete the URL key: " + e.getMessage());
             }
         }
         try {

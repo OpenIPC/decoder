@@ -81,7 +81,7 @@ class MenuManager {
         /** D: debug text (resolution, codec, fps) in every multi-view cell on or off. */
         void onToggleStats();
         void onExit();
-        /** Reset: every stored setting deleted, the app restarted as on first start (#171). */
+        /** Start over: every stored setting cleared, the app restarted as on first start (#171). */
         void onFactoryReset();
         void onShowSettings();
         void onSaveSettings();
@@ -297,8 +297,8 @@ class MenuManager {
         layout.addView(divider, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
 
-        // Two deliberate presses: Reset, then Reset again in the confirmation (#171)
-        TextView reset = createItem("Reset");
+        // Two deliberate presses: Start over, then Clear settings in the confirmation (#171)
+        TextView reset = createItem("Start over");
         layout.addView(reset);
         reset.setOnClickListener(v -> {
             PopupWindow p = mMenuPopup;
@@ -522,16 +522,18 @@ class MenuManager {
     }
 
     /**
-     * Asks before the factory reset (#171). Cancel has the focus, so a stray OK on a remote
+     * Asks before clearing the settings (#171). Cancel has the focus, so a stray OK on a remote
      * closes the dialog without deleting anything.
      */
     private void confirmFactoryReset() {
         AlertDialog dialog = new AlertDialog.Builder(activity)
-                .setTitle("Reset to factory settings?")
-                .setMessage("All camera slots, transports and settings are deleted, "
-                        + "and the app starts again as after installing.")
+                .setTitle("Start with a clean slate?")
+                .setMessage("This clears all camera slots, their transports and the other "
+                        + "settings, so you can set the app up again from scratch. The app "
+                        + "restarts and opens as right after installing. Your cameras are not "
+                        + "changed.")
                 .setNegativeButton("Cancel", (d, which) -> d.cancel())
-                .setPositiveButton("Reset", (d, which) -> {
+                .setPositiveButton("Clear settings", (d, which) -> {
                     if (listener != null) listener.onFactoryReset();
                 })
                 .create();

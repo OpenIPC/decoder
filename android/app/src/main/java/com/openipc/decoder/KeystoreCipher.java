@@ -53,7 +53,7 @@ class KeystoreCipher implements CredentialStore.Cipherer {
         if (key == null) throw new IllegalStateException("No key in the Android Keystore");
     }
 
-    /** Deletes the key, so stored URLs can never be read again (factory reset, #171). */
+    /** Deletes the key, so stored URLs can never be read again (Start over, #171). */
     static void deleteKey() throws Exception {
         KeyStore ks = KeyStore.getInstance(KEYSTORE);
         ks.load(null);

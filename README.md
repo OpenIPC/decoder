@@ -68,7 +68,7 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 | **S**        | The playback mode: every frame, or key frames only (the picture updates once per key frame interval, MJPEG once a second), the lowest decoder load. Works in multi-view and in the single view and never changes the view |
 | **Settings** | Edit the URL and the transport of the active slot (single-camera mode only)                                                                                                        |
 | **WebUI**    | Open the camera's web interface; credentials come from the RTSP URL (single-camera mode only)                                                                                      |
-| **Reset**    | Reset to factory settings after a confirmation (**Cancel** has the focus): all camera slots, transports and settings are deleted and the app starts again as after installing |
+| **Start over** | Clear all settings after a confirmation (**Cancel** has the focus) to set the app up again from scratch: camera slots, transports and the other settings are removed, and the app opens as right after installing. The cameras are not changed |
 | **Exit**     | Close the app. The small text next to it is the app version and build hash.                                                                                                        |
 
 Items that are on — D, Q, S, U and the active slot — have an orange fill; the item the remote is on has a light blue frame.
