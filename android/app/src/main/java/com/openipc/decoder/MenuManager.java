@@ -82,7 +82,7 @@ class MenuManager {
         void onToggleStats();
         void onExit();
         /** Start over: every stored setting cleared, the app restarted as on first start (#171). */
-        void onFactoryReset();
+        void onStartOver();
         void onShowSettings();
         void onSaveSettings();
         void onWebUI();
@@ -303,7 +303,7 @@ class MenuManager {
         reset.setOnClickListener(v -> {
             PopupWindow p = mMenuPopup;
             if (p != null) p.dismiss();
-            confirmFactoryReset();
+            confirmStartOver();
         });
 
         TextView exit = createItem("Exit");
@@ -525,7 +525,7 @@ class MenuManager {
      * Asks before clearing the settings (#171). Cancel has the focus, so a stray OK on a remote
      * closes the dialog without deleting anything.
      */
-    private void confirmFactoryReset() {
+    private void confirmStartOver() {
         AlertDialog dialog = new AlertDialog.Builder(activity)
                 .setTitle("Start with a clean slate?")
                 .setMessage("This clears all camera slots, their transports and the other "
@@ -534,7 +534,7 @@ class MenuManager {
                         + "changed.")
                 .setNegativeButton("Cancel", (d, which) -> d.cancel())
                 .setPositiveButton("Clear settings", (d, which) -> {
-                    if (listener != null) listener.onFactoryReset();
+                    if (listener != null) listener.onStartOver();
                 })
                 .create();
         dialog.setOnShowListener(d -> {

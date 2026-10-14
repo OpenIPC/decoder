@@ -484,7 +484,7 @@ public class Decoder extends Activity
      * nothing kept in memory survives either.
      */
     @Override
-    public void onFactoryReset() {
+    public void onStartOver() {
         Log.i(TAG, "Start over: clearing all settings");
         if (quadEnabled) stopQuad();
         if (rtspClient != null) rtspClient.stop();
