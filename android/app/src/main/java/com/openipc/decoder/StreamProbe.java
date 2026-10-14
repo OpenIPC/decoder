@@ -276,16 +276,23 @@ final class StreamProbe {
     static Result run(String tag, String url, Transport.Mode mode, String userAgent, Cancel cancel) {
         Counter counter = new Counter();
         CountDownLatch played = new CountDownLatch(1);
+        // Played or failed: a failure ends the check at once, before the session's own
+        // reconnects try the login again (a wrong password would get several attempts per check)
+        CountDownLatch settled = new CountDownLatch(1);
         String[] failure = new String[1];
         RtspSession session = new RtspSession(tag, new RtspSession.Callback() {
             @Override
             public void onStatus(String status) {
-                if ("buffering".equals(status) || "connected".equals(status)) played.countDown();
+                if ("buffering".equals(status) || "connected".equals(status)) {
+                    played.countDown();
+                    settled.countDown();
+                }
             }
 
             @Override
             public void onFailure(String message) {
                 failure[0] = message;
+                settled.countDown();
             }
 
             @Override
@@ -314,7 +321,7 @@ final class StreamProbe {
         if (!cancel.start(session)) return null;
         boolean ok = false;
         try {
-            ok = waitFor(played, CONNECT_WINDOW_MS, cancel);
+            ok = waitFor(settled, CONNECT_WINDOW_MS, cancel) && played.getCount() == 0;
             if (ok && !cancel.cancelled()) sleep(RECEIVE_MS, cancel);
         } finally {
             session.stop();

@@ -1542,9 +1542,13 @@ public class Decoder extends Activity
                 mResumed && (udpViewShown || !quadEnabled));
     }
 
-    /** The grid of the debug page in single and U view: 3x3 in the U view (it has the U cell). */
+    /**
+     * The grid of the debug page in single and U view: 3x3 in the U view (it has the U cell),
+     * and when the slot on screen is beyond the 2x2 grid, even an empty one (Qodo on #163).
+     */
     private int probeGridSize() {
-        return udpViewShown ? 3 : quadGridSize(mHosts, DEFAULT_URL);
+        if (udpViewShown || mActive >= 4) return 3;
+        return quadGridSize(mHosts, DEFAULT_URL);
     }
 
     /** Cell i shows what the TV shows: the active slot, or the U cell in the U view. */
