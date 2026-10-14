@@ -13,6 +13,7 @@ import android.app.Dialog;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.text.InputType;
 import android.text.SpannableString;
 import android.text.style.RelativeSizeSpan;
@@ -35,6 +36,7 @@ import android.widget.PopupWindow;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.TextView;
+import android.window.OnBackInvokedDispatcher;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -552,17 +554,26 @@ class MenuManager {
         // for the on-screen keyboard, which covered the page's fields, and it relaid out as
         // the keyboard came and went. The theme has no windowFullscreen, so the window resizes
         // above the keyboard and the page scrolls its focused field into view
-        Dialog dialog = new Dialog(activity, android.R.style.Theme_Black_NoTitleBar) {
-            @SuppressWarnings("deprecation")
-            @Override
-            public void onBackPressed() {
-                if (view.canGoBack()) view.goBack();
-                else cancel();
-            }
+        Dialog dialog = new Dialog(activity, android.R.style.Theme_Black_NoTitleBar);
+        // Back goes back in the page first: a key on older Androids, the back callback
+        // (also the predictive gesture) on Android 13+
+        Runnable back = () -> {
+            if (view.canGoBack()) view.goBack();
+            else dialog.cancel();
         };
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            dialog.getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    OnBackInvokedDispatcher.PRIORITY_DEFAULT, back::run);
+        } else {
+            dialog.setOnKeyListener((d, keyCode, event) -> {
+                if (keyCode != KeyEvent.KEYCODE_BACK) return false;
+                if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) back.run();
+                return true;
+            });
+        }
         LinearLayout layout = new LinearLayout(activity);
         layout.setOrientation(LinearLayout.VERTICAL);
-        // Close for a remote or a touchscreen; Back goes back in the page first
+        // Close for a remote or a touchscreen
         TextView closeBtn = createItem("Close");
         closeBtn.setOnClickListener(v -> dialog.cancel());
         layout.addView(closeBtn, new LinearLayout.LayoutParams(
