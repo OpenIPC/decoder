@@ -399,7 +399,8 @@ final class DebugServer {
      * screen the snapshot takes the full width and the cells are listed below it (#103). It
      * fetches /stats.json every 1.5 s and the snapshot (without labels) every 3, 5 or 10 s,
      * both only while the tab is visible (#98). The Info switch hides the text over the cells
-     * and the list, leaving the header and the snapshot (#141).
+     * and the list, leaving the header and the snapshot (#141). In single view the grid stays,
+     * with the camera on screen framed and the stream checks of the other slots (#100).
      */
     private static final String PAGE = "<!doctype html>\n"
             + "<html><head><meta charset=\"utf-8\"><meta name=\"viewport\""
@@ -445,6 +446,8 @@ final class DebugServer {
             + "align-items:center;justify-content:center;background:#000;color:#ff5a5a;"
             + "text-align:center;padding:8px;font-size:clamp(9px,4cqw,14px)}"
             + ".off b{font-size:clamp(16px,14cqh,30px);color:#666}"
+            // Single view (#100): the camera on screen framed, a stream found by a check green
+            + ".cell.on{border:2px solid #3d8bff}.off.ok,.ok{color:#7fd07f}.off.none{color:#888}"
             + "#list{display:none;width:100%;border-collapse:collapse;font-size:13px}"
             + "#list td{padding:5px 6px;border-top:1px solid #262626;vertical-align:top}"
             + "#list td:first-child{font-weight:700;width:1.5em;color:#fff}"
@@ -491,7 +494,9 @@ final class DebugServer {
             + "function num(v){return Math.round(v*10)/10}\n"
             + "function where(c){return esc(host(c.url))+(c.transport?' \u00b7 '+"
             + "esc(c.transport):'')+(c.audio===true?' \u00b7 \u266a':'')}\n"
-            + "function info(c){if(!c.video)return '<span class=\"bad\">'+esc(c.text)+'</span>';\n"
+            + "function ok(c){return c.probe&&c.probe.state==='ok'}\n"
+            + "function info(c){if(!c.video)return '<span class=\"'+(ok(c)?'ok':'bad')+'\">'+"
+            + "esc(c.text)+'</span>';\n"
             + "var t=esc(c.text),r=/(\\d+)\\/(\\d+) fps/.exec(c.text||'');\n"
             + "if(r&&+r[1]<0.9*r[2])t=t.replace(r[0],'<span class=\"warn\">'+r[0]+'</span>');\n"
             + "if(c.lost_fps>0)t+=' \u00b7 <span class=\"bad\">lost '+num(c.lost_fps)"
@@ -499,11 +504,14 @@ final class DebugServer {
             + "return t}\n"
             // One cell: slot, camera and transport on top; size, fps and losses below
             + "function cell(c){var top='<span class=\"slot\">'+esc(c.slot)+'</span><span"
-            + " class=\"dim\">'+where(c)+'</span>';\n"
-            + "if(!c.video)return '<div class=\"cell\"><div class=\"off\"><b>'+esc(c.slot)+'</b>"
-            + "<span>'+esc(c.text)+'</span></div><div class=\"top\">'+top+'</div></div>';\n"
-            + "return '<div class=\"cell\"><div class=\"top\">'+top+'</div><div class=\"bot\">"
-            + "'+info(c)+'</div></div>'}\n"
+            + " class=\"dim\">'+where(c)+(c.on_screen?' \u00b7 on screen':'')+'</span>',"
+            + "cls=c.on_screen?'cell on':'cell';\n"
+            + "if(!c.video)return '<div class=\"'+cls+'\"><div class=\"off'+(ok(c)?' ok':'')"
+            + "+(c.text==='" + StreamProbes.NOT_CONFIGURED + "'?' none':'')+'\">"
+            + "<b>'+esc(c.slot)+'</b><span>'+esc(c.text)+'</span></div><div class=\"top\">'+top+"
+            + "'</div></div>';\n"
+            + "return '<div class=\"'+cls+'\"><div class=\"top\">'+top+'</div><div"
+            + " class=\"bot\">'+info(c)+'</div></div>'}\n"
             + "function row(c){return '<tr><td>'+esc(c.slot)+'</td><td><span class=\"h\">"
             + "'+where(c)+'</span><br>'+info(c)+'</td></tr>'}\n"
             + "function render(s){"
@@ -518,8 +526,11 @@ final class DebugServer {
             + ":ui?'UI '+s.ui_thread:none?(s.mode||'no data'):'';\n"
             + "$('dot').className='dot '+(stuck?'bad':ui||none?'warn':'ok');\n"
             + "var list,side=1;\n"
-            + "if(s.mode==='paused'||!(s.cells||s.single))"
+            + "if(s.mode==='paused'||!(s.cells||s.single||s.slots))"
             + "list=[{text:s.mode==='paused'?'App in background':(s.mode||'')}];\n"
+            // Single and U view (#100): the grid with the camera on screen and the checks of
+            // the others
+            + "else if(s.slots){list=s.slots.slice();side=list.length>4?3:2}\n"
             // The U view is the U cell alone; the 3x3 grid has it as its ninth cell (#87)
             + "else if(s.cells){side=s.mode==='udp'?1:s.cells.length>4?3:2;list=s.cells.slice();"
             + "while(list.length<side*side)list.push({slot:'',text:''})}\n"
