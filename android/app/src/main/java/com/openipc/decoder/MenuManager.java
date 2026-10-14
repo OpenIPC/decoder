@@ -405,8 +405,8 @@ class MenuManager {
     }
 
     /**
-     * Two menu items side by side, split by a thin line (#173): the left one takes the free
-     * width, the right one its own. Left / Right move between them with a remote.
+     * Two menu items side by side, split by a thin line exactly in the middle (#173): both get
+     * half the width. Left / Right move between them with a remote.
      */
     private LinearLayout pairRow(TextView left, TextView right) {
         LinearLayout row = new LinearLayout(activity);
@@ -417,8 +417,10 @@ class MenuManager {
         line.setBackgroundColor(Color.DKGRAY);
         row.addView(line, new LinearLayout.LayoutParams(dp(1),
                 LinearLayout.LayoutParams.MATCH_PARENT));
-        row.addView(right, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        row.addView(right, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        left.setSingleLine(true);
+        right.setSingleLine(true);
         return row;
     }
 

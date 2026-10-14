@@ -520,17 +520,12 @@ public class Decoder extends Activity
         }
     }
 
-    /** Starts the app again in a new process after a reset (#171). */
+    /** Starts the app again in a new process after a reset (#171), through {@link Restart}. */
     private void restartClean() {
-        Intent restart = getPackageManager().getLaunchIntentForPackage(getPackageName());
-        if (restart == null) restart = new Intent(this, Decoder.class);
-        restart.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        Intent restart = new Intent(this, Restart.class);
+        restart.putExtra(Restart.EXTRA_PID, android.os.Process.myPid());
+        restart.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         startActivity(restart);
-        finishAndRemoveTask();
-        // The system has the new task once startActivity() returns; it starts a process for
-        // it after this one ends. A short delay lets the launch settle first
-        new Handler(android.os.Looper.getMainLooper()).postDelayed(
-                () -> Runtime.getRuntime().exit(0), 300);
     }
 
     @Override
