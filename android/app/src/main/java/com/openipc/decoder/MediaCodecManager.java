@@ -490,6 +490,30 @@ class MediaCodecManager {
         return needCreate;
     }
 
+    /**
+     * The picture's size: the crop rectangle when the decoder gives one. KEY_WIDTH / KEY_HEIGHT
+     * are the buffer, padded to the decoder's alignment (1080 → 1088; one H.265 decoder made
+     * 1920 wide 2304), which skewed the picture's aspect ratio and the size shown (#166).
+     */
+    static int[] visibleSize(MediaFormat format) {
+        return visibleSize(format.getInteger(MediaFormat.KEY_WIDTH),
+                format.getInteger(MediaFormat.KEY_HEIGHT),
+                cropKey(format, "crop-left"), cropKey(format, "crop-top"),
+                cropKey(format, "crop-right"), cropKey(format, "crop-bottom"));
+    }
+
+    private static int cropKey(MediaFormat format, String key) {
+        return format.containsKey(key) ? format.getInteger(key) : -1;
+    }
+
+    /** As above from plain values; a crop value < 0 is missing. Crop right / bottom are inclusive. */
+    static int[] visibleSize(int width, int height, int left, int top, int right, int bottom) {
+        // A crop edge outside the buffer is not believed: that axis keeps the buffer size
+        int w = left >= 0 && right > left && right < width ? right - left + 1 : width;
+        int h = top >= 0 && bottom > top && bottom < height ? bottom - top + 1 : height;
+        return new int[]{w, h};
+    }
+
     /** Renders every decoded frame that is ready; caller holds decoderLock. */
     private void drainOutput(MediaCodec codec) {
         MediaCodec.BufferInfo info = bufferInfo;
@@ -497,13 +521,11 @@ class MediaCodecManager {
         while ((outputBufferId = codec.dequeueOutputBuffer(info, 0)) >= 0
                 || outputBufferId == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
             if (outputBufferId == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                MediaFormat format = codec.getOutputFormat();
-                int mWidth = format.getInteger(MediaFormat.KEY_WIDTH);
-                int mHeight = format.getInteger(MediaFormat.KEY_HEIGHT);
-                outWidth = mWidth;
-                outHeight = mHeight;
+                int[] size = visibleSize(codec.getOutputFormat());
+                outWidth = size[0];
+                outHeight = size[1];
                 if (listener != null) {
-                    listener.onResolutionChanged(mWidth, mHeight);
+                    listener.onResolutionChanged(size[0], size[1]);
                 }
             } else {
                 codec.releaseOutputBuffer(outputBufferId, true);
