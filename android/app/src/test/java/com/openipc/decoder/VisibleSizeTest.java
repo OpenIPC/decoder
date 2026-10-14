@@ -34,8 +34,14 @@ public class VisibleSizeTest {
     }
 
     @Test
-    public void cropLargerThanTheBufferIsIgnored() {
+    public void cropOutsideTheBufferIsIgnored() {
         assertArrayEquals(new int[]{1920, 1088},
                 MediaCodecManager.visibleSize(1920, 1088, 0, 0, 3839, 2159));
+        // Wholly outside, narrower than the buffer (Qodo on #167)
+        assertArrayEquals(new int[]{1920, 1088},
+                MediaCodecManager.visibleSize(1920, 1088, 3000, 2000, 3100, 2100));
+        // One axis bad, the other kept
+        assertArrayEquals(new int[]{1920, 1080},
+                MediaCodecManager.visibleSize(1920, 1088, 0, 0, 1920, 1079));
     }
 }

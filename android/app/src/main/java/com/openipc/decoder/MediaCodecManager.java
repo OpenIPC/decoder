@@ -508,13 +508,9 @@ class MediaCodecManager {
 
     /** As above from plain values; a crop value < 0 is missing. Crop right / bottom are inclusive. */
     static int[] visibleSize(int width, int height, int left, int top, int right, int bottom) {
-        int w = width;
-        int h = height;
-        if (left >= 0 && right > left) w = right - left + 1;
-        if (top >= 0 && bottom > top) h = bottom - top + 1;
-        // A crop larger than the buffer is not believed
-        if (w > width && width > 0) w = width;
-        if (h > height && height > 0) h = height;
+        // A crop edge outside the buffer is not believed: that axis keeps the buffer size
+        int w = left >= 0 && right > left && right < width ? right - left + 1 : width;
+        int h = top >= 0 && bottom > top && bottom < height ? bottom - top + 1 : height;
         return new int[]{w, h};
     }
 
