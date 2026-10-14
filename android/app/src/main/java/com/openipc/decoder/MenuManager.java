@@ -13,6 +13,7 @@ import android.app.Dialog;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.text.InputType;
 import android.text.SpannableString;
 import android.text.style.RelativeSizeSpan;
@@ -35,6 +36,7 @@ import android.widget.PopupWindow;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.TextView;
+import android.window.OnBackInvokedDispatcher;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -548,23 +550,52 @@ class MenuManager {
             scheme = "http";
         }
 
-        AlertDialog.Builder b = new AlertDialog.Builder(activity);
-        b.setView(view);
-        b.setNegativeButton("Close", (dialog, which) -> dialog.cancel());
-        Dialog dialog = b.create();
+        // Full screen, not an AlertDialog around the page (#160): a small dialog barely moved
+        // for the on-screen keyboard, which covered the page's fields, and it relaid out as
+        // the keyboard came and went. The theme has no windowFullscreen, so the window resizes
+        // above the keyboard and the page scrolls its focused field into view
+        Dialog dialog = new Dialog(activity, android.R.style.Theme_Black_NoTitleBar);
+        // Back goes back in the page first: a key on older Androids, the back callback
+        // (also the predictive gesture) on Android 13+
+        Runnable back = () -> {
+            if (view.canGoBack()) view.goBack();
+            else dialog.cancel();
+        };
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            dialog.getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    OnBackInvokedDispatcher.PRIORITY_DEFAULT, back::run);
+        } else {
+            dialog.setOnKeyListener((d, keyCode, event) -> {
+                if (keyCode != KeyEvent.KEYCODE_BACK) return false;
+                if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) back.run();
+                return true;
+            });
+        }
+        LinearLayout layout = new LinearLayout(activity);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        // Close for a remote or a touchscreen
+        TextView closeBtn = createItem("Close");
+        closeBtn.setOnClickListener(v -> dialog.cancel());
+        layout.addView(closeBtn, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        layout.addView(view, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        dialog.setContentView(layout);
         dialog.setOnDismissListener(d -> {
             mBrowserDialog = null;
             view.destroy();
         });
         mBrowserDialog = dialog;
         dialog.show();
-        // AlertDialog marks its window "no input method" when its content has no EditText,
-        // and a WebView is not one: text fields of the camera's page then got no keyboard
-        // (#120). Clear that, and let the page take the focus for its fields
+        // The page's text fields need the keyboard (#120): the window must take input focus
         android.view.Window w = dialog.getWindow();
         if (w != null) {
+            w.setLayout(WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT);
             w.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                    | WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
+                    | WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
+                    | WindowManager.LayoutParams.FLAG_FULLSCREEN);
             w.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         }
         view.setFocusable(true);
