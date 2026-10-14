@@ -478,6 +478,41 @@ public class Decoder extends Activity
     @Override
     public void onExit() { finishAndRemoveTask(); }
 
+    /**
+     * Factory reset (#171): stops every stream, deletes the stored settings, the key of the
+     * encrypted camera URLs and WebUI's cookies, then starts the app in a new process, so
+     * nothing kept in memory survives either.
+     */
+    @Override
+    public void onFactoryReset() {
+        Log.i(TAG, "Factory reset");
+        if (quadEnabled) stopQuad();
+        if (rtspClient != null) rtspClient.stop();
+        closeDecoder();
+        closeAudio();
+        // commit(), not apply(): the process ends right after this
+        getSharedPreferences("settings", MODE_PRIVATE).edit().clear().commit();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                KeystoreCipher.deleteKey();
+            } catch (Exception e) {
+                Log.w(TAG, "Factory reset: cannot delete the URL key: " + e.getMessage());
+            }
+        }
+        try {
+            android.webkit.CookieManager.getInstance().removeAllCookies(null);
+            android.webkit.CookieManager.getInstance().flush();
+        } catch (Exception e) {
+            // No WebView on this device (#15): nothing stored there either
+        }
+        Intent restart = getPackageManager().getLaunchIntentForPackage(getPackageName());
+        if (restart == null) restart = new Intent(this, Decoder.class);
+        restart.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        startActivity(restart);
+        finishAndRemoveTask();
+        Runtime.getRuntime().exit(0);
+    }
+
     @Override
     public void onShowSettings() { menuManager.showUrlEditor(mActive, mHosts, mTransports); }
 

@@ -81,6 +81,8 @@ class MenuManager {
         /** D: debug text (resolution, codec, fps) in every multi-view cell on or off. */
         void onToggleStats();
         void onExit();
+        /** Reset: every stored setting deleted, the app restarted as on first start (#171). */
+        void onFactoryReset();
         void onShowSettings();
         void onSaveSettings();
         void onWebUI();
@@ -295,6 +297,15 @@ class MenuManager {
         layout.addView(divider, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
 
+        // Two deliberate presses: Reset, then Reset again in the confirmation (#171)
+        TextView reset = createItem("Reset");
+        layout.addView(reset);
+        reset.setOnClickListener(v -> {
+            PopupWindow p = mMenuPopup;
+            if (p != null) p.dismiss();
+            confirmFactoryReset();
+        });
+
         TextView exit = createItem("Exit");
         layout.addView(exit);
         exit.setText(s);
@@ -508,6 +519,27 @@ class MenuManager {
         dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
         dialog.show();
         input.requestFocus();
+    }
+
+    /**
+     * Asks before the factory reset (#171). Cancel has the focus, so a stray OK on a remote
+     * closes the dialog without deleting anything.
+     */
+    private void confirmFactoryReset() {
+        AlertDialog dialog = new AlertDialog.Builder(activity)
+                .setTitle("Reset to factory settings?")
+                .setMessage("All camera slots, transports and settings are deleted, "
+                        + "and the app starts again as after installing.")
+                .setNegativeButton("Cancel", (d, which) -> d.cancel())
+                .setPositiveButton("Reset", (d, which) -> {
+                    if (listener != null) listener.onFactoryReset();
+                })
+                .create();
+        dialog.setOnShowListener(d -> {
+            View cancel = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
+            if (cancel != null) cancel.requestFocus();
+        });
+        dialog.show();
     }
 
     private void focusChange(View item) {
