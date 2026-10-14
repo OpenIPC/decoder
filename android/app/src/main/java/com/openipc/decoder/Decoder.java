@@ -130,6 +130,8 @@ public class Decoder extends Activity
     // Stored values that could not be decrypted: kept as they are until the slot is edited
     private final String[] mUnreadable = new String[CAM_COUNT];
     String mUserAgent = "User-Agent: OpenIPC-Decoder/1.0\r\n";
+    /** Short checks of the slots not on screen while the debug page is in use (#100). */
+    private StreamProbes streamProbes;
 
     // Thread management
     private volatile int listenerGen;
@@ -177,6 +179,7 @@ public class Decoder extends Activity
             }
         } catch (PackageManager.NameNotFoundException ignored) {}
         mUserAgent = "User-Agent: OpenIPC-Decoder/" + mVersion + "\r\n";
+        streamProbes = new StreamProbes(mUserAgent);
         mDensity = getResources().getDisplayMetrics().density;
         credentials = CredentialStore.create();
         // The decoder list for /stats.json, built off the UI thread (#88)
@@ -345,6 +348,8 @@ public class Decoder extends Activity
             stopQuad();
             boolean configured = mHost != null && !mHost.isEmpty() && !mHost.equals(DEFAULT_URL);
             if (configured) {
+                // A probe of this camera ends first: some take one client only (#100)
+                streamProbes.willShow(mHost);
                 rtspClient.configure(mHost, mUserAgent, mTransports[mActive]);
                 startListener();
                 rtspClient.start();
@@ -601,6 +606,8 @@ public class Decoder extends Activity
             return;
         }
 
+        // A probe of this camera ends first: some take one client only (#100)
+        streamProbes.willShow(mHost);
         rtspClient.configure(mHost, mUserAgent, mTransports[mActive]);
         startListener();
         rtspClient.start();
@@ -683,6 +690,8 @@ public class Decoder extends Activity
     // ====================== Quad mode ======================
 
     private void startQuad() {
+        // Every cell gets its own session: a probe would be a second client of its camera
+        streamProbes.stopAll();
         if (rtspClient != null) {
             rtspClient.stop();
         }
@@ -1318,23 +1327,36 @@ public class Decoder extends Activity
             side[0] = 1;
             return cells;
         }
-        if (udpViewShown) {
-            cells.add(snapshotCell(U_CELL));
-            side[0] = 1;
-            return cells;
-        }
-        if (!quadEnabled) {
-            Snapshots.Cell c = new Snapshots.Cell();
-            c.slot = mActive + 1;
-            c.live = mResumed && "connected".equals(singleState)
-                    && singleRenderedWithin(SNAPSHOT_LIVE_MS);
-            c.label = statusText != null && statusText.getVisibility() == View.VISIBLE
-                    ? statusText.getText().toString() : c.live ? "Playing" : "No new frames";
-            if (c.live) {
-                c.frame = mSurface.getBitmap(width, Snapshots.height(width));
+        if (udpViewShown || !quadEnabled) {
+            // The grid as in multi-view (#100): the camera on screen, the others' checks
+            updateProbes();
+            int size = probeGridSize();
+            long now = SystemClock.elapsedRealtime();
+            for (int i = 0; i < size * size; i++) {
+                Snapshots.Cell c;
+                if (!onScreen(i)) {
+                    c = new Snapshots.Cell();
+                    c.slot = i == U_CELL ? 0 : i + 1;
+                    StreamProbe.Result r = probeResult(i);
+                    c.label = probeText(i, now);
+                    c.ok = r != null && r.ok;
+                } else if (udpViewShown) {
+                    c = snapshotCell(U_CELL);
+                } else {
+                    c = new Snapshots.Cell();
+                    c.slot = i + 1;
+                    c.live = "connected".equals(singleState)
+                            && singleRenderedWithin(SNAPSHOT_LIVE_MS);
+                    c.label = statusText != null && statusText.getVisibility() == View.VISIBLE
+                            ? statusText.getText().toString() : c.live ? "Playing" : "No new frames";
+                    if (c.live) {
+                        c.frame = mSurface.getBitmap(width / size, Snapshots.height(width) / size);
+                    }
+                }
+                c.onScreen = onScreen(i);
+                cells.add(c);
             }
-            cells.add(c);
-            side[0] = 1;
+            side[0] = size;
             return cells;
         }
         int size = quadGridSize(mHosts, DEFAULT_URL);
@@ -1500,7 +1522,109 @@ public class Decoder extends Activity
             }
             m.put("cells", list);
         }
+        if (udpViewShown || !quadEnabled) {
+            updateProbes();
+            m.put("slots", probeSlots());
+        }
         return m;
+    }
+
+    // ====================== Stream checks in single view (#100) ======================
+
+    /** Single and U view: the debug page is in use, the other slots get short checks. */
+    private void updateProbes() {
+        String[] urls = new String[CAM_COUNT];
+        for (int i = 0; i < CAM_COUNT; i++) {
+            urls[i] = mHosts[i] != null && !mHosts[i].isEmpty() && !mHosts[i].equals(DEFAULT_URL)
+                    ? mHosts[i] : null;
+        }
+        streamProbes.update(urls, mTransports, udpViewShown ? null : mHost,
+                mResumed && (udpViewShown || !quadEnabled));
+    }
+
+    /** The grid of the debug page in single and U view: 3x3 in the U view (it has the U cell). */
+    private int probeGridSize() {
+        return udpViewShown ? 3 : quadGridSize(mHosts, DEFAULT_URL);
+    }
+
+    /** Cell i shows what the TV shows: the active slot, or the U cell in the U view. */
+    private boolean onScreen(int i) {
+        return udpViewShown ? i == U_CELL : i == mActive;
+    }
+
+    private StreamProbe.Result probeResult(int i) {
+        return i < CAM_COUNT && mHosts[i] != null ? streamProbes.result(i, mHosts[i]) : null;
+    }
+
+    /** What a cell not on screen says: its last check, or why it has none. */
+    private String probeText(int i, long nowMs) {
+        if (i == U_CELL) return "U \u00b7 not checked in single view";
+        String skip = StreamProbes.skipReason(mHosts[i], DEFAULT_URL,
+                udpViewShown ? null : mHost);
+        if (skip != null) return skip;
+        StreamProbe.Result r = probeResult(i);
+        if (r != null) return r.text(nowMs) + (streamProbes.isRunning(i) ? " \u00b7 checking" : "");
+        return streamProbes.isRunning(i) ? "Checking stream\u2026" : "Waiting for a stream check";
+    }
+
+    /**
+     * Every cell of the grid for /stats.json in single and U view (#100): the camera on screen
+     * as it plays, the others with the result of their last check. UI thread only.
+     */
+    private List<Object> probeSlots() {
+        int size = probeGridSize();
+        long now = SystemClock.elapsedRealtime();
+        List<Object> list = new ArrayList<>();
+        for (int i = 0; i < size * size; i++) {
+            boolean u = i == U_CELL;
+            Map<String, Object> c = new LinkedHashMap<>();
+            c.put("slot", u ? "U" : i + 1);
+            c.put("on_screen", onScreen(i));
+            String url = u ? UDP_CELL_URL : mHosts[i];
+            if (u || (url != null && !url.isEmpty() && !url.equals(DEFAULT_URL))) {
+                c.put("url", u ? UDP_CELL_URL : DebugServer.redact(url));
+                if (!u) c.put("transport_mode", mTransports[i] != null ? mTransports[i].name() : null);
+            }
+            if (onScreen(i)) {
+                if (udpViewShown) {
+                    QuadCell[] cells = quadCells;
+                    QuadCell cell = cells != null ? cells[U_CELL] : null;
+                    TextView v = quadStats[U_CELL];
+                    c.put("video", cell != null && cell.showsVideo(SNAPSHOT_LIVE_MS));
+                    c.put("text", v != null ? v.getText().toString() : null);
+                } else {
+                    boolean video = mResumed && "connected".equals(singleState)
+                            && singleRenderedWithin(SNAPSHOT_LIVE_MS);
+                    c.put("video", video);
+                    c.put("text", video ? (mVideoWidth > 0 ? mVideoWidth + "\u00d7" + mVideoHeight + " " : "")
+                            + (rtspClient != null && rtspClient.isJpeg() ? "MJPEG"
+                            : codecH265 ? "H.265" : "H.264") + " \u00b7 " + singleOutFps + " fps"
+                            : statusText != null && statusText.getVisibility() == View.VISIBLE
+                            ? statusText.getText().toString() : singleState);
+                }
+            } else {
+                c.put("video", false);
+                c.put("text", probeText(i, now));
+                StreamProbe.Result r = probeResult(i);
+                Map<String, Object> p = new LinkedHashMap<>();
+                p.put("state", r != null ? (r.ok ? "ok" : "error")
+                        : streamProbes.isRunning(i) ? "checking" : u || StreamProbes.skipReason(
+                        mHosts[i], DEFAULT_URL, udpViewShown ? null : mHost) != null
+                        ? "not checked" : "waiting");
+                if (r != null) {
+                    p.put("checked_s_ago", (now - r.atMs) / 1000);
+                    p.put("summary", r.summary);
+                    if (r.codec != null) p.put("codec", r.codec);
+                    if (r.width > 0) p.put("size", r.width + "x" + r.height);
+                    p.put("fps", r.fps);
+                    p.put("kbps", r.kbps);
+                    p.put("key_frames", r.keyFrames);
+                }
+                c.put("probe", p);
+            }
+            list.add(c);
+        }
+        return list;
     }
 
     // ====================== Screen / zoom ======================
@@ -1806,6 +1930,7 @@ public class Decoder extends Activity
     protected void onPause() {
         super.onPause();
         mResumed = false;
+        streamProbes.stopAll();
         menuManager.onPauseDismissBrowser();
         // The UDP view is not a saved mode: after a resume the slot or grid comes back
         leaveUdpView();
@@ -1958,6 +2083,8 @@ public class Decoder extends Activity
             mSurface.setVisibility(View.VISIBLE);
             boolean configured = mHost != null && !mHost.isEmpty() && !mHost.equals(DEFAULT_URL);
             if (configured) {
+                // A probe of this camera ends first: some take one client only (#100)
+                streamProbes.willShow(mHost);
                 rtspClient.configure(mHost, mUserAgent, mTransports[mActive]);
                 startListener();
                 rtspClient.start();

@@ -58,6 +58,10 @@ final class Snapshots {
         /** Playing right now; otherwise only the label is drawn. */
         boolean live;
         String label;
+        /** Not on screen, but its last stream check found the stream (#100): label in green. */
+        boolean ok;
+        /** What the TV shows, in a grid drawn for the single view (#100): framed. */
+        boolean onScreen;
     }
 
     private static HandlerThread copyThread;
@@ -137,6 +141,13 @@ final class Snapshots {
                 drawLabel(canvas, c, shown, x, y, cw, ch, bandH, text, band);
                 canvas.drawRect(x, y, x + cw, y + 1, grid);
                 canvas.drawRect(x, y, x + 1, y + ch, grid);
+                if (c.onScreen && side > 1) {
+                    Paint frame = new Paint();
+                    frame.setColor(0xFF3D8BFF);
+                    frame.setStyle(Paint.Style.STROKE);
+                    frame.setStrokeWidth(4);
+                    canvas.drawRect(x + 2, y + 2, x + cw - 2, y + ch - 2, frame);
+                }
             }
         }
         long t1 = SystemClock.elapsedRealtime();
@@ -167,8 +178,9 @@ final class Snapshots {
             text.setColor(Color.WHITE);
             canvas.drawText(label, x + 4, y + ch - 6, text);
         } else {
-            // No video: slot number and status in the middle, in red
-            text.setColor(0xFFFF6060);
+            // No video: slot number and status in the middle, in red; a stream found by a
+            // check of a slot not on screen in green (#100)
+            text.setColor(c.ok ? 0xFF7FD07F : 0xFFFF6060);
             float w = text.measureText(label);
             canvas.drawText(label, x + Math.max(4, (cw - w) / 2),
                     y + (ch + text.getTextSize()) / 2f, text);
