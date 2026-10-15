@@ -474,10 +474,10 @@ public class DecodePlannerTest {
 
     @Test
     public void aLightCellIsPromotedWhenTheFirstOneIsHeldBackByAFailedLoad() {
-        // The stored values of #189: capacity at the floor, failed at 239 719; nine cells on key
+        // The state of #189 in the session after the demotion: capacity at the floor, failed at
+        // 239 719 (after a restart, a value below the floor is not trusted); nine cells on key
         // frames, about 50 000 blocks/s in all
-        long floor = DecodePlanner.fullLoad(1920, 1080, 30);
-        DecodePlanner p = new DecodePlanner(floor, true, 239_719, floor);
+        DecodePlanner p = new DecodePlanner(DecodePlanner.fullLoad(1920, 1080, 30), true, 239_719);
         List<DecodePlanner.Cell> cells = keyCells(9, 0);
         cells.get(0).fullLoad = 180_000; // the U cell: up to about 221 000, too close to 239 719
         cells.get(0).keyLoad = 9_000;
