@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for testing! Reports are collected into the **Verified devices** table in the README.
+        Thanks for testing! Reports are collected into the **Verified devices** table in [docs/devices.md](https://github.com/OpenIPC/decoder/blob/v2/docs/devices.md#verified-devices).
         The app version is shown in the menu next to **Exit**, for example `v2.02`.
 
         感谢测试！可以用中文填写。应用版本显示在菜单中 **Exit** 旁边。
