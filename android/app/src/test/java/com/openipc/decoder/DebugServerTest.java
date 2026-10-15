@@ -18,8 +18,10 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 public class DebugServerTest {
@@ -47,15 +49,77 @@ public class DebugServerTest {
     }
 
     @Test
-    public void shownAddressesSkipLoopbackAndLinkLocal() throws Exception {
+    public void shownAddressesArePrivateIpv4Only() throws Exception {
         assertTrue(NetInfo.isShown(ip("192.168.1.20")));
         assertTrue(NetInfo.isShown(ip("172.17.32.144")));
-        assertTrue(NetInfo.isShown(ip("8.8.8.8")));
+        assertTrue(NetInfo.isShown(ip("10.0.0.5")));
+        // Public and carrier-grade NAT: the debug server never answers there (#203)
+        assertFalse(NetInfo.isShown(ip("8.8.8.8")));
+        assertFalse(NetInfo.isShown(ip("33.91.55.135")));
+        assertFalse(NetInfo.isShown(ip("100.64.1.2")));
         assertFalse(NetInfo.isShown(ip("127.0.0.1")));
         assertFalse(NetInfo.isShown(ip("127.1.2.3")));
         assertFalse(NetInfo.isShown(ip("169.254.1.1")));
         assertFalse(NetInfo.isShown(ip("0.0.0.0")));
         assertFalse(NetInfo.isShown(ip("fd12::1")));
+    }
+
+    private static Map<String, List<InetAddress>> interfaces(String... nameAndAddresses)
+            throws Exception {
+        Map<String, List<InetAddress>> m = new LinkedHashMap<>();
+        for (String entry : nameAndAddresses) {
+            String[] parts = entry.split(" ");
+            List<InetAddress> addrs = new ArrayList<>();
+            for (int i = 1; i < parts.length; i++) addrs.add(ip(parts[i]));
+            m.put(parts[0], addrs);
+        }
+        return m;
+    }
+
+    @Test
+    public void lanAddressesSkipMobileData() throws Exception {
+        // The OPPO in #187: two mobile-data addresses besides Wi-Fi (#203)
+        assertEquals(Arrays.asList("192.168.1.42"), NetInfo.lanAddresses(interfaces(
+                "lo 127.0.0.1 ::1",
+                "rmnet_data0 33.91.55.135",
+                "rmnet_data1 33.95.96.154 2a00:1fa0::5",
+                "wlan0 192.168.1.42 fe80::1 fd00::42")));
+        // Mobile data on private ranges (carrier NAT) is not shown either
+        assertEquals(Arrays.asList("10.0.0.7"), NetInfo.lanAddresses(interfaces(
+                "ccmni0 10.120.3.4",
+                "v4-rmnet_data2 192.0.0.4",
+                "clat4 192.0.0.4",
+                "seth_lte0 10.11.12.13",
+                "pdp0 172.20.0.1",
+                "wwan0 192.168.200.2",
+                "rev_rmnet0 10.9.9.9",
+                "wlan0 10.0.0.7")));
+        assertEquals(Arrays.asList(), NetInfo.lanAddresses(interfaces(
+                "lo 127.0.0.1", "rmnet0 100.70.1.2")));
+    }
+
+    @Test
+    public void lanAddressesWifiFirstThenEthernet() throws Exception {
+        assertEquals(Arrays.asList("192.168.1.42", "192.168.43.1", "172.17.32.144", "10.42.0.1"),
+                NetInfo.lanAddresses(interfaces(
+                        "rndis0 10.42.0.1",
+                        "eth0 172.17.32.144 169.254.3.3",
+                        "wlan0 192.168.1.42",
+                        "ap0 192.168.43.1 192.168.1.42")));
+        // The system order stays within one kind
+        assertEquals(Arrays.asList("192.168.2.2", "192.168.1.1"),
+                NetInfo.lanAddresses(interfaces("eth1 192.168.2.2", "eth0 192.168.1.1")));
+    }
+
+    @Test
+    public void cellularInterfaceNames() {
+        for (String n : new String[] {"rmnet0", "rmnet_data0", "ccmni1", "v4-rmnet_data0",
+                "clat4", "seth_lte1", "pdp0", "wwan0"}) {
+            assertTrue(n, NetInfo.isCellular(n));
+        }
+        for (String n : new String[] {"wlan0", "eth0", "ap0", "swlan0", "rndis0", "lo"}) {
+            assertFalse(n, NetInfo.isCellular(n));
+        }
     }
 
     @Test
