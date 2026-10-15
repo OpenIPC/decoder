@@ -45,7 +45,7 @@ public class TapGuardTest {
         TapGuard g = new TapGuard(14);
         g.down(800, 400, W, H, ZONE);
         g.moveTo(805, 403);
-        g.moveTo(805, 403);
+        g.up(805, 403);
         assertTrue(g.wasTap());
     }
 
@@ -53,7 +53,7 @@ public class TapGuardTest {
     public void swipeFromTheTopEdgeIsNoTap() {
         TapGuard g = new TapGuard(14);
         g.down(800, 0, W, H, ZONE);
-        g.moveTo(800, 2);
+        g.up(800, 2);
         assertFalse(g.wasTap());
     }
 
@@ -62,7 +62,7 @@ public class TapGuardTest {
         // GestureDetector takes this as a tap: the system kept the moves of its swipe
         TapGuard g = new TapGuard(14);
         g.down(800, 100, W, H, ZONE);
-        g.moveTo(800, 400);
+        g.up(800, 400);
         assertFalse(g.wasTap());
     }
 
@@ -71,7 +71,7 @@ public class TapGuardTest {
         TapGuard g = new TapGuard(14);
         g.down(800, 400, W, H, ZONE);
         g.moveTo(900, 400);
-        g.moveTo(800, 400);
+        g.up(800, 400);
         assertFalse(g.wasTap());
     }
 
@@ -80,6 +80,7 @@ public class TapGuardTest {
         TapGuard g = new TapGuard(14);
         g.down(800, 400, W, H, ZONE);
         g.secondFinger();
+        g.up(800, 400);
         assertFalse(g.wasTap());
         g.down(800, 400, W, H, ZONE);
         g.cancel();
@@ -87,12 +88,19 @@ public class TapGuardTest {
     }
 
     @Test
-    public void newSequenceStartsAfresh() {
+    public void answerIsTheLastFinishedSequence() {
+        // Qodo on #216: a new touch begun before a late tap confirmation does not change it
         TapGuard g = new TapGuard(14);
         g.down(800, 0, W, H, ZONE);
-        assertFalse(g.wasTap());
+        g.up(800, 300);
         g.down(800, 400, W, H, ZONE);
+        assertFalse(g.wasTap());
+        g.up(800, 400);
         assertTrue(g.wasTap());
+        g.down(800, 0, W, H, ZONE);
+        assertTrue(g.wasTap());
+        g.up(800, 300);
+        assertFalse(g.wasTap());
     }
 
     @Test

@@ -160,6 +160,8 @@ public class Decoder extends Activity
     private TapGuard tapGuard;
     /** The system's gesture insets (left, top, right, bottom), Android 10+. */
     private final int[] gestureInsets = new int[4];
+    /** Set from a touch's up until the click it posts has run (#213). */
+    private boolean clickFromTouch;
     private float mZoomScale = 1.0f;
     private float mPanX;
     private float mPanY;
@@ -883,7 +885,7 @@ public class Decoder extends Activity
                 int idx = size == 1 ? U_CELL : row * size + col;
                 quadViews[idx] = new SurfaceView(this);
                 quadViews[idx].setOnClickListener(cv -> {
-                    if (!touchTapOrKey(cv)) return;
+                    if (!touchTapOrKey()) return;
                     menuManager.showMenu(findViewById(R.id.decoder), quadEnabled, mActive, mVersion,
                             BuildConfig.GIT_HASH, mHosts);
                 });
@@ -948,7 +950,7 @@ public class Decoder extends Activity
         hint.setBackgroundColor(Color.BLACK);
         // Like the camera cells and the video view: a tap opens the menu
         hint.setOnClickListener(v -> {
-            if (!touchTapOrKey(v)) return;
+            if (!touchTapOrKey()) return;
             menuManager.showMenu(findViewById(R.id.decoder),
                     quadEnabled, mActive, mVersion, BuildConfig.GIT_HASH, mHosts);
         });
@@ -2177,8 +2179,11 @@ public class Decoder extends Activity
                 break;
             }
             case MotionEvent.ACTION_MOVE:
-            case MotionEvent.ACTION_UP:
                 tapGuard.moveTo(ev.getX(), ev.getY());
+                break;
+            case MotionEvent.ACTION_UP:
+                tapGuard.up(ev.getX(), ev.getY());
+                clickFromTouch = true;
                 break;
             case MotionEvent.ACTION_POINTER_DOWN:
                 tapGuard.secondFinger();
@@ -2189,15 +2194,20 @@ public class Decoder extends Activity
             default:
                 break;
         }
-        return super.dispatchTouchEvent(ev);
+        boolean handled = super.dispatchTouchEvent(ev);
+        if (ev.getActionMasked() == MotionEvent.ACTION_UP) {
+            // A view clicks after the up, posted: this runs after that click
+            getWindow().getDecorView().post(() -> clickFromTouch = false);
+        }
+        return handled;
     }
 
     /**
-     * A click on a cell or the U hint opens the menu: from a key (remote, D-pad) always, from
-     * a touch only when it was a real tap (#213).
+     * A click on a cell or the U hint opens the menu: from a key (remote, D-pad) or
+     * accessibility always, from a touch only when it was a real tap (#213).
      */
-    private boolean touchTapOrKey(View v) {
-        return !v.isInTouchMode() || tapGuard.wasTap();
+    private boolean touchTapOrKey() {
+        return !clickFromTouch || tapGuard.wasTap();
     }
 
     private int dp(float dp) {

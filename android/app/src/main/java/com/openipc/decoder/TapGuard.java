@@ -13,7 +13,10 @@ package com.openipc.decoder;
  * swipes to show its bars or go back; one whose finger moved more than the touch slop, also
  * when the system kept the moves and only the up arrived (GestureDetector takes a down and a
  * far-away up with no move between as a tap); one with a second finger (pinch); one that was
- * cancelled. Coordinates are in pixels of the screen; no Android classes, for the unit tests.
+ * cancelled. The answer is the one of the last finished sequence (up or cancel), so a tap
+ * confirmed after its up (GestureDetector waits for a double tap) or a click posted after it
+ * gets its own sequence's answer, not one of a new touch that has just begun. Coordinates are
+ * in pixels of the screen; no Android classes, for the unit tests.
  */
 class TapGuard {
     /** Edge zone where the system has no gesture insets (before Android 10, or 0 reported). */
@@ -23,6 +26,7 @@ class TapGuard {
 
     private final float slop;
     private boolean tap;
+    private boolean lastTap;
     private float downX, downY;
 
     TapGuard(float touchSlopPx) {
@@ -56,10 +60,16 @@ class TapGuard {
         tap = !startsInEdgeZone(x, y, w, h, zone);
     }
 
-    /** A move or the up of the first finger. */
+    /** A move of the first finger. */
     void moveTo(float x, float y) {
         float dx = x - downX, dy = y - downY;
         if (dx * dx + dy * dy > slop * slop) tap = false;
+    }
+
+    /** The up of the last finger: the sequence is finished. */
+    void up(float x, float y) {
+        moveTo(x, y);
+        lastTap = tap;
     }
 
     /** A second finger: a pinch, not a tap. */
@@ -69,10 +79,11 @@ class TapGuard {
 
     void cancel() {
         tap = false;
+        lastTap = false;
     }
 
-    /** Whether the last sequence was a tap that may open the menu. */
+    /** Whether the last finished sequence was a tap that may open the menu. */
     boolean wasTap() {
-        return tap;
+        return lastTap;
     }
 }
