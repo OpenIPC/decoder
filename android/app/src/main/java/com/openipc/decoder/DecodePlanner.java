@@ -41,8 +41,18 @@ final class DecodePlanner {
     static final long PROBE_MAX_WAIT_MS = 10 * 60_000;
     /** Promotions stay this far below a load that failed: the load estimates are noisy. */
     static final double FAILED_MARGIN = 0.9;
-    /** Quiet time after which a load that failed is tried once more: it may have been a fluke. */
+    /**
+     * Time after the last demotion (or the last such retry) after which a load that failed is
+     * tried once more: it may have been a fluke. Not from the last lossy sample, which key-frame
+     * cells reset now and then (#189).
+     */
     static final long FAILED_RETRY_MS = 60 * 60_000;
+    /**
+     * Losses below a proven load count as a transient (#189): demoted, but the capacity and the
+     * failed load stay at least at the proven load. A second such demotion within this time
+     * means the proven load is wrong after all: it is handled as any other failure.
+     */
+    static final long TRANSIENT_WINDOW_MS = 10 * 60_000;
     /**
      * After the grid starts, every decoder starts at once and all of them lose frames for a
      * second or two: no decision on losses that early (#148). Set by the app; 0 in tests.
@@ -109,6 +119,10 @@ final class DecodePlanner {
     private long resumeWaitMs = PROBE_QUIET_MS;
     /** The last lossy sample; promotions do not move it, unlike quietSinceMs. */
     private long lastLossMs = -1;
+    /** The last demotion or failed-load retry: the next retry is timed from it (#189). */
+    private long lastFailMs = -1;
+    /** The last demotion counted as a transient, or -1 (#189). */
+    private long lastTransientMs = -1;
 
     /** No loss-based decision for this long after the first step (#148). */
     void setWarmup(long ms) { warmupMs = ms; }
@@ -181,6 +195,7 @@ final class DecodePlanner {
             lossyTimes.pollFirst();
         }
         if (lastLossMs < 0) lastLossMs = nowMs;
+        if (lastFailMs < 0) lastFailMs = nowMs;
         if (anyLossy) {
             lossyTimes.addLast(nowMs);
             quietSinceMs = nowMs;
@@ -203,6 +218,18 @@ final class DecodePlanner {
             for (int i = cells.size() - 1; i >= 0; i--) {
                 Cell c = cells.get(i);
                 if (c.full && !c.paused && c.playing && c.known) {
+                    lastFailMs = nowMs;
+                    // Below a load that played quietly: a transient (other apps, a stalled
+                    // stream), unless one came shortly before; only the cell goes back (#189)
+                    boolean repeated = lastTransientMs >= 0
+                            && nowMs - lastTransientMs < TRANSIENT_WINDOW_MS;
+                    if (load < proven && !repeated) {
+                        lastTransientMs = nowMs;
+                        capacity = Math.max(minCapacity, Math.max(proven, Math.min(capacity,
+                                Math.round(load * 0.9))));
+                        learnt = true;
+                        return change(nowMs, Action.DEMOTE, c.index);
+                    }
                     // Losses at this load: the capacity is below it, but not below a proven load.
                     // Remembered for this session even below the floor; only stored values at
                     // or below it are distrusted after a restart (#126)
@@ -244,7 +271,9 @@ final class DecodePlanner {
             }
         }
 
-        // Promote the highest-priority key-frame cell whose load is known
+        // Promote the highest-priority key-frame cell whose load is known; when it is held back,
+        // a lower one that fits within the capacity and below a failed load (#189)
+        boolean first = true;
         for (Cell c : cells) {
             if (c.full || c.paused || !c.playing || c.pinned) {
                 // Not connected (an offline camera) or paused: nothing to wait for
@@ -260,22 +289,35 @@ final class DecodePlanner {
             }
             unknownSince.remove(c.index);
             long after = load - c.keyLoad + c.fullLoad;
-            // Never up to a load that failed, not even within the capacity, unless it has been
-            // quiet for very long
-            if (after >= failedLoad * FAILED_MARGIN
-                    && nowMs - quietSinceMs < FAILED_RETRY_MS) return Decision.NONE;
+            boolean belowFailed = after < failedLoad * FAILED_MARGIN;
             boolean fits = after <= capacity;
+            if (!first) {
+                // Out of priority order only what surely fits: no probe, no retry (#189)
+                if (fits && belowFailed) return promote(nowMs, c.index);
+                continue;
+            }
+            first = false;
+            // Never up to a load that failed, not even within the capacity, unless the last
+            // failure was very long ago; that retry restarts the wait (#189)
+            boolean retry = !belowFailed && nowMs - lastFailMs >= FAILED_RETRY_MS;
+            if (!belowFailed && !retry) continue;
             // Beyond the capacity only after a quiet period
             boolean probe = nowMs - quietSinceMs >= probeWaitMs;
             if (fits || probe) {
-                // Every promotion starts a new quiet period: a load counts as proven only
-                // after it has itself played for PROBE_QUIET_MS without losses
-                quietSinceMs = nowMs;
-                return change(nowMs, Action.PROMOTE, c.index);
+                if (retry) lastFailMs = nowMs;
+                return promote(nowMs, c.index);
             }
-            return Decision.NONE;
         }
         return Decision.NONE;
+    }
+
+    /**
+     * Every promotion starts a new quiet period: a load counts as proven only after it has
+     * itself played for PROBE_QUIET_MS without losses.
+     */
+    private Decision promote(long nowMs, int index) {
+        quietSinceMs = nowMs;
+        return change(nowMs, Action.PROMOTE, index);
     }
 
     private static int countPlaying(List<Cell> cells) {
