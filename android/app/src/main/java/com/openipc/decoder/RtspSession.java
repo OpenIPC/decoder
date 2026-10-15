@@ -116,6 +116,10 @@ class RtspSession {
     private volatile int heartbeatErrorsBefore;
     private volatile boolean heartbeatUsed;
     private volatile boolean heartbeatLogged;
+    /** Degrees counter-clockwise the MJPEG frames of this connection are turned (#200). */
+    private volatile int rotate;
+    private volatile boolean rotateLogged;
+    private volatile boolean rotateIgnoredLogged;
     private Thread networkThread;
     private Thread watchdogThread;
 
@@ -137,6 +141,11 @@ class RtspSession {
     }
 
     void configure(String url, String userAgent, boolean withAudio, Transport.Mode mode) {
+        if (!java.util.Objects.equals(url, this.url)) {
+            // Another camera: its rotation is logged again (#200)
+            rotateLogged = false;
+            rotateIgnoredLogged = false;
+        }
         this.url = url;
         this.userAgent = userAgent != null ? userAgent : "";
         this.withAudio = withAudio;
@@ -311,6 +320,8 @@ class RtspSession {
 
     /** One session from connect to disconnect. Returns true if PLAY succeeded. */
     private boolean connect(int gen) throws IOException {
+        // Only an RTSP MJPEG stream is turned (#200); the other transports draw it as it comes
+        rotate = 0;
         if (RtpListener.Url.matches(url)) return listen(gen, RtpListener.Url.parse(url));
         if (HttpMjpeg.matches(url)) return httpMjpeg(gen, HttpMjpeg.Url.parse(url));
         if (FlowUfo.Url.matches(url)) return flowUfo(gen, FlowUfo.Url.parse(url));
@@ -468,6 +479,7 @@ class RtspSession {
             }
 
             if (gen != generation) return false;
+            rotate = rotation(u.rotate, sdp.videoJpeg);
             callback.onSdp(sdp);
 
             // PLAY on the request URL, as before: accepted by the servers seen so far
@@ -650,6 +662,30 @@ class RtspSession {
             heartbeat = null;
         }
     }
+
+    /**
+     * The turn for frames of this connection: {@code wanted} for MJPEG, 0 for H.264/H.265,
+     * which have no rotation yet (#201). Logged once each.
+     */
+    private int rotation(int wanted, boolean jpeg) {
+        if (wanted == 0) return 0;
+        if (!jpeg) {
+            if (!rotateIgnoredLogged) {
+                rotateIgnoredLogged = true;
+                Log.i(TAG, tag + ": rotate= only applies to MJPEG streams for now (#201)");
+            }
+            return 0;
+        }
+        if (!rotateLogged) {
+            rotateLogged = true;
+            Log.i(TAG, tag + ": MJPEG frames turned " + wanted + "\u00b0 counter-clockwise"
+                    + " (#200; ?rotate=0 turns it off)");
+        }
+        return wanted;
+    }
+
+    /** Degrees counter-clockwise the MJPEG frames are turned now (#200), 0 for none. */
+    int rotate() { return rotate; }
 
     /** Heartbeat statistics for /stats.json once an RTSP slot used one (#187), else null. */
     Map<String, Object> heartbeatStats() {
@@ -1362,6 +1398,12 @@ class RtspSession {
          * option is ours: it is taken out of the URL sent to the camera.
          */
         int heartbeatPort;
+        /**
+         * Degrees counter-clockwise to turn MJPEG frames when drawing them (#200): 90 for
+         * rtsp://{host}:7070/webcam, whose toy camera is mounted sideways, else 0;
+         * ?rotate=0|90|180|270 overrides it. Ours as well: not sent to the camera.
+         */
+        int rotate;
 
         static Url parse(String url) throws IOException {
             if (url == null) throw new IOException("Camera slot not configured");
@@ -1408,18 +1450,23 @@ class RtspSession {
                 u.host = hostPort;
             }
             if (u.host.isEmpty()) throw new IOException("Invalid RTSP URL: host is missing");
-            rest = takeHeartbeat(u, rest);
+            rest = takeOptions(u, rest);
             u.requestUrl = scheme + "://" + authority + rest;
             return u;
         }
 
-        /** Sets heartbeatPort from path and query; returns them without our option. */
-        private static String takeHeartbeat(Url u, String rest) throws IOException {
+        /**
+         * Sets heartbeatPort and rotate from path and query; returns them without our
+         * options.
+         */
+        private static String takeOptions(Url u, String rest) throws IOException {
             int q = rest.indexOf('?');
             String path = q >= 0 ? rest.substring(0, q) : rest;
             if (u.port == 7070 && (path.equalsIgnoreCase("/webcam")
                     || path.equalsIgnoreCase("/webcam/"))) {
+                // The cooingdv toys (#187): heartbeat, and the K200's sideways camera (#200)
                 u.heartbeatPort = UdpHeartbeat.DEFAULT_PORT;
+                u.rotate = 90;
             }
             if (q < 0) return rest;
             StringBuilder kept = new StringBuilder();
@@ -1427,14 +1474,16 @@ class RtspSession {
             for (String param : rest.substring(q + 1).split("&", -1)) {
                 int eq = param.indexOf('=');
                 String name = (eq < 0 ? param : param.substring(0, eq)).toLowerCase(Locale.ROOT);
-                if (!name.equals("heartbeat")) {
+                if (!name.equals("heartbeat") && !name.equals("rotate")) {
                     if (kept.length() > 0) kept.append('&');
                     kept.append(param);
                     continue;
                 }
                 found = true;
                 String v = eq < 0 ? "" : param.substring(eq + 1).trim().toLowerCase(Locale.ROOT);
-                if (v.equals("off") || v.equals("0")) {
+                if (name.equals("rotate")) {
+                    u.rotate = parseRotate(v);
+                } else if (v.equals("off") || v.equals("0")) {
                     u.heartbeatPort = 0;
                 } else {
                     try {
@@ -1451,6 +1500,19 @@ class RtspSession {
             // Untouched unless our option was there
             if (!found) return rest;
             return kept.length() > 0 ? path + "?" + kept : path;
+        }
+
+        /** ?rotate= in degrees counter-clockwise: 0, 90, 180 or 270 (#200). */
+        static int parseRotate(String v) throws IOException {
+            switch (v) {
+                case "0": return 0;
+                case "90": return 90;
+                case "180": return 180;
+                case "270": return 270;
+                default:
+                    throw new IOException("Invalid rotate: " + v
+                            + " (degrees counter-clockwise: rotate=0, 90, 180 or 270)");
+            }
         }
 
         private static int parsePort(String s, String url) throws IOException {

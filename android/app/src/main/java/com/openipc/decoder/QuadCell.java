@@ -437,6 +437,9 @@ class QuadCell implements RtspSession.Callback {
     /** The cooingdv heartbeat of an RTSP cell once it used one (#187), else null. */
     java.util.Map<String, Object> heartbeatStats() { return session.heartbeatStats(); }
 
+    /** Degrees counter-clockwise the MJPEG frames are turned (#200), 0 for none. */
+    int rotate() { return jpeg ? session.rotate() : 0; }
+
     /** Transport in use, with the mode after a fallback (#112). */
     String transportLabel() { return Transport.label(session.transportInUse(), transport); }
 
@@ -730,7 +733,7 @@ class QuadCell implements RtspSession.Callback {
             return;
         }
         Surface s = surface;
-        int[] size = jpegRenderer.render(frame, s,
+        int[] size = jpegRenderer.render(frame, s, session.rotate(),
                 () -> running && jpeg && s == surface);
         if (size == null) return;
         lastJpegDecodeMs = now;

@@ -94,6 +94,9 @@ class RtspClient implements RtspSession.Callback {
     /** The cooingdv heartbeat once this slot used one (#187), else null. */
     java.util.Map<String, Object> heartbeatStats() { return session.heartbeatStats(); }
 
+    /** Degrees counter-clockwise the MJPEG frames are turned (#200), 0 for none. */
+    int rotate() { return session.rotate(); }
+
     void start() {
         nalAssembler.reset();
         jpegAssembler.reset();

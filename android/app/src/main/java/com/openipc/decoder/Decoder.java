@@ -1562,6 +1562,9 @@ public class Decoder extends Activity
             if (jl != null) single.put("jieli", jl);
             Map<String, Object> hb = rtspClient != null ? rtspClient.heartbeatStats() : null;
             if (hb != null) single.put("heartbeat", hb);
+            // MJPEG turned counter-clockwise, "size" is the turned one (#200)
+            int rotate = rtspClient != null && rtspClient.isJpeg() ? rtspClient.rotate() : 0;
+            if (rotate != 0) single.put("rotate", rotate);
             m.put("single", single);
         }
         QuadCell[] cells = quadCells;
@@ -1606,6 +1609,7 @@ public class Decoder extends Activity
                     if (jl != null) c.put("jieli", jl);
                     Map<String, Object> hb = cell.heartbeatStats();
                     if (hb != null) c.put("heartbeat", hb);
+                    if (cell.rotate() != 0) c.put("rotate", cell.rotate());
                 }
                 list.add(c);
             }
@@ -1975,7 +1979,10 @@ public class Decoder extends Activity
      */
     private boolean drawJpeg(Frame frame, int gen) {
         Surface s = mVideoSurface;
-        int[] size = jpegRenderer.render(frame, s, () -> gen == listenerGen && s == mVideoSurface);
+        RtspClient client = rtspClient;
+        int rotate = client != null ? client.rotate() : 0;
+        int[] size = jpegRenderer.render(frame, s, rotate,
+                () -> gen == listenerGen && s == mVideoSurface);
         if (size != null) jpegShown(size[0], size[1]);
         return size != null;
     }
