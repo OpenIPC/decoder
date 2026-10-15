@@ -56,7 +56,7 @@ Most devices below were reported with the legacy 1.0x version (`basic` branch); 
 
 ## Hardware decoder notes
 
-What the app has measured or met on real devices. The decoders of a device are listed in `/stats.json` (`decoders`: name, type, hardware, instances, 1080p frame rate).
+What the app has measured or met on real devices. The decoders of a device are listed in `/stats.json` (`decoders`: `name`, `type`, `hardware`, `adaptive`, `max_instances`, `fps_1080p`; see [debug.md](debug.md#decoders)).
 
 | Topic | Note |
 |---|---|
