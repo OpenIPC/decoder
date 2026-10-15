@@ -14,6 +14,14 @@
     <!-- The multicast permission must not hide the app on Ethernet-only boxes (#68) -->
     <uses-feature android:name="android.hardware.wifi" android:required="false" />
 
+    <!-- Save report (#207): is there an app to share it with? Android 11+ shows only these -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>
+
     <!-- For Android 10+ -->
     <application
         android:name=".App"
