@@ -303,6 +303,9 @@ public class JieliTest {
         final boolean sendVideoParam;
         volatile int rtpPort;
         volatile boolean sendVideo = true;
+        /** KEEP_ALIVE_INTERVAL only after the first keepalive, not after APP_ACCESS. */
+        volatile boolean lateInterval;
+        private boolean intervalSent;
         private final Thread thread;
 
         FakeToy(int timeoutMs, boolean sendVideoParam) throws IOException {
@@ -332,9 +335,7 @@ public class JieliTest {
                         got.add(new Got(m));
                         switch (m.topic) {
                             case Jieli.APP_ACCESS:
-                                out.write(Jieli.encode(Jieli.KEEP_ALIVE_INTERVAL,
-                                        "{\"op\":\"NOTIFY\",\"param\":{\"timeout\":\""
-                                                + timeoutMs + "\"}}"));
+                                if (!lateInterval) interval(out);
                                 out.write(Jieli.encode("BAT_STATUS",
                                         "{\"op\":\"NOTIFY\",\"param\":{\"level\":\"4\"}}"));
                                 if (sendVideoParam) {
@@ -346,6 +347,7 @@ public class JieliTest {
                                 break;
                             case Jieli.KEEP_ALIVE:
                                 out.write(Jieli.encode(Jieli.KEEP_ALIVE, ""));
+                                if (lateInterval && !intervalSent) interval(out);
                                 break;
                             case Jieli.OPEN_RT_STREAM:
                                 out.write(Jieli.encode(Jieli.OPEN_RT_STREAM,
@@ -365,6 +367,12 @@ public class JieliTest {
             } catch (IOException e) {
                 // Closed
             }
+        }
+
+        private void interval(OutputStream out) throws IOException {
+            intervalSent = true;
+            out.write(Jieli.encode(Jieli.KEEP_ALIVE_INTERVAL,
+                    "{\"op\":\"NOTIFY\",\"param\":{\"timeout\":\"" + timeoutMs + "\"}}"));
         }
 
         private void sendVideo() throws IOException {
@@ -510,6 +518,32 @@ public class JieliTest {
             @SuppressWarnings("unchecked")
             Map<String, Object> ctp = (Map<String, Object>) r.client.stats().get("ctp");
             assertEquals(7500L, ctp.get("keepalive_ms"));
+        }
+    }
+
+    @Test
+    public void lateIntervalAppliesAtOnce() throws Exception {
+        int rtp = freeUdpPort();
+        try (FakeToy toy = new FakeToy(2000, true)) {
+            toy.rtpPort = rtp;
+            toy.sendVideo = false;
+            toy.lateInterval = true;
+            Running r = new Running("jieli://127.0.0.1:" + toy.port() + "?rtp=" + rtp);
+            assertTrue(toy.opened.await(5, TimeUnit.SECONDS));
+            long until = now() + 3000;
+            while (now() < until && Collections.frequency(toy.topics(), Jieli.KEEP_ALIVE) < 2) {
+                Thread.sleep(20);
+            }
+            r.keepGoing.set(false);
+            assertTrue(r.ended.await(3, TimeUnit.SECONDS));
+            List<Long> keepAlives = new ArrayList<>();
+            for (Got g : toy.got) {
+                if (g.topic.equals(Jieli.KEEP_ALIVE)) keepAlives.add(g.at);
+            }
+            // The second one 500 ms after the first, not 7.5 s
+            assertTrue("keepalives: " + keepAlives.size(), keepAlives.size() >= 2);
+            long gap = keepAlives.get(1) - keepAlives.get(0);
+            assertTrue("gap " + gap, gap >= 400 && gap <= 900);
         }
     }
 

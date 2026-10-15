@@ -664,6 +664,12 @@ final class Jieli {
             return h != null ? text + ". " + h : text;
         }
 
+        /** Milliseconds since the last video packet from the toy, or Long.MAX_VALUE. */
+        long videoAgeMs() {
+            long last = lastVideoAt;
+            return last > 0 ? now() - last : Long.MAX_VALUE;
+        }
+
         String connectingText() {
             return withHint("Connecting to the toy (CTP " + url.endpoint() + ")");
         }
@@ -723,7 +729,9 @@ final class Jieli {
                 send(out, APP_ACCESS, put("ver", "25", "type", "0"));
                 long t0 = now();
                 long lastRx = t0;
-                long nextKeepAlive = 0;
+                // From the last one sent: an interval announced later applies at once (Qodo
+                // on #198)
+                long lastKeepAlive = 0;
                 long openAt = 0;
                 boolean diagnostics = false;
                 boolean receiving = false;
@@ -735,16 +743,16 @@ final class Jieli {
                         send(out, DATE_TIME, put("date", new SimpleDateFormat("yyyyMMddHHmmss",
                                 Locale.ROOT).format(new Date())));
                         keepAlive(out);
-                        nextKeepAlive = t + keepAliveIntervalMs;
+                        lastKeepAlive = t;
                         requestStream(out);
                         requestedStream = true;
                         openAt = t;
                         state = "requested";
                         listener.onState(false, requestedText());
                     }
-                    if (requestedStream && t >= nextKeepAlive) {
+                    if (requestedStream && t - lastKeepAlive >= keepAliveIntervalMs) {
                         keepAlive(out);
-                        nextKeepAlive = t + keepAliveIntervalMs;
+                        lastKeepAlive = t;
                     }
                     if (requestedStream) {
                         long last = lastVideoAt;

@@ -759,20 +759,26 @@ class RtspSession {
             // onState comes from the CTP thread, the video from the UDP one
             final AtomicBoolean first = new AtomicBoolean(true);
             final AtomicBoolean received = new AtomicBoolean(false);
+            final Object order = new Object();
             c.run(() -> active && gen == generation, new Jieli.Listener() {
                 @Override
                 public void onState(boolean receiving, String text) {
                     if (gen != generation) return;
-                    if (receiving) {
-                        inUse = "Jieli RTP";
-                        received.set(true);
-                    } else {
-                        inUse = null;
-                        // Video that stopped says so; the next frame reports "connected" again
-                        status(gen, received.get() ? "disconnected" : "buffering");
-                        first.set(true);
+                    // In order with usable() on the UDP thread: a packet that came in since
+                    // the CTP thread saw the video stop wins (Qodo on #198)
+                    synchronized (order) {
+                        if (receiving) {
+                            inUse = "Jieli RTP";
+                            received.set(true);
+                        } else {
+                            if (c.videoAgeMs() < Jieli.quietMs) return;
+                            inUse = null;
+                            // Video that stopped says so; the next frame reports "connected"
+                            status(gen, received.get() ? "disconnected" : "buffering");
+                            first.set(true);
+                        }
+                        callback.onDetail(text);
                     }
-                    callback.onDetail(text);
                 }
 
                 @Override
@@ -804,7 +810,9 @@ class RtspSession {
 
                 private void usable() {
                     lastPacketMs = System.nanoTime() / 1_000_000;
-                    if (first.compareAndSet(true, false)) status(gen, "connected");
+                    synchronized (order) {
+                        if (first.compareAndSet(true, false)) status(gen, "connected");
+                    }
                 }
             });
             return true;
