@@ -102,6 +102,15 @@ The U cell plays a camera that pushes RTP over UDP to port **5600** of the devic
   <img src="../screenshots/phone_webui.jpg" alt="WebUI on a phone: the page scrolls the field above the keyboard" width="400">
 </p>
 
+On a phone (TECNO KM4, Android 15, v2.10) with an OpenIPC camera: the page opens on *Live*, the menu button lists the sections, and long pages scroll with a finger while **Close** stays on top.
+
+| | |
+|---|---|
+| <img src="img/webui_live.jpg" alt="WebUI: Live" width="400"><br>*Live*: the first page | <img src="img/webui_menu.jpg" alt="WebUI: the section menu" width="400"><br>The menu button: Dashboard, Live, Camera, System, Services |
+| <img src="img/webui_dashboard_top.jpg" alt="WebUI: Dashboard, top" width="400"><br>*Dashboard*, top: CPU, memory, temperature, encoder | <img src="img/webui_dashboard_scroll1.jpg" alt="WebUI: Dashboard, scrolled" width="400"><br>Scrolled down: uptime and the snapshot |
+| <img src="img/webui_dashboard_scroll2.jpg" alt="WebUI: Dashboard, scrolled further" width="400"><br>Further down: encoder and network graphs | <img src="img/webui_camera_menu.jpg" alt="WebUI: Camera menu" width="400"><br>*Camera*: Settings, Stream URLs, Raw, Config file |
+| <img src="img/webui_settings_picture.jpg" alt="WebUI: Camera settings, Picture" width="400"><br>*Camera → Settings*, the *Picture* section | <img src="img/webui_settings_main_stream.jpg" alt="WebUI: Camera settings, Main stream" width="400"><br>The *Main stream* section: codec, resolution |
+
 ## Opening a camera from another app
 
 The app accepts plain-text shares (`ACTION_SEND`, `text/plain`). Sharing an `rtsp://`, `udp://` or `http://` URL from another app, for example OpenIPC Network, puts it into the **active** slot, saves it and switches to the single view. An optional `transport` extra (`tcp`, `udp`, `auto`, `multicast`) sets the slot's transport; without it the slot keeps its setting.
