@@ -142,9 +142,18 @@ class RtspSession {
 
     void configure(String url, String userAgent, boolean withAudio, Transport.Mode mode) {
         if (!java.util.Objects.equals(url, this.url)) {
-            // Another camera: its rotation is logged again (#200)
+            // Another camera: its rotation is logged again (#200), and the heartbeat counts
+            // of the previous one leave /stats.json (Qodo on #188). A heartbeat still running
+            // is closed by its connection, without adding to the new totals.
             rotateLogged = false;
             rotateIgnoredLogged = false;
+            synchronized (lock) {
+                heartbeat = null;
+                heartbeatUsed = false;
+                heartbeatsBefore = 0;
+                heartbeatErrorsBefore = 0;
+                heartbeatLogged = false;
+            }
         }
         this.url = url;
         this.userAgent = userAgent != null ? userAgent : "";
