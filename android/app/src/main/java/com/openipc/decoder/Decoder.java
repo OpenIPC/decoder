@@ -299,8 +299,14 @@ public class Decoder extends Activity
             @Override public void onLongPress(MotionEvent e) { takeScreenshot(); }
         });
         mSurface.setOnTouchListener((v, event) -> {
-            mScaleDetector.onTouchEvent(event);
-            mGestureDetector.onTouchEvent(event);
+            // Pan moves the view itself (#76): the detectors get the touch in the parent's
+            // coordinates, which do not move with it, or each step would eat the next one
+            // (Qodo on #185)
+            MotionEvent inParent = MotionEvent.obtain(event);
+            inParent.offsetLocation(v.getLeft(), v.getTop());
+            mScaleDetector.onTouchEvent(inParent);
+            mGestureDetector.onTouchEvent(inParent);
+            inParent.recycle();
             return true;
         });
 
@@ -1710,11 +1716,20 @@ public class Decoder extends Activity
     // ====================== Screen / zoom ======================
 
     private static final int REQUEST_STORAGE_FOR_SCREENSHOT = 1;
+    /** Largest screenshot: 4K, 33 MB as ARGB; a larger stream is scaled down to it. */
+    private static final int SCREENSHOT_MAX_PIXELS = 3840 * 2160;
 
     private void takeScreenshot() {
         if (isTakingScreenshot) return;
 
-        // Android 6-9 save through the shared Pictures folder: needs the runtime permission (#28)
+        // A SurfaceView has no getBitmap() (#76): PixelCopy, Android 7+. Checked before the
+        // permission, which would be asked for nothing here (Qodo on #185)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            Toast.makeText(this, "Screenshots need Android 7 or newer", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // Android 7-9 save through the shared Pictures folder: needs the runtime permission (#28)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
                 && Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
                 && checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
@@ -1724,18 +1739,24 @@ public class Decoder extends Activity
             return;
         }
 
-        // A SurfaceView has no getBitmap() (#76): PixelCopy, Android 7+
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
-            Toast.makeText(this, "Screenshots need Android 7 or newer", Toast.LENGTH_SHORT).show();
-            return;
-        }
         if (mVideoWidth <= 0 || mVideoHeight <= 0
                 || !mSurface.getHolder().getSurface().isValid()) {
             Toast.makeText(this, "No video frame available", Toast.LENGTH_SHORT).show();
             return;
         }
-        // At the stream's own size, not the view's
-        Bitmap bitmap = Bitmap.createBitmap(mVideoWidth, mVideoHeight, Bitmap.Config.ARGB_8888);
+        // At the stream's own size, not the view's, but at most SCREENSHOT_MAX_PIXELS: the
+        // resolution comes from the camera (Qodo on #185)
+        double fit = Math.min(1, Math.sqrt((double) SCREENSHOT_MAX_PIXELS
+                / ((double) mVideoWidth * mVideoHeight)));
+        Bitmap bitmap;
+        try {
+            bitmap = Bitmap.createBitmap(Math.max(1, (int) (mVideoWidth * fit)),
+                    Math.max(1, (int) (mVideoHeight * fit)), Bitmap.Config.ARGB_8888);
+        } catch (OutOfMemoryError e) {
+            Log.w(TAG, "No memory for a screenshot of " + mVideoWidth + "x" + mVideoHeight);
+            Toast.makeText(this, "Failed to save screenshot", Toast.LENGTH_SHORT).show();
+            return;
+        }
         isTakingScreenshot = true;
         // Copied on the snapshot thread, the UI thread does not wait for it
         boolean started = Snapshots.copy(mSurface, bitmap, result -> {
