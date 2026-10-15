@@ -249,7 +249,7 @@ The pairing is kept with the host's adb key (`~/.android/adbkey`): later only `c
 ### Builds
 
 - `v2` / `basic`: `gh release download latest -R OpenIPC/decoder -p decoder-v2.apk -p decoder.apk`
-- A given 2.xx version: `gh release download v2.01 -R OpenIPC/decoder` (`decoder-v2-2.01.apk`). CI creates the release `v<versionName>` on the first v2 build of each version (#157).
+- An older `v2` / `basic` build: from the OpenIPC Telegram channel (every build of these branches is posted there with its version and commit). There are no per-version releases (#194).
 - Branches: `build.yml` builds signed APKs only on **push** runs (not `pull_request`); artifact name is `decoder-<branch with / → ->`:
   ```sh
   B=feat/rtsp-multicast

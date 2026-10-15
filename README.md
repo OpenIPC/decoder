@@ -11,38 +11,49 @@
 
 A small Android app for watching RTSP streams from IP cameras, with hardware H.264/H.265 decoding. It is built for cameras running [OpenIPC](https://openipc.org) firmware and works on phones, tablets, TVs, set-top boxes and car devices.
 
+- **Video:** H.264/H.265 via MediaCodec, MJPEG over RTSP and HTTP; automatic decoder recovery
+- **Audio:** AAC, Opus, G.711, L16
+- **Views:** one camera, or multi-view with up to 8 cameras plus a camera that pushes RTP, decoding adapted to what the device can do
+- **Network:** RTSP over TCP, UDP (Auto falls back to TCP) or multicast, RTP pushed by the camera (Majestic `outgoing`), Basic and Digest authentication, automatic reconnection
+- **More:** Android TV remote, zoom, camera web interface, URLs stored encrypted, a debug page on port 8085
+
 <p align="center">
   <img src="screenshots/quad_menu.jpg" alt="Multi-view with eight cameras and the menu" width="640">
+</p>
+
+<p align="center">
+  <img src="screenshots/single_status.jpg" alt="Single view right after connecting: transport, codecs and bitrate" width="640">
+</p>
+
+<p align="center">
+  <img src="screenshots/phone_menu.jpg" alt="The menu on a phone" width="400">
+  <img src="screenshots/phone_webui.jpg" alt="WebUI on a phone: the page scrolls the field above the keyboard" width="400">
+</p>
+
+<p align="center">
+  <img src="screenshots/debug_page.jpg" alt="Debug page: snapshot with each cell's text" width="640"><br>
+  <img src="screenshots/debug_json.png" alt="/stats.json" width="318">
+  <img src="screenshots/debug_log.png" alt="/log" width="318">
 </p>
 
 ## Download
 
 Ready-to-install builds are in the [**latest** release](https://github.com/OpenIPC/decoder/releases/tag/latest):
 
-| File             | What it is                             |
-|------------------|----------------------------------------|
-| `decoder-v2.apk` | **Current version**, recommended       |
-| `decoder.apk`    | Legacy version from the `basic` branch |
+| File | What it is |
+|---|---|
+| `decoder-v2.apk` | **Current version**, recommended |
+| `decoder.apk` | Legacy version from the `basic` branch |
 
-Each 2.xx version also has a release of its own — [`v2.01`](https://github.com/OpenIPC/decoder/releases/tag/v2.01) and later, on the [releases page](https://github.com/OpenIPC/decoder/releases) — with that version's APK and the changes since the previous one.
+Every build is replaced in `latest` by the next one. Development is continuous, so there are no releases per version; every `v2` and `basic` build is also posted with its version and commit to the OpenIPC Telegram channel ([our channels](https://openipc.org/our-channels)).
 
 A beta channel is available on [Google Play](https://play.google.com/apps/internaltest/4701231141824898735). To join it, send your e-mail through the [OpenIPC Telegram channels](https://openipc.org/our-channels).
-
-## Features
-
-- **Video:** RTSP playback, hardware H.264/H.265 decoding via MediaCodec, MJPEG over RTSP (RTP/JPEG) and over HTTP (`multipart/x-mixed-replace`) in the single view and in multi-view, automatic decoder recovery, a lossy UDP stream shown with concealed damage instead of a black picture, a warning when the device's video decoder stops responding, picture fitted to any screen shape
-- **Audio:** AAC (RFC 3640 `mpeg4-generic`, ADTS, MP4A-LATM), Opus, G.711 μ-law/A-law, L16 PCM (mono/stereo); in multi-view, the sound of the selected cell
-- **Display:** single camera, or multi-view (Quad) with up to 8 cameras plus the U cell (a camera that pushes RTP) in a 2×2 or 3×3 grid; adaptive decoding (full rate or key frames per cell, learnt per device); S: key frames only, in multi-view and in the single view
-- **Controls:** pinch-to-zoom, pan, double-tap to reset, Android TV remote (Leanback launcher)
-- **Network:** RTSP over TCP or UDP (Auto, the default, falls back to TCP when UDP is refused, brings no video or keeps losing key frames), the transport in use shown on connect, RTSP multicast, plain RTP pushed over UDP by the camera (unicast or multicast), Basic and Digest authentication, RTSP keepalive, automatic reconnection with exponential back-off, connection-quality indicator
-- **WebUI:** built-in browser for the camera's web interface
-- **More:** 8 camera slots, URLs stored encrypted, long-press screenshot, URLs can be shared from other apps
 
 ## Requirements
 
 - Android 5.0 (API 21) or higher
-- An IP camera with RTSP, or one that pushes RTP over UDP (OpenIPC Majestic `outgoing`), see [Transports](#transports)
-- Google services (GAPPS) are **not** required: the app works on AOSP builds without them. WebUI uses the system WebView, so it needs a working WebView package (on some devices this is Google's *Android System WebView*); disabling it affects only WebUI — [#15](https://github.com/OpenIPC/decoder/issues/15)
+- An IP camera with RTSP or HTTP MJPEG, or one that pushes RTP over UDP (OpenIPC Majestic `outgoing`)
+- Google services (GAPPS) are **not** required. WebUI needs a working system WebView ([#15](https://github.com/OpenIPC/decoder/issues/15))
 
 ## Quick start
 
@@ -52,14 +63,10 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
    ```
    rtsp://username:password@ip_address:554/stream=0
    ```
-   Under the URL you can choose the [transport](#transports); Auto (UDP, falling back to TCP) is the default for a new slot.
+   Under the URL you can choose the transport; Auto (UDP, falling back to TCP) is the default for a new slot. Other URL types: [Transports](docs/transports.md).
 4. Press **Save**. The app connects straight away and reconnects automatically if the stream drops.
 
 ## Controls
-
-### Menu
-
-The menu is a grid: the eight slots on top, two rows of four below.
 
 ```
 [ 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 ]
@@ -67,110 +74,16 @@ The menu is a grid: the eight slots on top, two rows of four below.
 [ Exit     | Reset  | Debug  | UDP    ]
 ```
 
-<p align="center">
-  <img src="screenshots/phone_menu.jpg" alt="The menu on a phone" width="400">
-  <img src="screenshots/phone_webui.jpg" alt="WebUI on a phone: the page scrolls the field above the keyboard" width="400">
-</p>
+| Input | Action |
+|---|---|
+| Tap / **OK** | Open or close the menu |
+| **1**–**8** | Camera slot; the number's colour shows the connection quality |
+| **Grid** / **Slides** | Multi-view or one camera / every frame or key frames only |
+| **Debug** / **UDP** | Text in the multi-view cells / the camera that pushes RTP to port 5600 |
+| Pinch, double tap | Zoom and pan, reset the zoom (single view) |
+| Long press | Screenshot (single view) / play this cell's sound (multi-view) |
 
-| Item         | Action                                                                                                                                                                             |
-|--------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **1**–**8**  | Switch to a camera slot. The active slot's number shows the connection quality: green under 100 ms of jitter, yellow 100–300 ms, red above 300 ms. A grey number is an empty slot. |
-| **Settings** | Edit the URL and the transport of the active slot (single view only; grey elsewhere)                                                                                                        |
-| **WebUI**    | Open the camera's web interface; credentials come from the RTSP URL (single view only; grey elsewhere)                                                                                      |
-| **Grid**     | The view: multi-view (2×2 or 3×3) or the single camera. Grid does not change the playback mode (Slides) |
-| **Slides**   | The playback mode: every frame, or key frames only (the picture updates once per key frame interval, MJPEG once a second), the lowest decoder load. Works in multi-view and in the single view and never changes the view |
-| **Exit**     | Close the app. The small text under it is the app version and build hash.                                                                                                        |
-| **Reset**    | Clear all settings after a confirmation (**Cancel** has the focus) to set the app up again from scratch: camera slots, transports and the other settings are removed, and the app opens as right after installing. The cameras are not changed |
-| **Debug**    | Text in the corner of every multi-view cell (resolution, codec, decoded/received fps, key frames, status), or in none |
-| **UDP**      | The U cell full-screen: the camera that pushes RTP over UDP to port 5600 |
-
-Items that are on — Grid, Slides, Debug, UDP and the active slot — have an orange fill; the item the remote is on has a light blue frame.
-
-### Gestures and keys
-
-| Input                    | Action                                                                                   |
-|--------------------------|------------------------------------------------------------------------------------------|
-| Tap / **OK** / **Enter** | Open or close the menu                                                                   |
-| **Back** / **Esc**       | Close the menu                                                                           |
-| Pinch, then drag         | Zoom (up to 5×) and pan, single view                                                     |
-| Double tap               | Reset zoom                                                                               |
-| Long press               | Single view: save a screenshot to `Pictures/OpenIPC`. Multi-view: play this cell's sound |
-
-### Opening a camera from another app
-
-The app accepts plain-text shares (`ACTION_SEND`, `text/plain`). Sharing an `rtsp://`, `udp://` or `http://` URL from another app, for example OpenIPC Network, puts it into the active slot. An optional `transport` extra (`tcp`, `udp`, `auto`, `multicast`) sets the slot's transport:
-
-```sh
-adb shell am start -a android.intent.action.SEND -t text/plain \
-  --es android.intent.extra.TEXT 'rtsp://user:pass@192.168.1.10/stream=0' \
-  --es transport udp -n com.openipc.decoder/.Decoder
-```
-
-### Multi-view (Quad)
-
-Shows the configured slots in a 2×2 grid, or in a 3×3 grid once any of slots 5–8 is used. The ninth cell of the 3×3 grid, the **U** cell, plays a camera that pushes RTP over UDP to port 5600 of the device (`udp://@:5600`, see [udp:// slots](#udp-slots-majestic-outgoing)); until a stream arrives it shows every address of the device to send to. **UDP** in the menu opens it full-screen. Other ports or multicast groups go into a slot as a `udp://` URL. Each cell has its own connection and decoder, and the device's video decoder has a fixed budget: the AG-216 test box, for example, decodes about two 1080p30 streams at full rate. So the grid adapts: cells start on key frames only, then decode every frame in priority order (the U cell while it receives a stream, the cell whose sound plays, then slot order) while the decoder keeps up. Cells beyond that stay on key frames, with the picture updated once per key frame interval (`key frames` in the corner text, menu **Debug**). The limit is learnt on each device by measurement. Substreams of the cameras, where available, let more cells play at full rate. A key-frame cell over the hardware decoder's instance limit (the AG-216 has 4 × H.265) uses a software decoder instead (`· software` in the corner); only beyond that budget too does it show `Decoder limit: N × H.265`. When even key frames are too much, the lowest-priority cell is paused (`Paused: decoder overloaded`) and tried again after a quiet period; losses in the first seconds after the grid starts, when every decoder starts at once, do not count. A cell whose UDP stream loses a piece of every key frame shows the frames with the damage concealed (`· damaged`) rather than a black picture. Some cameras accept only one RTSP client at a time. Long-press a cell to play its audio (long-press it again to mute); the selected cell shows an AUDIO badge and is remembered. Tap any cell to open the menu.
-
-## Transports
-
-Each slot has its own transport, chosen under the URL in **Settings** (or with the `transport` extra of a shared link):
-
-| Transport         | How the video arrives                                    | Notes                                                                                                                                                    |
-|-------------------|----------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **TCP**           | RTP inside the RTSP connection                           | Works everywhere, also through NAT and firewalls                                                                                                         |
-| **UDP**           | RTP over UDP, a port pair per track                      | Lower latency on a LAN. Lost packets are skipped, not resent. Never falls back                                                                           |
-| **Auto** (default) | UDP, or TCP when UDP does not work                       | Falls back to TCP when the camera refuses UDP or no video arrives within 3 s, then stays on TCP until the slot is changed                                |
-| **Multicast**     | RTSP multicast (Android 8.0+), or TCP when it is refused | For servers that offer RTSP multicast. OpenIPC Majestic and XM cameras do not: they reply 400 or 451, and the slot plays over TCP in the same connection |
-
-The transport actually in use is shown when a stream starts in single view (`Connected • UDP • H.265 …`), on the debug page and in `/stats.json` (`transport`; the slot's setting is `transport_mode`). After a fallback it reads, for example, `TCP (auto)`.
-
-<p align="center">
-  <img src="screenshots/single_status.jpg" alt="Single view right after connecting: transport, codecs and bitrate" width="640">
-</p>
-
-### UDP slots (Majestic outgoing)
-
-A slot can also receive RTP that the camera pushes by itself, without RTSP. Put a `udp://` URL into the slot instead of `rtsp://`:
-
-| URL                                 | Meaning                                                              |
-|-------------------------------------|----------------------------------------------------------------------|
-| `udp://@:5600`                      | Listen on port 5600                                                  |
-| `udp://@239.1.2.3:5600`             | Join the multicast group 239.1.2.3 on port 5600                      |
-| `udp://192.168.1.10@239.1.2.3:5600` | The same, but accept packets from this sender only                   |
-| `udp://@:5600?codec=h265&pt=97`     | Set the codec or the video payload type when the defaults do not fit |
-
-The codec is taken from the RTP payload type (96 → H.264, 97 → H.265) unless `codec=` is given, and a codec change on the camera is followed while playing. Video only. Two slots cannot listen on the same port.
-
-On the camera, add the device as an `outgoing` destination in `/etc/majestic.yaml` (then restart Majestic):
-
-```yaml
-outgoing:
-  servers:
-    - udp://192.168.1.20:5600
-```
-
-`/api/v1/outgoing.json` on the camera shows whether the destination is live. Majestic can also send to a multicast group (`udp://239.1.2.3:5600`), so several devices can watch one camera. On Wi‑Fi the app holds a multicast lock while it is in a group.
-
-### HTTP MJPEG slots
-
-A slot also takes an HTTP MJPEG URL, such as Majestic's `http://user:password@<camera>/mjpeg`: a `multipart/x-mixed-replace` stream with one JPEG per part, chunked or not. Basic credentials are sent with the request, Digest after the camera asks for it; the stream reconnects like RTSP. It plays in the single view and in multi-view; the transport shows as `HTTP`. There is no audio on this path.
-
-## Debug page (port 8085)
-
-While the app runs it serves its debug information over HTTP on port **8085**, for a browser or `curl` on the same network:
-
-- `http://<device>:8085/` — the snapshot fills the page, with each cell's camera, size, fps and losses (in red) drawn over it; the header shows the version, the device time and uptime. **Info On / Off** in the header hides the text over the cells (and the list below them on a narrow screen), leaving only the picture; it is **Off** until switched on, and the choice is remembered in the browser. A red note in the header says when the device's video decoder stopped responding (`decoder_stuck`);
-- `http://<device>:8085/snapshot.jpg` (`?labels=0`: frames only) — a picture laid out like the screen, at the screen's resolution (at most 1920×1080), made from the frames the app shows right now; a cell without video is black with its status. Taken only when asked for; the page refreshes it every 3, 5 (default) or 10 s while the tab is visible;
-- `http://<device>:8085/stats.json` — the same as JSON, for scripts;
-- In single view the page and the snapshot still show the whole grid (#100): the camera on screen is framed in blue, every other configured slot gets a short stream check (connect, a few seconds of packets, no decoding) about every 45 s while the page is open, and its cell says what was found, e.g. `Stream OK · H.265 · 25 fps · 3.1 Mbit/s · checked 12 s ago`, or the error. A slot of the camera on screen is never checked (some cameras take one client only), nor a `udp://` slot. `stats.json` has these cells under `slots`;
-- `http://<device>:8085/log` — the last 500 lines of the app's log.
-
-Only clients on the local network are answered (loopback, 10/8, 172.16/12, 192.168/16, link-local, IPv6 fc00::/7); others get 403. Logins and passwords are never shown.
-
-<p align="center">
-  <img src="screenshots/debug_page.jpg" alt="Debug page: snapshot with each cell's text" width="640"><br>
-  <img src="screenshots/debug_json.png" alt="/stats.json" width="318">
-  <img src="screenshots/debug_log.png" alt="/log" width="318">
-</p>
+Every item, the remote, sharing a URL from another app and **Reset**: [Usage](docs/usage.md).
 
 ## Known limitations
 
@@ -179,140 +92,39 @@ Only clients on the local network are answered (loopback, 10/8, 172.16/12, 192.1
 >
 > - **RTSP multicast needs Android 8.0+** and a server that offers it; OpenIPC cameras do not — [#69](https://github.com/OpenIPC/decoder/issues/69)
 > - **G.726 audio and MP4A-LATM with in-band configuration (`cpresent=1`) are not supported.** OpenIPC Majestic does not use them, and cameras that offer G.726 can usually send G.711 or AAC instead — [#14](https://github.com/OpenIPC/decoder/issues/14)
-> - **MJPEG is decoded in software on devices without a usable JPEG decoder** (the AG-216 lists one but cannot create it); hardware decoding is used where the device offers `video/jpeg` — [#132](https://github.com/OpenIPC/decoder/issues/132)
-> - **The video decoder of the AG-216 can stop responding until the device is restarted**: frames arrive, none is decoded; the app says so on the screen and on the debug page, the cause is not known yet — [#145](https://github.com/OpenIPC/decoder/issues/145)
-> - **Switching between multi-view and the single view can freeze the picture for seconds** on some TV boxes (seen on the AG-216) — [#76](https://github.com/OpenIPC/decoder/issues/76)
+> - **MJPEG is decoded in software on devices without a usable JPEG decoder** (the AG-216 lists one but cannot create it) — [#132](https://github.com/OpenIPC/decoder/issues/132)
+> - **The video decoder of the AG-216 can stop responding until the device is restarted**: frames arrive, none is decoded; the app says so on the screen and on the debug page — [#145](https://github.com/OpenIPC/decoder/issues/145)
 > - **Credentials are sent in clear text** over plain RTSP/HTTP (Basic auth unless the camera asks for Digest); RTSPS is not supported and not planned — [#16](https://github.com/OpenIPC/decoder/issues/16)
+> - **Screenshots and the debug snapshot need Android 7.0+**
 >
 > Known bugs are tracked separately under the [`bug` label](https://github.com/OpenIPC/decoder/issues?q=is%3Aissue+is%3Aopen+label%3Abug).
 
-## Branches
+## Documentation
 
-| Branch  | Status                                                                                                         |
-|---------|----------------------------------------------------------------------------------------------------------------|
-| `v2`    | **Main development branch** (default). Modular code in `android/`. Builds are published as `decoder-v2.apk`.   |
-| `basic` | Legacy single-file version (1.0x), kept for reference and older setups. Builds are published as `decoder.apk`. |
+| Document | Contents |
+|---|---|
+| [Usage](docs/usage.md) | menu, gestures and keys, remote control, multi-view, Slides, the U cell, WebUI, sharing a URL from another app, screenshots, Reset |
+| [Transports](docs/transports.md) | URL formats and options: RTSP over TCP/UDP/Auto/multicast, `udp://` push (Majestic `outgoing`), HTTP MJPEG; codecs, authentication, what the servers support |
+| [Debug](docs/debug.md) | debug page on port 8085, `/stats.json` field reference, `/log`, snapshots, what to send with a bug report |
+| [Architecture](docs/architecture.md) | data path, classes, threads, the decode planner, SurfaceView rendering, repository layout |
+| [Testing and releases](docs/testing.md) | branches, CI, unit tests, versions and releases, branch builds, `mapping.txt`, building locally |
+| [Security](docs/security.md) | credential store, debug server (LAN only), log redaction, no encryption on the network |
+| [Devices](docs/devices.md) | verified and not working devices, hardware decoder notes, device and camera reports |
+| [Drones and Wi‑Fi toys](docs/toys.md) | how toys stream, FLOW-UFO (in testing), what to try with an unknown toy, what to send |
+| [Laboratory](LABORATORY.md) | the test bench: devices, cameras, access, methods |
 
-Please base pull requests on `v2`.
-
-## Building
-
-You need JDK 17 and the Android SDK (platform 36). Point the build at the SDK with `ANDROID_HOME` or `android/local.properties`.
-
-```bash
-cd android
-./gradlew assembleDebug        # debug build, no signing keys needed
-# → app/build/outputs/apk/debug/app-debug.apk
-```
-
-A release build needs a keystore at `android/key.jks` and these environment variables:
-
-```bash
-export KEYSTORE_PASS=your_password
-export KEY_ALIAS=your_alias
-export KEY_PASS=your_key_password
-./gradlew assembleRelease      # → app/build/outputs/apk/release/app-release.apk
-```
-
-Debug and release builds are signed with different keys. To switch from one to the other, uninstall the app first; its saved camera URLs are removed with it.
-
-**CI:** every push is built by GitHub Actions. Pushes to `v2` and `basic` update the [latest](https://github.com/OpenIPC/decoder/releases/tag/latest) release and notify the OpenIPC Telegram channel. Other branches only attach the APK as a workflow artifact on the run page.
-
-## Architecture
-
-| Class                                    | Role                                                                                                              |
-|------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
-| `Decoder`                                | Main activity: UI, lifecycle, settings, single-view video decoding, multi-view grid                               |
-| `RtspClient`                             | Single-view stream: RTSP session, NAL assembly, audio, connection quality                                         |
-| `RtspSession`                            | One RTSP session over TCP, UDP or multicast: handshake, RTP receive, keepalive, watchdog, reconnect with back-off |
-| `RtspAuth`, `Sdp`                        | Basic and Digest authentication; parsing of the camera's session description                                      |
-| `Transport`, `UdpReceiver`, `RtpReorder` | Transport negotiation; UDP and multicast receive with a sender filter; packet reordering                          |
-| `RtpListener`                            | `udp://` slots: plain RTP pushed by the camera                                                                    |
-| `HttpMjpeg`                              | `http://` slots: MJPEG over HTTP (`multipart/x-mixed-replace`, chunked or not)                                    |
-| `NalAssembler`                           | Rebuilds H.264/H.265 NAL units from RTP packets, drops units damaged by packet loss                               |
-| `JpegAssembler`                          | MJPEG: rebuilds whole JPEG frames from RTP/JPEG (RFC 2435)                                                        |
-| `JpegCodec`, `JpegRenderer`              | MJPEG on screen: the device's JPEG decoder where there is one, otherwise BitmapFactory                            |
-| `DecodePlanner`                          | Multi-view: which cells decode every frame and which only key frames, within the learnt decoder capacity          |
-| `MediaCodecManager`, `DecoderRetry`      | Hardware video decoder lifecycle and recovery after decoder errors                                                |
-| `AudioManager`, `AudioConfig`            | Audio pipeline: G.711/L16 conversion, AAC/Opus decoding, AudioTrack playback                                      |
-| `QuadCell`                               | One multi-view cell: its own session, decoder and optional audio                                                  |
-| `MenuManager`                            | Popup menu, URL editor, WebUI browser                                                                             |
-| `CredentialStore`, `KeystoreCipher`      | Encrypted storage of camera URLs (Android Keystore)                                                               |
-| `FramePool`, `Frame`                     | Buffer pool that reduces garbage-collector load                                                                   |
-| `App`, `Crash`                           | Uncaught-exception handler and crash report screen                                                                |
-| `DebugServer`, `NetInfo`, `Snapshots`    | Debug page on port 8085 (LAN clients only), device addresses, snapshots of the screen                             |
-
-Network, video decoding and audio run on separate threads, so a slow decoder never blocks the socket.
-
-## Security notes
-
-- Credentials are taken from the URL and sent in the `Authorization` header: Basic first, Digest when the camera asks for it. They are not included in the RTSP request line.
-- RTSP, RTP over UDP and HTTP are not encrypted, and RTSPS is not supported. Credentials that a camera expects inside the URL path or query (for example `user=…_password=…`) are sent with every request. Use the app only on trusted networks, see [#16](https://github.com/OpenIPC/decoder/issues/16).
-- Camera URLs, including passwords, are stored encrypted (AES-256-GCM with a key kept in the Android Keystore, Android 6.0+) in the app's private storage. On Android 5.x, or if the Keystore is unavailable, they are stored in plain text. Backup is disabled (`allowBackup="false"`).
-- The debug page on port 8085 is not encrypted and has no password; it answers only local-network clients and never shows logins or passwords.
-
-## Device compatibility
-
-Tested the app on your device? Please [**submit a Device report**](https://github.com/OpenIPC/decoder/issues/new?template=device_report.yml). It takes a minute and helps other users. Tested a camera? [**Submit a Camera report**](https://github.com/OpenIPC/decoder/issues/new?template=camera_report.yml): manufacturer, model, RTSP URL (without the password), codecs and what works.
-
-### Verified devices
-
-Most devices below were reported with the legacy 1.0x version (`basic` branch); the *App* column shows the version that was tested. New reports should include the app version.
-
-| Type        | Device                                 | Android                           | Kernel         | App     | Notes                                                                                      |
-|-------------|----------------------------------------|-----------------------------------|----------------|---------|--------------------------------------------------------------------------------------------|
-| Phone       | Asus ZC553KL                           | 8.1                               | 3.18.71        | 1.0x    |                                                                                            |
-| Phone       | Blackview BV4900Pro                    | 12                                | 4.19.191       | 1.0x    |                                                                                            |
-| Phone       | Oppo 5X                                | ColorOS 15.0                      | 5.15.149       | 1.0x    |                                                                                            |
-| Phone       | Oppo A17                               | ColorOS 12.1                      | 4.19.191       | 1.0x    |                                                                                            |
-| Phone       | Samsung Galaxy A51                     | 13                                | 4.14.113       | 1.0x    |                                                                                            |
-| Phone       | Samsung Galaxy M21 (SM-M215F/DSN)      | 12                                | 4.14.113       | 1.0x    |                                                                                            |
-| Phone       | Samsung Galaxy S25                     | 15                                | 6.6.30         | 1.0x    |                                                                                            |
-| Phone       | Samsung A55 5G                         | 14                                | 6.1.93         | 1.0x    |                                                                                            |
-| Phone       | Samsung Galaxy J7                      | 10                                | 3.18.150       | 1.0x    |                                                                                            |
-| Phone       | Samsung S8                             | 9                                 | 4.4.153        | 1.0x    |                                                                                            |
-| Phone       | Samsung S23 Ultra                      | 15                                | 5.15.153       | 1.0x    |                                                                                            |
-| Phone       | TECNO KM4                              | 15                                | 5.15.194       | v2 2.04 | Lab touch device: WebUI with the on-screen keyboard checked ([#159](https://github.com/OpenIPC/decoder/issues/159), [#160](https://github.com/OpenIPC/decoder/issues/160)); Close under the status bar ([#169](https://github.com/OpenIPC/decoder/issues/169)) |
-| Phone       | Xiaomi Redmi 7A                        | 10                                | 4.9.261        | 1.0x    |                                                                                            |
-| Phone       | Xiaomi Redmi Note 7 (M1901F7G)         | 10                                | 4.4.192        | 1.0x    |                                                                                            |
-| Phone       | Xiaomi Redmi Note 13 4G                | 13                                | 5.15.94        | 1.0x    |                                                                                            |
-| Tablet      | Lenovo TB-8504X                        | 8.1.0                             | 3.18.71        | v2 2.00 | H.265 and multi-view work; WebUI input fixed in 2.02 ([#159](https://github.com/OpenIPC/decoder/issues/159)) |
-| Tablet      | Lenovo TB-X304L                        | 8.1.0                             | 3.18.71        | 1.0x    | Picture cropped in 1.0x, fixed in v2 ([#17](https://github.com/OpenIPC/decoder/issues/17)) |
-| Tablet      | Lenovo TB-X606F                        | 10                                | —              | 1.0x    | Picture cropped in 1.0x, fixed in v2 ([#17](https://github.com/OpenIPC/decoder/issues/17)) |
-| Tablet      | Lenovo Tab P11                         | 11                                | 4.19.157-perf+ | 1.0x    | Picture cropped in 1.0x, fixed in v2 ([#17](https://github.com/OpenIPC/decoder/issues/17)) |
-| Tablet      | Samsung Galaxy Tab A                   | 7.1.1                             | 3.10.49        | 1.0x    |                                                                                            |
-| Tablet      | Samsung Galaxy Tab A                   | 11                                | 4.9.227        | 1.0x    |                                                                                            |
-| Tablet      | Samsung Tab A7 (SM-T505)               | 12                                | 4.19.157-perf- | 1.0x    |                                                                                            |
-| Set-top box | A95X F3 AIR                            | 9 (SlimBOXtv AOSP 9.14, no GAPPS) | 4.9.113        | 1.0x    |                                                                                            |
-| Set-top box | IE X3 Air                              | 9 (SlimBOXtv AOSP 9.14, no GAPPS) | 4.9.113        | 1.0x    |                                                                                            |
-| Set-top box | AG-216                                 | 10                                | 4.9.170        | v2 2.00 | v2 test device; decoder budget measured at ≈ 1080p60 in total (two 1080p30 at full rate)   |
-| Set-top box | SberBox SBDV-00001                     | custom                            | 4.9.228        | 1.0x    |                                                                                            |
-| Set-top box | X96Q (Allwinner H313)                  | 10                                | 4.9.170        | 1.0x    |                                                                                            |
-| Projector   | SIBIRLINK HY300 / HY320                | 11                                | 4.19.323       | v2 2.02 | 1080p H.264 / H.265 work; 2304×1296 and 2560×1440 do not start ([#165](https://github.com/OpenIPC/decoder/issues/165), [#166](https://github.com/OpenIPC/decoder/issues/166)) |
-| TV          | Haier Candy Android TV 2K              | 11                                | 4.9.243+       | 1.0x    | No icon in the device's app list                                                           |
-| TV          | Yandex TV Novex NVX-55U169TSY          | 7.1.1                             | 4.4.3          | 1.0x    |                                                                                            |
-| Car         | Media Center JCAC10003 (ac8227/ac8229) | 12                                | 3.18.79+       | 1.0x    |                                                                                            |
-| Car         | Mirror Z55                             | 8.1.0                             | 4.4.83         | 1.0x    |                                                                                            |
-
-### Not working
-
-| Type        | Device         | Android | Kernel  | App  | Notes    |
-|-------------|----------------|---------|---------|------|----------|
-| Set-top box | Unnamed TV box | 5.1.1   | 3.14.29 | 1.0x | No video |
-
-## Version history
-
-Changes are listed on the [releases page](https://github.com/OpenIPC/decoder/releases) and in the [commit history](https://github.com/OpenIPC/decoder/commits/v2). The history of 1.0x versions is in the [`basic` branch README](https://github.com/OpenIPC/decoder/tree/basic#version-history).
-
-## License
-
-[The Prosperity Public License 3.0.0](LICENSE.md): free for noncommercial use, with a 30-day trial for commercial use. See [LICENSE.md](LICENSE.md) for the full terms.
+The change history is the [merged pull requests](https://github.com/OpenIPC/decoder/pulls?q=is%3Apr+is%3Amerged+base%3Av2) and the [commits of v2](https://github.com/OpenIPC/decoder/commits/v2).
 
 ## Support
 
 - Questions and bug reports: [GitHub Issues](https://github.com/OpenIPC/decoder/issues)
-- Documentation: [openipc.org](https://openipc.org)
+- Tested the app on a device or a camera? Please send a [Device report](https://github.com/OpenIPC/decoder/issues/new?template=device_report.yml) or a [Camera report](https://github.com/OpenIPC/decoder/issues/new?template=camera_report.yml)
+- OpenIPC: [openipc.org](https://openipc.org)
 
 [![Telegram](https://openipc.org/images/telegram_button.svg)](https://openipc.org/our-channels)
+
+## License
+
+[The Prosperity Public License 3.0.0](LICENSE.md): free for noncommercial use, with a 30-day trial for commercial use. See [LICENSE.md](LICENSE.md) for the full terms.
 
 [logo]: https://raw.githubusercontent.com/OpenIPC/.github/refs/heads/main/assets/openipc-logo-black.svg
