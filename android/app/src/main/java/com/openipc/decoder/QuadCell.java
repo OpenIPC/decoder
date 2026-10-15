@@ -288,6 +288,8 @@ class QuadCell implements RtspSession.Callback {
         // stalls again (Qodo on #146)
         if ("disconnected".equals(status)) nalAssembler.setSalvage(false);
         state = status;
+        // A flowufo:// session sends its detail after the status it belongs to (Qodo on #188)
+        detail = null;
         // A connection that works again clears the last connection error
         if ("connected".equals(status) && problem != null && !problem.startsWith("Decoder")) {
             problem = null;

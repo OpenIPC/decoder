@@ -70,6 +70,8 @@ final class FlowUfo {
     static final int SLOTS = 4;
     /** A slot this many frames behind the newest asks for its next frame whole. */
     static final int LAG = 5;
+    /** Fragments in a row this far behind the newest frame: the drone counts from 1 again. */
+    static final int RESTART_RUN = 8;
     static final int STATUS_COLLECTING = 0;
     static final int STATUS_COMPLETE = 1;
     static final int STATUS_WHOLE = 3;
@@ -262,11 +264,16 @@ final class FlowUfo {
         /** The frame whose fragments arrive now: not acknowledged while it is coming in. */
         long current;
         long lastDelivered;
+        /** When a fragment last added data: the quiet time of the acknowledgement. */
         long lastFragmentMs;
+        /** Fragments in a row far behind the newest frame. */
+        private int behind;
         volatile int fragments;
         volatile int duplicates;
         volatile int stale;
         volatile int mismatched;
+        /** Fragments with less data than their place in the body needs. */
+        volatile int shortFragments;
         volatile int completed;
         volatile int delivered;
         volatile int lost;
@@ -286,20 +293,30 @@ final class FlowUfo {
             base = 0;
             current = 0;
             lastDelivered = 0;
+            behind = 0;
         }
 
         static int slotOf(long seq) {
             return (int) ((seq - 1) & (SLOTS - 1));
         }
 
-        /** Adds a fragment; returns its slot when the fragment completed a frame to show. */
+        /**
+         * Adds a fragment; returns its slot when the fragment completed a frame to show. Only a
+         * fragment that adds data counts for the quiet time: stale ones and duplicates do not
+         * (Qodo on #188).
+         */
         Slot add(Fragment f, long nowMs) {
-            lastFragmentMs = nowMs;
-            // Far behind the newest frame: the drone counts from 1 again
             if (maxSeq > 64 && f.seq + 64 < maxSeq) {
+                // Far behind the newest frame: a straggler, or the drone counts from 1 again;
+                // only a run of them is taken for a restart (Qodo on #188)
+                if (++behind < RESTART_RUN) {
+                    stale++;
+                    return null;
+                }
                 restarts++;
                 reset();
             }
+            behind = 0;
             // Only a base behind the frame itself makes sense
             if (f.base > base && f.base < f.seq) base = f.base;
             Slot s = slots[slotOf(f.seq)];
@@ -316,7 +333,6 @@ final class FlowUfo {
                 s.start(f);
             }
             fragments++;
-            current = f.seq;
             if (f.seq > maxSeq) maxSeq = f.seq;
             if (s.status == STATUS_COMPLETE || (f.total == s.total && s.has(f.index))) {
                 duplicates++;
@@ -332,10 +348,19 @@ final class FlowUfo {
                 s.bodyLength = Math.max(s.bodyLength, f.bodyLength);
             }
             int at = f.index * FRAGMENT_DATA;
+            if (f.dataLength < Math.min(FRAGMENT_DATA, s.bodyLength - at)) {
+                shortFragments++;
+                // A short one inside the body stays missing (Qodo on #188); the last one ends
+                // the body where its data ends
+                if (f.index < s.total - 1) return null;
+                s.bodyLength = at + f.dataLength;
+            }
             int n = Math.min(f.dataLength, s.total * FRAGMENT_DATA - at);
             System.arraycopy(f.buf, f.dataOffset, s.body, at, n);
             s.mask[f.index >> 5] |= 1 << (f.index & 31);
             s.received++;
+            lastFragmentMs = nowMs;
+            current = f.seq;
             if (s.received < s.total) return null;
             s.status = STATUS_COMPLETE;
             completed++;
@@ -365,11 +390,12 @@ final class FlowUfo {
             boolean any = false;
             boolean allComplete = true;
             for (Slot s : slots) {
-                if (s.seq == 0) continue;
+                // At or below the base the drone is done with it: no record, and an incomplete
+                // one does not hold up the request for the next frame (Qodo on #188)
+                if (s.seq == 0 || s.seq <= base) continue;
                 any = true;
                 if (s.status != STATUS_COMPLETE) allComplete = false;
                 if (s.seq == current && !quiet) continue;
-                if (s.seq <= base) continue;
                 if (maxSeq - s.seq >= LAG) {
                     pos = wholeRecord(out, pos, s.seq + SLOTS);
                     records++;
@@ -514,6 +540,8 @@ final class FlowUfo {
         private volatile boolean gl = true;
         private volatile float fragmentsPerS;
         private volatile float framesPerS;
+        /** Any fragment from the drone, usable or not: it is still there. */
+        private long lastFragmentAt;
 
         Client(String tag, Url url, SocketSetup setup) {
             this.tag = tag;
@@ -561,7 +589,8 @@ final class FlowUfo {
             int rateFragments = 0;
             int rateFrames = 0;
             long nextSummary = rateMark + 30_000;
-            int failedSends = 0;
+            // Start of the current run of failed sends, or 0
+            long failingSince = 0;
             try {
                 while (!closed && keepGoing.holds()) {
                     long t = now();
@@ -573,15 +602,11 @@ final class FlowUfo {
                         rateFrames = window.delivered;
                         rateMark = t;
                     }
-                    if (receiving && t - window.lastFragmentMs > resetMs) {
-                        resets++;
-                        receiving = false;
-                        playing = false;
-                        window.reset();
-                        nextProbe = t;
+                    if (receiving && t - lastFragmentAt > resetMs) {
                         Log.w(TAG, tag + ": FLOW-UFO: no fragment for " + resetMs
                                 + " ms, probing again (" + summary() + ")");
-                        listener.onState(false, probingText(true));
+                        probeAgain(listener, t);
+                        nextProbe = t;
                     }
                     if (receiving && t >= nextSummary) {
                         nextSummary = t + 30_000;
@@ -602,14 +627,21 @@ final class FlowUfo {
                     }
                     if (sendFailed) {
                         // Off the toy's Wi-Fi, or its network went away: a new socket after
-                        // 3 s of failures, bound again to whatever network reaches it now
-                        if (++failedSends >= 30) {
-                            failedSends = 0;
+                        // 3 s of failures, bound again to whatever network reaches it now. The
+                        // drone sends to the port of the probe: the new port probes at once
+                        // (Qodo on #188)
+                        if (failingSince == 0) failingSince = t;
+                        if (t - failingSince >= 3000) {
+                            failingSince = 0;
                             s.close();
                             s = open(address);
+                            Log.w(TAG, tag + ": FLOW-UFO: new socket after send errors, local port "
+                                    + s.getLocalPort() + " (network: " + network + ")");
+                            if (receiving) probeAgain(listener, t);
+                            nextProbe = t;
                         }
                     } else {
-                        failedSends = 0;
+                        failingSince = 0;
                     }
                     long wake = receiving ? nextAck : nextProbe;
                     int timeout = (int) Math.max(1, Math.min(100, wake - now()));
@@ -635,6 +667,15 @@ final class FlowUfo {
             } finally {
                 s.close();
             }
+        }
+
+        /** Back to probing: the stream is gone. */
+        private void probeAgain(Listener listener, long t) {
+            resets++;
+            receiving = false;
+            playing = false;
+            window.reset();
+            listener.onState(false, probingText(true));
         }
 
         private boolean send(DatagramSocket s, DatagramPacket p) {
@@ -676,6 +717,7 @@ final class FlowUfo {
                 return;
             }
             long t = now();
+            lastFragmentAt = t;
             if (!receiving) {
                 receiving = true;
                 if (firstHeader == null) firstHeader = hex(b, 0, FRAGMENT_HEADER);
@@ -747,6 +789,7 @@ final class FlowUfo {
             m.put("duplicates", w.duplicates);
             m.put("stale", w.stale);
             m.put("mismatched", w.mismatched);
+            m.put("short_fragments", w.shortFragments);
             m.put("bad_packets", badPackets);
             m.put("frames", w.delivered);
             m.put("frames_complete", w.completed);

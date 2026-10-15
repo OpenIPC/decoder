@@ -355,11 +355,75 @@ public class FlowUfoTest {
     @Test
     public void restartedDroneCountsFromOne() {
         FlowUfo.Window w = new FlowUfo.Window();
-        byte[] body = new byte[10];
-        assertNotNull(w.add(parsed(piece(500, body, 0)), 0));
-        assertNotNull(w.add(parsed(piece(1, body, 0)), 1));
+        byte[] small = new byte[10];
+        assertNotNull(w.add(parsed(piece(500, small, 0)), 0));
+        // A run of fragments far behind: the drone started again from 1
+        byte[] body = new byte[FlowUfo.RESTART_RUN * 1024];
+        for (int i = 0; i < FlowUfo.RESTART_RUN; i++) w.add(parsed(piece(1, body, i)), 1);
         assertEquals(1, w.restarts);
         assertEquals(1, w.maxSeq);
+        assertNotNull(w.add(parsed(piece(2, small, 0)), 2));
+    }
+
+    @Test
+    public void oneStragglerDoesNotReset() {
+        FlowUfo.Window w = new FlowUfo.Window();
+        byte[] body = new byte[2000];
+        assertNotNull(w.add(parsed(piece(100, Arrays.copyOf(body, 10), 0)), 0));
+        assertNull(w.add(parsed(piece(101, body, 0)), 10));
+        // A delayed fragment of frame 35 is only stale
+        assertNull(w.add(parsed(piece(35, body, 0)), 15));
+        assertEquals(0, w.restarts);
+        assertEquals(1, w.stale);
+        assertEquals(101, w.maxSeq);
+        assertNotNull(w.add(parsed(piece(101, body, 1)), 20));
+    }
+
+    @Test
+    public void staleFragmentsDoNotHoldBackTheMask() {
+        FlowUfo.Window w = new FlowUfo.Window();
+        byte[] body = new byte[2000];
+        w.add(parsed(piece(1, body, 0)), 0);
+        w.add(parsed(piece(5, body, 0)), 0);
+        // Fragments of the replaced frame 1 keep coming: frame 5 is still due its mask
+        for (int t = 5; t <= 40; t += 5) w.add(parsed(piece(1, body, 1)), t);
+        List<long[]> r = records(ack(w, 40));
+        assertEquals(1, r.size());
+        assertEquals(5, r.get(0)[0]);
+        assertEquals(FlowUfo.STATUS_COLLECTING, r.get(0)[1]);
+    }
+
+    @Test
+    public void baseHiddenFrameDoesNotHoldUpTheNextRequest() {
+        FlowUfo.Window w = new FlowUfo.Window();
+        byte[] body = new byte[2000];
+        byte[] one = Arrays.copyOf(body, 10);
+        // Frame 1 incomplete; frame 2 complete and says base 1
+        w.add(parsed(piece(1, body, 0)), 0);
+        w.add(parsed(fragment(2, 1, 0, 1, one.length, 640, 360, 50, one, 0, one.length)), 0);
+        List<long[]> r = records(ack(w, 100));
+        assertEquals(2, r.size());
+        assertArrayEquals(new long[] {2, FlowUfo.STATUS_COMPLETE, 20}, Arrays.copyOf(r.get(0), 3));
+        assertArrayEquals(new long[] {3, FlowUfo.STATUS_WHOLE, 16}, Arrays.copyOf(r.get(1), 3));
+    }
+
+    @Test
+    public void shortFragments() {
+        FlowUfo.Window w = new FlowUfo.Window();
+        byte[] body = new byte[2500];
+        // Fragment 0 with 100 bytes instead of 1024: stays missing
+        byte[] p = fragment(1, 0, 0, 3, body.length, 640, 360, 50, body, 0, 100);
+        assertNull(w.add(parsed(p), 0));
+        assertEquals(1, w.shortFragments);
+        assertEquals(0, w.slots[0].received);
+        w.add(parsed(piece(1, body, 0)), 0);
+        w.add(parsed(piece(1, body, 1)), 0);
+        // The last one with 2 of its 452 bytes: the body ends there
+        p = fragment(1, 0, 2, 3, body.length, 640, 360, 50, body, 2048, 2);
+        FlowUfo.Slot s = w.add(parsed(p), 0);
+        assertNotNull(s);
+        assertEquals(2050, s.bodyLength);
+        assertEquals(2, w.shortFragments);
     }
 
     // ====================== JPEG headers ======================
