@@ -23,8 +23,8 @@ android {
         applicationId "com.openipc.decoder"
         minSdk 21
         targetSdk 36
-        versionCode 32
-        versionName "2.07"
+        versionCode 33
+        versionName "2.08"
 
         buildConfigField "String", "GIT_HASH", "\"${getGitHash()}\""
     }
@@ -50,6 +50,8 @@ android {
             shrinkResources = true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             signingConfig = signingConfigs.release
+            // No META-INF/version-control-info.textproto (#181): BuildConfig.GIT_HASH has the commit
+            vcsInfo.include = false
         }
     }
 
@@ -61,6 +63,12 @@ android {
     testOptions {
         // android.jar stubs (Log, ...) return defaults instead of throwing in JVM unit tests
         unitTests.returnDefaultValues = true
+    }
+
+    // No dependency metadata in the APK and bundle (#181): there are no runtime dependencies
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
 
     lint {
