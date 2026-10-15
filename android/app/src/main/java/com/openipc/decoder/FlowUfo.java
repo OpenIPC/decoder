@@ -928,9 +928,12 @@ final class FlowUfo {
                         if (failingSince == 0) failingSince = t;
                         if (t - failingSince >= 3000) {
                             failingSince = 0;
-                            if (receiving) probeAgain(listener, address);
-                            locked = -1;
-                            for (int i = 0; i < ports.length; i++) open(i, address);
+                            if (receiving) {
+                                probeAgain(listener, address);
+                            } else {
+                                locked = -1;
+                                for (int i = 0; i < ports.length; i++) open(i, address);
+                            }
                             Log.w(TAG, tag + ": FLOW-UFO: new sockets after send errors, local"
                                     + " port " + localPorts() + " (network: " + network + ")");
                             Arrays.fill(nextProbe, t);
@@ -969,7 +972,11 @@ final class FlowUfo {
                         }
                         continue;
                     }
-                    if (locked < 0 && packetType(rx, 0, in.getLength()) >= 0) lock(got, in);
+                    // Only a frame fragment locks: a service message may come from the engine
+                    // that sends no video (Qodo on #188)
+                    if (locked < 0 && packetType(rx, 0, in.getLength()) == TYPE_FRAGMENT) {
+                        lock(got, in);
+                    }
                     handle(rx, in.getLength(), listener);
                 }
             } catch (IOException e) {
@@ -1004,16 +1011,17 @@ final class FlowUfo {
                     + (ports.length > 1 ? "; the other port is not probed any more" : ""));
         }
 
-        /** Back to probing on every port: the stream is gone. */
+        /**
+         * Back to probing on every port: the stream is gone. Every socket is new, bound again
+         * to whatever network reaches the toy now (Qodo on #188).
+         */
         private void probeAgain(Listener listener, InetAddress address) throws IOException {
             resets++;
             receiving = false;
             playing = false;
             window.reset();
             locked = -1;
-            for (int i = 0; i < ports.length; i++) {
-                if (socket(i) == null) open(i, address);
-            }
+            for (int i = 0; i < ports.length; i++) open(i, address);
             listener.onState(false, probingText(true));
         }
 
