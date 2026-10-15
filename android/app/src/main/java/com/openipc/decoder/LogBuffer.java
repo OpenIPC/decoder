@@ -51,8 +51,12 @@ final class LogBuffer {
             while (true) {
                 Process p = null;
                 try {
-                    // No -d: dump what logcat still has, then keep following
-                    p = new ProcessBuilder("logcat", "-v", "threadtime")
+                    // No -d: dump what logcat still has, then keep following. Every line of the
+                    // app's own tag, but only Info and up from the rest of the process: graphics
+                    // libraries on some phones (mali_gralloc) log dozens of Debug lines a second
+                    // and would push the app's lines out of the ring within seconds (#187)
+                    p = new ProcessBuilder("logcat", "-v", "threadtime",
+                            "OpenIPCDecoder:V", "*:I")
                             .redirectErrorStream(true).start();
                     try (BufferedReader r = new BufferedReader(
                             new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
