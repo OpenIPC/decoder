@@ -406,4 +406,157 @@ public class DecodePlannerTest {
         assertTrue(!cells.get(0).paused && !cells.get(1).paused);
         assertEquals(P1080_30, p.capacity());
     }
+
+    /** Steps once per second until a decision other than NONE, at most {@code ms}; applied. */
+    private static DecodePlanner.Decision until(DecodePlanner p, List<DecodePlanner.Cell> cells,
+            long[] t, long ms) {
+        DecodePlanner.Decision d = DecodePlanner.Decision.NONE;
+        for (long end = t[0] + ms; d.action == DecodePlanner.Action.NONE && t[0] < end; t[0] += 1000) {
+            d = p.step(cells, t[0]);
+            apply(cells, d);
+        }
+        return d;
+    }
+
+    /** Three cells play a load of {@code each} x 3 quietly until it is proven. */
+    private static List<DecodePlanner.Cell> provenAtThree(DecodePlanner p, long each, long[] t) {
+        List<DecodePlanner.Cell> cells = keyCells(3, each);
+        for (int i = 0; i < 3; i++) until(p, cells, t, 10_000);
+        assertEquals(3, full(cells));
+        for (long end = t[0] + DecodePlanner.PROBE_QUIET_MS + 1000; t[0] < end; t[0] += 1000) {
+            assertEquals(DecodePlanner.Action.NONE, p.step(cells, t[0]).action);
+        }
+        return cells;
+    }
+
+    @Test
+    public void aTransientLossBelowAProvenLoadKeepsTheCapacity() {
+        // The #189 timeline: 312 338 proven, then losses at 239 719 (other apps, a stall)
+        long floor = DecodePlanner.fullLoad(1920, 1080, 30);
+        DecodePlanner p = new DecodePlanner(464_979, true, 446_770, floor);
+        long[] t = {0};
+        List<DecodePlanner.Cell> cells = provenAtThree(p, 312_338 / 3, t);
+        for (DecodePlanner.Cell c : cells) c.fullLoad = 239_719 / 3;
+        cells.get(0).lossy = true;
+        DecodePlanner.Decision d = until(p, cells, t, 10_000);
+        assertEquals(DecodePlanner.Action.DEMOTE, d.action);
+        assertEquals(2, d.index);
+        assertTrue("not below the proven load", p.capacity() >= 312_336);
+        assertEquals("the failed load stays", 446_770, p.failedLoad());
+        // The losses stop: the cell goes back to full rate at once
+        cells.get(0).lossy = false;
+        d = until(p, cells, t, 10_000);
+        assertEquals(DecodePlanner.Action.PROMOTE, d.action);
+        assertEquals(2, d.index);
+    }
+
+    @Test
+    public void repeatedLossesBelowAProvenLoadCountAsAFailure() {
+        long floor = DecodePlanner.fullLoad(1920, 1080, 30);
+        DecodePlanner p = new DecodePlanner(464_979, true, 446_770, floor);
+        long[] t = {0};
+        List<DecodePlanner.Cell> cells = provenAtThree(p, 312_338 / 3, t);
+        long each = 239_719 / 3;
+        for (DecodePlanner.Cell c : cells) c.fullLoad = each;
+        cells.get(0).lossy = true;
+        assertEquals(DecodePlanner.Action.DEMOTE, until(p, cells, t, 10_000).action);
+        cells.get(0).lossy = false;
+        assertEquals(DecodePlanner.Action.PROMOTE, until(p, cells, t, 10_000).action);
+        // The same losses again, even much later (Qodo on #190): the proven load was wrong
+        for (long end = t[0] + 15 * 60_000; t[0] < end; t[0] += 1000) apply(cells, p.step(cells, t[0]));
+        assertEquals(3, full(cells));
+        cells.get(0).lossy = true;
+        DecodePlanner.Decision d = until(p, cells, t, 10_000);
+        assertEquals(DecodePlanner.Action.DEMOTE, d.action);
+        assertEquals(3 * each, p.failedLoad());
+        assertEquals(floor, p.capacity());
+    }
+
+    @Test
+    public void aTransientIsForgivenAgainOnceTheProvenLoadPlaysQuietlyAgain() {
+        long floor = DecodePlanner.fullLoad(1920, 1080, 30);
+        DecodePlanner p = new DecodePlanner(464_979, true, 446_770, floor);
+        long[] t = {0};
+        List<DecodePlanner.Cell> cells = provenAtThree(p, 312_338 / 3, t);
+        for (DecodePlanner.Cell c : cells) c.fullLoad = 239_719 / 3;
+        cells.get(0).lossy = true;
+        assertEquals(DecodePlanner.Action.DEMOTE, until(p, cells, t, 10_000).action);
+        cells.get(0).lossy = false;
+        assertEquals(DecodePlanner.Action.PROMOTE, until(p, cells, t, 10_000).action);
+        // The proven load plays without losses again
+        for (DecodePlanner.Cell c : cells) c.fullLoad = 312_338 / 3;
+        for (long end = t[0] + DecodePlanner.PROBE_QUIET_MS + 1000; t[0] < end; t[0] += 1000) {
+            apply(cells, p.step(cells, t[0]));
+        }
+        // Another transient: still not a failure
+        for (DecodePlanner.Cell c : cells) c.fullLoad = 239_719 / 3;
+        cells.get(0).lossy = true;
+        assertEquals(DecodePlanner.Action.DEMOTE, until(p, cells, t, 10_000).action);
+        assertTrue(p.capacity() >= 312_336);
+        assertEquals(446_770, p.failedLoad());
+    }
+
+    @Test
+    public void aLightCellIsPromotedWhenTheFirstOneIsHeldBackByAFailedLoad() {
+        // The state of #189 in the session after the demotion: capacity at the floor, failed at
+        // 239 719 (after a restart, a value below the floor is not trusted); nine cells on key
+        // frames, about 50 000 blocks/s in all
+        DecodePlanner p = new DecodePlanner(DecodePlanner.fullLoad(1920, 1080, 30), true, 239_719);
+        List<DecodePlanner.Cell> cells = keyCells(9, 0);
+        cells.get(0).fullLoad = 180_000; // the U cell: up to about 221 000, too close to 239 719
+        cells.get(0).keyLoad = 9_000;
+        for (int i = 1; i < 8; i++) {
+            cells.get(i).fullLoad = DecodePlanner.fullLoad(1920, 1080, 20); // about 162 000
+            cells.get(i).keyLoad = 5_000;
+        }
+        cells.get(8).fullLoad = DecodePlanner.fullLoad(1280, 720, 2); // about 7 000
+        cells.get(8).keyLoad = 6_000;
+        long[] t = {0};
+        for (int i = 0; i < 20; i++) until(p, cells, t, 1000);
+        assertTrue(!cells.get(0).full);
+        assertTrue("the first that fits plays at full rate", cells.get(1).full);
+        assertTrue("and the light one", cells.get(8).full);
+        assertEquals(2, full(cells));
+    }
+
+    @Test
+    public void onlyTheFirstCellIsProbedBeyondTheCapacity() {
+        DecodePlanner p = new DecodePlanner(P1080_30, false);
+        List<DecodePlanner.Cell> cells = keyCells(3, P1080_30);
+        cells.get(0).fullLoad = 2 * P1080_30; // does not fit
+        cells.get(1).fullLoad = P1080_30 / 2; // fits
+        long[] t = {0};
+        DecodePlanner.Decision d = until(p, cells, t, 1000);
+        assertEquals(DecodePlanner.Action.PROMOTE, d.action);
+        assertEquals("a lower cell that fits does not wait", 1, d.index);
+        // The third would fit a probe as well, but the probe keeps the priority order
+        d = until(p, cells, t, 2 * DecodePlanner.PROBE_QUIET_MS);
+        assertEquals(DecodePlanner.Action.PROMOTE, d.action);
+        assertEquals(0, d.index);
+    }
+
+    @Test
+    public void aFailedLoadIsRetriedAnHourAfterTheDemotionDespiteSparseLosses() {
+        DecodePlanner p = new DecodePlanner(P1080_30, false);
+        List<DecodePlanner.Cell> cells = keyCells(2, P1080_30);
+        long[] t = {0};
+        until(p, cells, t, 1000);
+        until(p, cells, t, 40_000); // the probe of the second camera
+        assertEquals(2, full(cells));
+        cells.get(0).lossy = true;
+        assertEquals(DecodePlanner.Action.DEMOTE, until(p, cells, t, 10_000).action);
+        long demotedAt = t[0];
+        cells.get(0).lossy = false;
+        // A single lost key frame now and then: never a demotion, but no quiet hour either
+        DecodePlanner.Decision d = DecodePlanner.Decision.NONE;
+        for (; d.action == DecodePlanner.Action.NONE && t[0] < demotedAt + 2 * DecodePlanner.FAILED_RETRY_MS;
+                t[0] += 1000) {
+            cells.get(1).lossy = (t[0] - demotedAt) % (20 * 60_000) < 1000;
+            d = p.step(cells, t[0]);
+        }
+        assertEquals(DecodePlanner.Action.PROMOTE, d.action);
+        assertEquals(1, d.index);
+        assertTrue(t[0] - demotedAt >= DecodePlanner.FAILED_RETRY_MS);
+        assertTrue(t[0] - demotedAt < DecodePlanner.FAILED_RETRY_MS + 20 * 60_000);
+    }
 }
