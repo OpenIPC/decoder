@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -107,6 +108,8 @@ class RtspSession {
     private volatile boolean listening;
     /** Client of a flowufo:// slot (#187), else null: it probes on its own when silent. */
     private volatile FlowUfo.Client ufo;
+    /** Client of a jieli:// slot (#187), else null: it asks for the stream again on its own. */
+    private volatile Jieli.Client jieli;
     /** Heartbeat of the RTSP connection now (#187), else null; counts of the earlier ones. */
     private volatile UdpHeartbeat heartbeat;
     private volatile int heartbeatsBefore;
@@ -216,6 +219,7 @@ class RtspSession {
     private void closeSocketLocked() {
         if (listener != null) listener.close();
         if (ufo != null) ufo.close();
+        if (jieli != null) jieli.close();
         if (heartbeat != null) heartbeat.close();
         if (udp != null) {
             udp.close();
@@ -289,7 +293,7 @@ class RtspSession {
                     }
                 }
             }
-            if (active && !listening && ufo == null
+            if (active && !listening && ufo == null && jieli == null
                     && System.nanoTime() / 1_000_000 - lastPacketMs > watchdogMs) {
                 Log.w(TAG, tag + ": stream is inactive, reconnecting");
                 active = false;
@@ -310,6 +314,7 @@ class RtspSession {
         if (RtpListener.Url.matches(url)) return listen(gen, RtpListener.Url.parse(url));
         if (HttpMjpeg.matches(url)) return httpMjpeg(gen, HttpMjpeg.Url.parse(url));
         if (FlowUfo.Url.matches(url)) return flowUfo(gen, FlowUfo.Url.parse(url));
+        if (Jieli.Url.matches(url)) return jieli(gen, Jieli.Url.parse(url));
         Url u = Url.parse(url);
         Socket s = new Socket();
         synchronized (lock) {
@@ -722,6 +727,103 @@ class RtspSession {
             }
             c.close();
         }
+    }
+
+    /** Jieli statistics for /stats.json while a jieli:// slot runs (#187), else null. */
+    Map<String, Object> jieliStats() {
+        Jieli.Client c = jieli;
+        return c != null ? c.stats() : null;
+    }
+
+    /**
+     * A jieli:// slot (#187): CTP over TCP asks the toy for the stream, which comes as RTP to
+     * a fixed local UDP port: payload type 26 goes to the RTP/JPEG path, 96 to the H.264 one,
+     * as on a udp:// slot. The client asks again when no video comes, so the watchdog leaves
+     * it alone. Returns true once it ran, like a PLAY that succeeded.
+     */
+    private boolean jieli(int gen, Jieli.Url u) throws IOException {
+        Jieli.Client c = new Jieli.Client(tag, u, NetInfo::bindToNetworkOf,
+                NetInfo::bindToNetworkOf);
+        synchronized (lock) {
+            if (gen != generation) return false;
+            jieli = c;
+            keepalive = null;
+            lastPacketMs = System.nanoTime() / 1_000_000;
+            streamBytes = 0;
+            bitrateMarkNs = System.nanoTime();
+            active = true;
+        }
+        try {
+            final int[] pt = {u.format == Jieli.FORMAT_H264 ? Jieli.PT_H264 : Jieli.PT_JPEG};
+            callback.onSdp(jieliSdp(pt[0]));
+            // onState comes from the CTP thread, the video from the UDP one
+            final AtomicBoolean first = new AtomicBoolean(true);
+            final AtomicBoolean received = new AtomicBoolean(false);
+            c.run(() -> active && gen == generation, new Jieli.Listener() {
+                @Override
+                public void onState(boolean receiving, String text) {
+                    if (gen != generation) return;
+                    if (receiving) {
+                        inUse = "Jieli RTP";
+                        received.set(true);
+                    } else {
+                        inUse = null;
+                        // Video that stopped says so; the next frame reports "connected" again
+                        status(gen, received.get() ? "disconnected" : "buffering");
+                        first.set(true);
+                    }
+                    callback.onDetail(text);
+                }
+
+                @Override
+                public void onRtp(byte[] buf, int offset, int length) {
+                    if (gen != generation) return;
+                    int type = buf[offset + 1] & 0x7F;
+                    if (type != pt[0]) {
+                        // The toy sends the other codec than asked for: follow it
+                        pt[0] = type;
+                        Log.i(TAG, tag + ": Jieli: video is "
+                                + (type == Jieli.PT_H264 ? "H.264" : "JPEG") + " (RTP PT " + type
+                                + ")");
+                        callback.onSdp(jieliSdp(type));
+                    }
+                    streamBytes += length;
+                    if (callback.onPacket(CHANNEL_VIDEO, buf, offset, length)) usable();
+                }
+
+                @Override
+                public void onJpeg(byte[] buf, int offset, int length) {
+                    if (gen != generation) return;
+                    if (pt[0] != Jieli.PT_JPEG) {
+                        pt[0] = Jieli.PT_JPEG;
+                        callback.onSdp(jieliSdp(Jieli.PT_JPEG));
+                    }
+                    streamBytes += length;
+                    if (callback.onJpegFrame(buf, offset, length)) usable();
+                }
+
+                private void usable() {
+                    lastPacketMs = System.nanoTime() / 1_000_000;
+                    if (first.compareAndSet(true, false)) status(gen, "connected");
+                }
+            });
+            return true;
+        } finally {
+            synchronized (lock) {
+                if (jieli == c) {
+                    jieli = null;
+                    inUse = null;
+                }
+            }
+            c.close();
+        }
+    }
+
+    private static Sdp jieliSdp(int pt) {
+        Sdp sdp = new Sdp();
+        sdp.videoPt = pt;
+        sdp.videoJpeg = pt == Jieli.PT_JPEG;
+        return sdp;
     }
 
     private boolean listen(int gen, RtpListener.Url u) throws IOException {

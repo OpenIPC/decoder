@@ -431,6 +431,9 @@ class QuadCell implements RtspSession.Callback {
     /** FLOW-UFO statistics of a flowufo:// cell (#187), else null. */
     java.util.Map<String, Object> flowUfoStats() { return session.flowUfoStats(); }
 
+    /** Jieli statistics of a jieli:// cell (#187), else null. */
+    java.util.Map<String, Object> jieliStats() { return session.jieliStats(); }
+
     /** The cooingdv heartbeat of an RTSP cell once it used one (#187), else null. */
     java.util.Map<String, Object> heartbeatStats() { return session.heartbeatStats(); }
 

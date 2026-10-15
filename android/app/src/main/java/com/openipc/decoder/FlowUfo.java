@@ -635,19 +635,19 @@ final class FlowUfo {
                     + " flowufo://192.168.169.1");
         }
         if (on80 && !on169 && !on1) {
-            sentence(parts, "Toys on 192.168.80.x (HF_ Wi-Fi) use another protocol, not supported"
-                    + " yet");
+            sentence(parts, "This phone is on 192.168.80.x (HF_ Wi-Fi), a Jieli toy: try"
+                    + " jieli://192.168.80.1");
         }
         return parts.length() > 0 ? parts.toString() : null;
     }
 
-    private static void sentence(StringBuilder sb, String s) {
+    static void sentence(StringBuilder sb, String s) {
         if (sb.length() > 0) sb.append(". ");
         sb.append(s);
     }
 
     /** {@code a} is in 192.168.{@code third}.0/24. */
-    private static boolean in24(InetAddress a, int third) {
+    static boolean in24(InetAddress a, int third) {
         if (!(a instanceof Inet4Address)) return false;
         byte[] b = a.getAddress();
         return (b[0] & 0xFF) == 192 && (b[1] & 0xFF) == 168 && (b[2] & 0xFF) == third;

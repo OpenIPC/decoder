@@ -168,7 +168,7 @@ Single view and U view: every cell of the grid as the debug page shows it (3×3 
 | `codec`, `size` | when found |
 | `fps`, `kbps`, `key_frames` | measured during the check |
 
-The FLOW-UFO test build ([toys.md](toys.md#flow-ufo)) adds a `flowufo` object per cell and in `single`, and a `heartbeat` object for RTSP slots that send the KY UFO heartbeat ([toys.md](toys.md#ky-ufo-rtsp-toys)); it is not in the releases.
+The FLOW-UFO test build ([toys.md](toys.md#flow-ufo)) adds a `flowufo` object per cell and in `single` (`jieli` for `jieli://` slots, [toys.md](toys.md#hf--jieli-toys)), and a `heartbeat` object for RTSP slots that send the KY UFO heartbeat ([toys.md](toys.md#ky-ufo-rtsp-toys)); it is not in the releases.
 
 ## Log
 
