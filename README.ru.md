@@ -45,7 +45,7 @@
 | `decoder-v2.apk` | **Текущая версия**, рекомендуется |
 | `decoder.apk` | Старая версия из ветки `basic` |
 
-У каждой версии 2.xx есть и свой релиз на [странице релизов](https://github.com/OpenIPC/decoder/releases) — с APK этой версии и списком изменений после предыдущей.
+Каждая новая сборка заменяет предыдущую в `latest`. Разработка идёт непрерывно, поэтому отдельных релизов по версиям нет; каждая сборка с номером версии и коммитом публикуется в Telegram-канале OpenIPC ([наши каналы](https://openipc.org/our-channels)).
 
 Есть бета-канал в [Google Play](https://play.google.com/apps/internaltest/4701231141824898735). Чтобы попасть в него, пришлите свой e-mail через [Telegram-каналы OpenIPC](https://openipc.org/our-channels).
 
@@ -115,7 +115,7 @@
 | [Drones and Wi‑Fi toys](docs/toys.md) | как передают видео игрушки, FLOW-UFO (в тестировании), что попробовать с неизвестной игрушкой, что прислать |
 | [Laboratory](LABORATORY.md) | тестовый стенд: устройства, камеры, доступ, методики |
 
-История изменений — в описаниях релизов на [странице релизов](https://github.com/OpenIPC/decoder/releases) (CI пишет их для каждой версии v2.xx).
+История изменений — это [принятые pull request'ы](https://github.com/OpenIPC/decoder/pulls?q=is%3Apr+is%3Amerged+base%3Av2) и [коммиты ветки v2](https://github.com/OpenIPC/decoder/commits/v2).
 
 ## Поддержка
 
