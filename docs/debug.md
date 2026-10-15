@@ -6,6 +6,7 @@
 - [Stream checks in the single view](#stream-checks-in-the-single-view)
 - [stats.json fields](#statsjson-fields)
 - [Log](#log)
+- [Save report](#save-report)
 - [Corner text in multi-view](#corner-text-in-multi-view)
 - [Bug reports](#bug-reports)
 
@@ -19,6 +20,7 @@ While the app runs it serves its debug information over HTTP on port **8085**, f
 | `/stats.json` | the state as JSON, pretty-printed, see [fields](#statsjson-fields) |
 | `/snapshot.jpg` | a picture of the screen, see [Snapshot](#snapshot); `?labels=0`: frames only |
 | `/log` | the last 500 lines of the app's log, see [Log](#log) |
+| `/report.txt` | a header, `/stats.json` and `/log` in one file, downloaded as `report-YYYYMMDD-HHMMSS.txt`, see [Save report](#save-report) |
 
 - Only clients on the local network are answered; others get `403`. The rule and what is hidden: [security.md](security.md#debug-server).
 - `GET` only (`405` otherwise), one request per connection, `Cache-Control: no-store`.
@@ -39,7 +41,7 @@ The device's addresses are in `addresses` of `/stats.json`, and the [U cell](usa
 `http://<device>:8085/`
 
 - The snapshot fills the page, laid out like the screen, with each cell's slot, camera host, transport, size, fps and losses (in red) drawn over it. A decoded rate below 90 % of the received one is shown in orange.
-- The header shows a status dot, the version and git hash, the device time and the uptime, and links to **JSON** and **Log**.
+- The header shows a status dot, the version and git hash, the device time and the uptime, and links to **JSON**, **Log** and **Save report** (`/report.txt`).
 - **Info On / Off** hides the text over the cells (and the list below them on a narrow screen), leaving only the picture. It is **Off** until switched on; the choice is remembered in the browser.
 - **Snapshot 3 s / 5 s / 10 s**: how often the picture is refreshed (default 5 s). `/stats.json` is fetched every 1.5 s. Both only while the tab is visible.
 - On a screen narrower than 720 px the snapshot takes the full width and the cells are listed below it.
@@ -174,6 +176,30 @@ The FLOW-UFO test build ([toys.md](toys.md#flow-ufo)) adds a `flowufo` object pe
 
 `http://<device>:8085/log`: the last 500 lines of the app's own log (logcat in `threadtime` format; without the `READ_LOGS` permission logcat returns only the app's own lines), redacted as they come in. The same lines over adb: `adb logcat -s OpenIPCDecoder`. Lines worth knowing are listed in [LABORATORY.md](../LABORATORY.md#log-lines-logcat--s-openipcdecoder).
 
+## Save report
+
+One file with everything a bug report needs, the same text from the app and from the debug page:
+
+```
+OpenIPC Decoder report
+App: OpenIPC Decoder 2.11 (36), git <hash>
+Device: <manufacturer> <model>
+Android: <version> (SDK <n>)
+Time: 2026-10-15 12:00:00 +0300
+Uptime: 1h 2m 3s
+
+== stats.json ==
+{ ...the same object as /stats.json, pretty-printed... }
+
+== log ==
+...the last 500 lines of /log...
+```
+
+- **In the app**: a **long press on Debug** in the menu (on a remote: hold **OK** on Debug, or press **Menu** while Debug has the focus). The file is saved to `Download/OpenIPC/report-YYYYMMDD-HHMMSS.txt`, a toast shows its name, and the system *Share* sheet opens to send it (Telegram, mail). Where no app can take it, as on most TV boxes, there is no share sheet; the file stays in `Download/OpenIPC` (over adb: `adb pull /sdcard/Download/OpenIPC/`).
+- Android 10 and newer save through MediaStore and need no permission. Android 6–9 ask for the storage permission first; refused, the file goes to the app's own folder (`Android/data/com.openipc.decoder/files/Download/`), and the share sheet gets the text (cut at 50 000 characters) instead of the file.
+- **On the debug page**: **Save report** in the header, or `curl -OJ http://<device>:8085/report.txt`. Local-network clients only, like the other paths.
+- Redacted like `/log` and `/stats.json`, and the whole text once more: no logins or passwords.
+
 ## Corner text in multi-view
 
 **Debug** in the menu shows it in every cell; the same text is `text` in `cells`.
@@ -196,7 +222,7 @@ Examples: `1920×1080 H.265 25/25 fps` at full rate, `1920×1080 H.265 key frame
 Send, in a [GitHub issue](https://github.com/OpenIPC/decoder/issues):
 
 1. App version and git hash (menu, under **Exit**), device model and Android version.
-2. `/stats.json` and `/log` taken while the problem is visible (or after about 30 s of trying).
+2. A [report file](#save-report) saved while the problem is visible (or after about 30 s of trying): a long press on **Debug** in the menu, or **Save report** on the debug page. Attach the `.txt` file to the issue. Without it, `/stats.json` and `/log`.
 3. The camera: make, model, firmware, URL **without the password** (`user:***`), codec, resolution, transport.
 4. A screenshot or `/snapshot.jpg` if the picture is wrong.
 
