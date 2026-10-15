@@ -325,17 +325,18 @@ public class Decoder extends Activity
                 FrameLayout.LayoutParams.MATCH_PARENT));
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            WindowInsetsController ctrl = getWindow().getInsetsController();
-            if (ctrl != null) {
-                ctrl.hide(WindowInsets.Type.navigationBars());
-                ctrl.setSystemBarsBehavior(
-                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-            }
-        } else {
-            //noinspection deprecation
-            getWindow().getDecorView().setSystemUiVisibility(
-                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION);
+            // Bars that stay shown while the video has the focus (not the transient ones after
+            // a swipe, which the app does not see) go away again after a moment (#202)
+            View decor = getWindow().getDecorView();
+            decor.setOnApplyWindowInsetsListener((v, insets) -> {
+                v.removeCallbacks(hideBarsRunnable);
+                if (hasWindowFocus() && insets.isVisible(WindowInsets.Type.systemBars())) {
+                    v.postDelayed(hideBarsRunnable, BARS_REHIDE_MS);
+                }
+                return v.onApplyWindowInsets(insets);
+            });
         }
+        hideSystemBars();
 
         updateStatus("disconnected");
         DebugServer.get().setSource(debugSource);
@@ -506,7 +507,11 @@ public class Decoder extends Activity
     }
 
     @Override
-    public void onExit() { finishAndRemoveTask(); }
+    public void onExit() {
+        // Not left showing over a finishing activity (#205)
+        menuManager.dismissAll();
+        finishAndRemoveTask();
+    }
 
     /**
      * Reset (#171): stops every stream, deletes the stored settings, the key of the encrypted
@@ -920,7 +925,7 @@ public class Decoder extends Activity
     /** Shown over the U cell until its first frame: where to send the stream. */
     private TextView udpHintCell() {
         TextView hint = new TextView(this);
-        hint.setText(udpHintText(NetInfo.addresses(), UDP_RTP_PORT));
+        hint.setText(udpHintText(NetInfo.udpAddresses(), UDP_RTP_PORT));
         hint.setTextColor(Color.GRAY);
         hint.setTextSize(13);
         hint.setGravity(Gravity.CENTER);
@@ -938,7 +943,7 @@ public class Decoder extends Activity
         if (v == null) return;
         View overlay = ((View) v.getParent()).findViewWithTag("quad_overlay_" + U_CELL);
         if (!(overlay instanceof TextView) || overlay.getVisibility() != View.VISIBLE) return;
-        String text = udpHintText(NetInfo.addresses(), UDP_RTP_PORT);
+        String text = udpHintText(NetInfo.udpAddresses(), UDP_RTP_PORT);
         TextView hint = (TextView) overlay;
         if (!text.contentEquals(hint.getText())) hint.setText(text);
     }
@@ -1073,7 +1078,7 @@ public class Decoder extends Activity
             overlay.setBackgroundColor(Color.BLACK);
             cell.addView(overlay);
         } else if (i == U_CELL) {
-            ((TextView) overlay).setText(udpHintText(NetInfo.addresses(), UDP_RTP_PORT));
+            ((TextView) overlay).setText(udpHintText(NetInfo.udpAddresses(), UDP_RTP_PORT));
         }
         overlay.setVisibility(View.VISIBLE);
         overlay.bringToFront();
@@ -1533,7 +1538,7 @@ public class Decoder extends Activity
         if (udpViewShown) {
             Map<String, Object> udp = new LinkedHashMap<>();
             udp.put("port", UDP_RTP_PORT);
-            udp.put("addresses", NetInfo.addresses());
+            udp.put("addresses", NetInfo.udpAddresses());
             m.put("udp", udp);
         } else if (!quadEnabled) {
             Map<String, Object> single = new LinkedHashMap<>();
@@ -2367,6 +2372,9 @@ public class Decoder extends Activity
 
     @Override
     protected void onDestroy() {
+        // The menu and the dialogs go with the activity, or Android logs them as leaked (#205)
+        if (menuManager != null) menuManager.dismissAll();
+        getWindow().getDecorView().removeCallbacks(hideBarsRunnable);
         super.onDestroy();
         DebugServer.get().clearSource(debugSource);
         streamProbes.shutdown();
@@ -2387,10 +2395,46 @@ public class Decoder extends Activity
         }
     }
 
+    /** How long bars that stay shown over the video are left before they are hidden (#202). */
+    private static final long BARS_REHIDE_MS = 3000;
+    private final Runnable hideBarsRunnable = this::hideSystemBars;
+
+    /**
+     * Full screen over the whole display in every viewing mode (single, grid, U), with no
+     * status or navigation bar (#202). A swipe from an edge shows them for a moment only.
+     * Android 15 draws apps edge to edge, so bars left shown cover the picture; some systems
+     * (an OPPO, #187) bring them back after another window had the focus, so this runs again
+     * whenever the activity resumes or gets the focus back: after the menu, a dialog or the
+     * WebUI, which keeps the bars and its insets padding (#169, #180).
+     */
+    private void hideSystemBars() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowInsetsController ctrl = getWindow().getInsetsController();
+            if (ctrl != null) {
+                ctrl.setSystemBarsBehavior(
+                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                ctrl.hide(WindowInsets.Type.systemBars());
+            }
+        } else {
+            //noinspection deprecation
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_FULLSCREEN);
+        }
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) hideSystemBars();
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
         mResumed = true;
+        hideSystemBars();
         startStreams();
         updateDebugUrls();
     }
