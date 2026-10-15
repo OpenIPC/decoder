@@ -31,9 +31,11 @@ What a `build` run publishes:
 
 | Branch | Output |
 |---|---|
-| `v2` | `decoder-v2.apk` and `decoder-v2-mapping.txt` in the [`latest`](https://github.com/OpenIPC/decoder/releases/tag/latest) release; a [versioned release](#versions-and-releases) for a new version; a message with the APK to the OpenIPC Telegram channel |
+| `v2` | `decoder-v2.apk` and `decoder-v2-mapping.txt` in the [`latest`](https://github.com/OpenIPC/decoder/releases/tag/latest) release (replaced by every build); a message with the APK, version and commit to the OpenIPC Telegram channel |
 | `basic` | `decoder.apk` and its mapping in `latest`; Telegram |
 | any other | workflow artifacts `decoder-<branch, / → ->` (APK) and `…-mapping` on the run page |
+
+Every run, `v2` and `basic` included, also keeps its mapping as the artifact `…-mapping`. Artifacts expire after 90 days.
 
 A pull request therefore gets tests and lint only; its APK comes from the push run of its branch.
 
@@ -45,14 +47,26 @@ CI is the reference: the project does not depend on local builds.
 
 ## Versions and releases
 
-- `v2` is **2.xx** (from 2.00). Every pull request that changes the app bumps `android/app/build.gradle` as its last commit before the merge: `versionName` +0.01, `versionCode` +1. Docs-only and CI-only pull requests do not. Current: **2.10** (code 35).
+- `v2` is **2.xx** (from 2.00). Every pull request that changes the app bumps `android/app/build.gradle` as its last commit before the merge: `versionName` +0.01, `versionCode` +1. Docs-only and CI-only pull requests do not.
 - `basic` keeps its 1.07.x line.
-- The first `v2` build of a new `versionName` creates the release **`v<version>`** at the commit it built, with `decoder-v2-<version>.apk`, `mapping-<version>.txt` and notes generated from the merged pull requests since the previous `v2.*` release (by version number). It is not marked *Latest*: the README links `releases/tag/latest`.
-- A push without a version bump updates only `latest`. A later build of the tagged commit adds a missing APK or mapping to an existing release; a build of another commit does not touch it.
+- Development is continuous, so there is **no release per version** (#194). The [`latest`](https://github.com/OpenIPC/decoder/releases/tag/latest) release always holds the newest `v2` and `basic` builds. Every `v2` and `basic` build is also posted to the OpenIPC Telegram channel with its version and commit, and that is where their older builds can be found. Builds of other branches are only workflow artifacts of their runs (90 days).
+- **Test pre-releases**: to let a reporter test a branch, a pre-release named after the issue is made by hand from the branch's CI artifact, e.g. [`flowufo-187-test1`](https://github.com/OpenIPC/decoder/releases/tag/flowufo-187-test1) for #187. It is deleted when the test is over.
+
+  ```sh
+  B=feat/my-branch                       # the branch to test
+  RUN=$(gh run list -R OpenIPC/decoder -b "$B" -e push -w Build -L 1 --json databaseId -q '.[0].databaseId')
+  gh run download "$RUN" -R OpenIPC/decoder -n "decoder-${B//\//-}"   # gives decoder-feat-my-branch.apk
+  cp "decoder-${B//\//-}.apk" decoder-my-test1.apk                    # the asset name the reporter sees
+  gh release create my-187-test1 decoder-my-test1.apk --prerelease \
+    --target "$(gh run view "$RUN" -R OpenIPC/decoder --json headSha -q .headSha)" \
+    --title "… test build 1 (#187)" --notes "…"
+  ```
+
+  The tag (`my-187-test1`) and the asset name are free to choose; the artifact is always named after the branch.
+
+- The change history is the [merged pull requests](https://github.com/OpenIPC/decoder/pulls?q=is%3Apr+is%3Amerged+base%3Av2) and the [commits of `v2`](https://github.com/OpenIPC/decoder/commits/v2).
 - The installed version and build hash show in the menu (under **Exit**, `v2.10, <hash>`) and in `/stats.json` (`version`, `git`).
 - Every build is `com.openipc.decoder` with the release signature, so a branch build installs over a release and keeps the settings.
-
-Release notes are the change history: [releases page](https://github.com/OpenIPC/decoder/releases).
 
 ## Testing a branch build
 
@@ -63,15 +77,50 @@ gh run download "$RUN" -R OpenIPC/decoder -n "decoder-${B//\//-}"
 adb install -r "decoder-${B//\//-}.apk"
 ```
 
-A given version: `gh release download v2.10 -R OpenIPC/decoder` (`decoder-v2-2.10.apk`). Check the hash under **Exit** after installing.
+The current `v2` build: `gh release download latest -R OpenIPC/decoder -p decoder-v2.apk`. Check the hash under **Exit** after installing.
 
 ## Stack traces and mapping.txt
 
-Release builds are obfuscated by R8. To read a stack trace from a crash screen or a log, use the mapping of the same build: `mapping-<version>.txt` from the versioned release, `decoder-v2-mapping.txt` from `latest` (only for the build that is there now), or the `…-mapping` artifact of a branch run. Then, with the Android SDK command-line tools:
+Release builds are shrunk and obfuscated by R8: classes, fields and methods get short names, and line numbers survive only through a map. A crash from a release build reads like this (an example):
+
+```
+java.lang.IllegalStateException: …
+    at a.u.a(SourceFile:12)
+    at com.openipc.decoder.Decoder.u(SourceFile:48)
+```
+
+R8 writes that map as **`mapping.txt`**, one per build:
+
+```
+# compiler: R8
+# compiler_version: 8.13.17
+# min_api: 21
+# pg_map_id: 8df440e8…            ← ties the file to exactly one build
+com.openipc.decoder.DecodePlanner -> a.u:
+# {"id":"sourceFile","fileName":"DecodePlanner.java"}
+    long capacity -> a
+    long proven -> c
+    long failedLoad -> d
+    1:5:void <init>(long,boolean,long,long):147:147 -> <init>
+```
+
+For every class, field and method it gives `original -> obfuscated`, with the line ranges that map back to the source. It also covers the library classes that went into the APK, which is why it is about 9,000 lines (700 KB). It holds no secrets (the code is open), and devices don't need it: it only matters for reading crashes.
+
+A mapping fits **only the build it came from**. Use the one whose build matches the hash under **Exit** or `git` in `/stats.json`:
+
+| Build | Mapping |
+|---|---|
+| the current `v2` build | `decoder-v2-mapping.txt` in [`latest`](https://github.com/OpenIPC/decoder/releases/tag/latest) |
+| an older `v2` build, or any branch build | the artifact `decoder-v2-mapping` (or `decoder-<branch>-mapping`) of the CI run that built it, kept 90 days. A push run is found by its commit (below). A manual run (*Run workflow* with `commit_hash`) is listed under the branch it was started on, not under the commit it built: `gh run list -R OpenIPC/decoder -w Build -e workflow_dispatch -b <branch>`, then pick the run by its time or ID |
+| builds before 2.08 | none: they were made before the mapping was kept (#181) |
 
 ```sh
-retrace mapping-2.10.txt stacktrace.txt
+RUN=$(gh run list -R OpenIPC/decoder -c <full commit hash> -e push -w Build -L 1 --json databaseId -q '.[0].databaseId')
+gh run download "$RUN" -R OpenIPC/decoder -n decoder-v2-mapping
+retrace decoder-v2-mapping.txt stacktrace.txt     # Android SDK command-line tools
 ```
+
+After `retrace`, the frames read `at com.openipc.decoder.DecodePlanner.step(DecodePlanner.java:215)`.
 
 ## Building locally
 

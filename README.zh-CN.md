@@ -45,7 +45,7 @@
 | `decoder-v2.apk` | **当前版本**，推荐使用 |
 | `decoder.apk` | `basic` 分支的旧版本 |
 
-每个 2.xx 版本在[发布页面](https://github.com/OpenIPC/decoder/releases)上另有独立的发布，包含该版本的 APK 以及相对上一版本的更改。
+每次新构建都会替换 `latest` 中的上一个构建。开发是持续进行的，因此不再按版本单独发布；`v2` 和 `basic` 分支的每个构建连同版本号和提交都会发布到 OpenIPC 的 Telegram 频道（[我们的频道](https://openipc.org/our-channels)）。
 
 [Google Play](https://play.google.com/apps/internaltest/4701231141824898735) 上提供测试渠道。如需加入，请通过 [OpenIPC Telegram 频道](https://openipc.org/our-channels)发送您的电子邮箱。
 
@@ -115,7 +115,7 @@
 | [Drones and Wi‑Fi toys](docs/toys.md) | 玩具如何传输视频、FLOW-UFO（测试中）、遇到未知玩具时可以尝试什么、需要提交哪些信息 |
 | [Laboratory](LABORATORY.md) | 测试平台：设备、摄像机、访问方式、测试方法 |
 
-更新历史见[发布页面](https://github.com/OpenIPC/decoder/releases)上的发布说明（CI 会为每个 v2.xx 版本自动生成）。
+更新历史即[已合并的 pull request](https://github.com/OpenIPC/decoder/pulls?q=is%3Apr+is%3Amerged+base%3Av2) 和 [v2 分支的提交](https://github.com/OpenIPC/decoder/commits/v2)。
 
 ## 支持
 

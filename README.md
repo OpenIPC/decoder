@@ -45,7 +45,7 @@ Ready-to-install builds are in the [**latest** release](https://github.com/OpenI
 | `decoder-v2.apk` | **Current version**, recommended |
 | `decoder.apk` | Legacy version from the `basic` branch |
 
-Each 2.xx version also has a release of its own on the [releases page](https://github.com/OpenIPC/decoder/releases), with that version's APK and the changes since the previous one.
+Every build is replaced in `latest` by the next one. Development is continuous, so there are no releases per version; every `v2` and `basic` build is also posted with its version and commit to the OpenIPC Telegram channel ([our channels](https://openipc.org/our-channels)).
 
 A beta channel is available on [Google Play](https://play.google.com/apps/internaltest/4701231141824898735). To join it, send your e-mail through the [OpenIPC Telegram channels](https://openipc.org/our-channels).
 
@@ -113,7 +113,7 @@ Every item, the remote, sharing a URL from another app and **Reset**: [Usage](do
 | [Drones and Wi‑Fi toys](docs/toys.md) | how toys stream, FLOW-UFO (in testing), what to try with an unknown toy, what to send |
 | [Laboratory](LABORATORY.md) | the test bench: devices, cameras, access, methods |
 
-The change history is in the release notes on the [releases page](https://github.com/OpenIPC/decoder/releases) (written by CI for every v2.xx version).
+The change history is the [merged pull requests](https://github.com/OpenIPC/decoder/pulls?q=is%3Apr+is%3Amerged+base%3Av2) and the [commits of v2](https://github.com/OpenIPC/decoder/commits/v2).
 
 ## Support
 
