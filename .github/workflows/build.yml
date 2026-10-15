@@ -159,24 +159,29 @@ jobs:
             cp decoder-v2-mapping.txt "$MAP"
             ASSETS+=("$MAP")
           fi
-          # An existing release is complete only with its APK (Qodo on #158)
-          has_apk() {
-            gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null | grep -qx "$APK"
+          # An existing release is complete only with its APK (Qodo on #158) and, when this build
+          # has one, its mapping (Qodo on #183). Fills MISSING with what it lacks
+          complete() {
+            local have
+            have=$(gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null) || have=""
+            MISSING=()
+            for a in "${ASSETS[@]}"; do grep -qx "$a" <<< "$have" || MISSING+=("$a"); done
+            [ ${#MISSING[@]} -eq 0 ]
           }
-          # Only the build of the tagged commit may add the missing APK (Qodo on #158)
-          repair_apk() {
+          # Only the build of the tagged commit may add the missing files (Qodo on #158)
+          repair() {
             TAGGED=$(gh api "repos/${{ github.repository }}/commits/$TAG" -q .sha)
             if [ "$TAGGED" = "$(git rev-parse HEAD)" ]; then
-              gh release upload "$TAG" "${ASSETS[@]}" --clobber
+              gh release upload "$TAG" "${MISSING[@]}" --clobber
             else
-              echo "::warning::$TAG has no $APK and points to ${TAGGED:0:7}, not this build"
+              echo "::warning::$TAG has no ${MISSING[*]} and points to ${TAGGED:0:7}, not this build"
             fi
           }
           if gh release view "$TAG" >/dev/null 2>&1; then
-            if has_apk; then
+            if complete; then
               echo "Release $TAG exists: only latest was updated"
             else
-              repair_apk
+              repair
             fi
             exit 0
           fi
@@ -195,9 +200,9 @@ jobs:
           if ! gh release create "$TAG" "${ASSETS[@]}" --target "$(git rev-parse HEAD)" \
               --title "OpenIPC Decoder ${VER}" --latest=false "${NOTES[@]}"; then
             # Another build of the same version created it meanwhile, or the upload failed:
-            # the release must exist and carry the APK, else the step fails
+            # the release must exist and carry the APK and the mapping, else the step fails
             gh release view "$TAG" >/dev/null
-            has_apk || repair_apk
+            complete || repair
           fi
 
       - name: Telegram
