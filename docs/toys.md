@@ -5,6 +5,7 @@
 - [Toy families by Wi‑Fi name](#toy-families-by-wifi-name)
 - [FLOW-UFO](#flow-ufo)
 - [KY UFO RTSP toys](#ky-ufo-rtsp-toys)
+- [HF / Jieli toys](#hf--jieli-toys)
 - [Credits](#credits)
 - [An unknown toy](#an-unknown-toy)
 - [What to send in a report](#what-to-send-in-a-report)
@@ -24,7 +25,7 @@ Cheap drones, cars and other toys with a Wi‑Fi camera usually work the same wa
 - The video is often **not a standard stream**: no RTSP, no plain RTP. Many toys send JPEG frames over UDP in their own framing and start only after the client has sent a request; some also expect regular replies while they stream. A standard player then sees nothing, and this app stays in *Buffering*.
 - Flight or drive commands go over the same network. **This app never sends any**: it only asks for and receives video.
 
-Whether a toy can be played here depends on its protocol. Toys that do offer RTSP or HTTP MJPEG play like any camera ([transports.md](transports.md)); others need a transport of their own, like [FLOW-UFO](#flow-ufo).
+Whether a toy can be played here depends on its protocol. Toys that do offer RTSP or HTTP MJPEG play like any camera ([transports.md](transports.md)); others need a transport of their own, like [FLOW-UFO](#flow-ufo) or [HF / Jieli](#hf--jieli-toys).
 
 ## Connecting
 
@@ -42,9 +43,9 @@ The Wi‑Fi name and the address the phone gets usually tell the family. The toy
 |---|---|---|---|---|
 | `FLOW-UFO-xxxxxx`, `FLOW_xxxxxx` | `192.168.169.x` | FLOW-UFO (BL60x camera; turbodrone calls it `wifi_uav`) | `flowufo://192.168.169.1` (UDP 8800 and 8801) | in testing ([#187](https://github.com/OpenIPC/decoder/issues/187)) |
 | `FLY-UFO-xxxxxx` and other cooingdv toys (KY UFO, RC UFO apps) | `192.168.1.x` | KY UFO RTSP | `rtsp://192.168.1.1:7070/webcam` (with the heartbeat to UDP 7099) | in testing ([#187](https://github.com/OpenIPC/decoder/issues/187)) |
-| `HF_xxxxxxxx` | `192.168.80.x` | Jieli / HF | — | **not supported yet** |
+| `HF_xxxxxxxx` | `192.168.80.x` | Jieli / HF (Jieli AC79 camera, vendor app *DVRunning 2*) | `jieli://192.168.80.1` (CTP on TCP 3333, video to the phone's UDP 6666) | test build 3, video path unverified ([#187](https://github.com/OpenIPC/decoder/issues/187)) |
 
-When a `flowufo://` slot points at the phone itself, or at the network of another family, its status says so (for example *192.168.1.100 is this phone; the toy is usually 192.168.1.1* or *This network looks like a KY UFO RTSP toy: try rtsp://192.168.1.1:7070/webcam*).
+When a `flowufo://` or `jieli://` slot points at the phone itself, or at the network of another family, its status says so (for example *192.168.1.100 is this phone; the toy is usually 192.168.1.1*, *This network looks like a KY UFO RTSP toy: try rtsp://192.168.1.1:7070/webcam* or, on a `192.168.80.x` network, *try jieli://192.168.80.1*).
 
 ## FLOW-UFO
 
@@ -90,9 +91,42 @@ Their apps send a heartbeat, the two bytes `01 01`, to UDP port 7099 of the toy 
 
 Some of these toys use the FLOW-UFO protocol instead (the KY UFO app has both); if RTSP shows nothing, try `flowufo://192.168.1.1`.
 
+## HF / Jieli toys
+
+| | |
+|---|---|
+| Wi‑Fi name | `HF_xxxxxxxx` |
+| Camera | Jieli AC79 (`AC79X_wifi_car_camera`); vendor app *DVRunning 2* (also *HF UFO*) |
+| Toy address | `192.168.80.1`: control (CTP) on TCP port 3333; the video goes to UDP port 6666 **of the phone** |
+| Slot URL | `jieli://192.168.80.1` (or `jieli://` alone) |
+| Status | **test build 3**, not in the releases: the control part follows a capture of the vendor app, the video part is **unverified**; issue [#187](https://github.com/OpenIPC/decoder/issues/187) |
+
+What the app does, as a capture of the vendor app shows it ([#196](https://github.com/OpenIPC/decoder/issues/196)):
+
+- It connects to TCP port 3333 and talks **CTP**: each message is `CTP:`, the length of a topic name, the topic (e.g. `OPEN_RT_STREAM`), the length of a JSON text and the JSON.
+- `APP_ACCESS` first; the toy answers with `KEEP_ALIVE_INTERVAL` (a timeout, 60 s), its battery and SD card state and `VIDEO_PARAM` (the size, e.g. 640×480 at 25 fps). Then `DATE_TIME` (the phone's time), a `CTP_KEEP_ALIVE` every 7.5 s (a quarter of a shorter timeout), and `OPEN_RT_STREAM` with the size from `VIDEO_PARAM` (640×480 at 25 if the toy sent none). When the slot stops: `CLOSE_RT_STREAM`.
+- The video was **not** in the capture (PCAPdroid without root cannot see it). After turbodrone's research on the same Jieli SDK it is **RTP/JPEG** (payload type 26) or H.264 (96) to the phone's **UDP port 6666**. The app listens there and plays payload type 26 through its RTP/JPEG path and 96 through its H.264 path; a whole JPEG in a datagram without RTP is shown too.
+- If nothing arrives on 6666 for 5 s after `OPEN_RT_STREAM`, the status says so and the app also listens on UDP 1234 (audio in the vendor SDK) and 2224 (its stream port), **only to log** what arrives there; it asks for the stream again every 10 s without video.
+- **No flight command is ever sent**: no `FLIGHT_CONTROL` over CTP, nothing to the toy's UDP port 3456 (where the vendor app sends the sticks).
+- Port 6666 can be used by one slot at a time: one `jieli://` slot in a grid.
+
+URL options (as with `udp://`, separated by `?` and `&`):
+
+| Option | Values | Default | What it does |
+|---|---|---|---|
+| `w`, `h`, `fps` | numbers | from `VIDEO_PARAM`, else 640, 480, 25 | the stream asked for in `OPEN_RT_STREAM` |
+| `rtp` | a UDP port | `6666` | the local port the video is expected on |
+| `format` | `0`, `1` | `0` | `0` asks for JPEG (as the vendor app does), `1` for H.264 |
+
+Examples: `jieli://192.168.80.1`, `jieli://192.168.80.1?w=1280&h=720`, `jieli://192.168.80.1?format=1`.
+
+Status texts while it connects: *Connecting to the toy (CTP 192.168.80.1:3333)*, *Stream requested, waiting for video on UDP 6666*, *No video on UDP 6666 yet: the toy accepted the request; see /log*, *Receiving from the toy on UDP 6666…*, *The toy's video stopped: waiting on UDP 6666*. The test build adds a `jieli` object to `/stats.json`: `state` (`connecting`, `ctp`, `requested`, `playing`, `quiet`), `target`, `network`, `ctp` (messages sent and received, keepalives and replies, the keepalive interval, the topics seen, the last 8 messages from the toy), `video_param`, `requested`, `rtp` (port, packets, video packets, frames, payload types, packets that are not RTP, the first packet in hex), `sources` (sender address:port → packets) and `diagnostic_ports`. The log has the CTP messages (JSON shortened) and the first packets on each port with sender, payload type and first bytes: exactly what a report needs.
+
+To test: install the test build, join the `HF_…` Wi‑Fi, [stay connected](#connecting), close the vendor app, put `jieli://192.168.80.1` into a slot. Wait about 30 s and [send a report](#what-to-send-in-a-report) in [#187](https://github.com/OpenIPC/decoder/issues/187), with or without a picture: `/stats.json` and `/log` tell what the toy really sends.
+
 ## Credits
 
-What the app does for FLOW-UFO and KY UFO toys was checked against [turbodrone](https://github.com/marshallrichards/turbodrone) (Apache-2.0), which flies these drones from a computer: its `wifi_uav` backend is the FLOW-UFO protocol and its `cooingdv` backend the KY UFO RTSP toys. The default quality parameters, the second port 8801 and its timing, the camera status bytes, leaving lagging frames out of the acknowledgement, the raster tables of `dqt=raster` and the 7099 heartbeat come from its code and research notes; no code of it is used. More open-source work on such toys is collected in [#196](https://github.com/OpenIPC/decoder/issues/196).
+What the app does for FLOW-UFO and KY UFO toys was checked against [turbodrone](https://github.com/marshallrichards/turbodrone) (Apache-2.0), which flies these drones from a computer: its `wifi_uav` backend is the FLOW-UFO protocol and its `cooingdv` backend the KY UFO RTSP toys. The default quality parameters, the second port 8801 and its timing, the camera status bytes, leaving lagging frames out of the acknowledgement, the raster tables of `dqt=raster` and the 7099 heartbeat come from its code and research notes; no code of it is used. For the HF / Jieli toys its research notes on the same Jieli SDK (`rxdrone`, `cooingdv_jieli`: RTP/JPEG to UDP 6666, audio on 1234, the stream ports) describe the video part; the control part follows a PCAPdroid capture of the vendor app posted in [#196](https://github.com/OpenIPC/decoder/issues/196). More open-source work on such toys is collected in [#196](https://github.com/OpenIPC/decoder/issues/196).
 
 ## An unknown toy
 

@@ -1032,7 +1032,8 @@ public class FlowUfoTest {
                 FlowUfo.subnetHint(ip("192.168.169.2"), on169));
         assertEquals("This phone is on 192.168.169.x: the toy is usually flowufo://192.168.169.1",
                 FlowUfo.subnetHint(ip("192.168.1.1"), on169));
-        assertEquals("Toys on 192.168.80.x (HF_ Wi-Fi) use another protocol, not supported yet",
+        assertEquals("This phone is on 192.168.80.x (HF_ Wi-Fi), a Jieli toy: try"
+                        + " jieli://192.168.80.1",
                 FlowUfo.subnetHint(ip("192.168.169.1"),
                         Collections.singletonList(ip("192.168.80.3"))));
         // On both networks: no guess

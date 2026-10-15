@@ -1558,6 +1558,8 @@ public class Decoder extends Activity
             // The toy drone's protocol counters (#187)
             Map<String, Object> ufo = rtspClient != null ? rtspClient.flowUfoStats() : null;
             if (ufo != null) single.put("flowufo", ufo);
+            Map<String, Object> jl = rtspClient != null ? rtspClient.jieliStats() : null;
+            if (jl != null) single.put("jieli", jl);
             Map<String, Object> hb = rtspClient != null ? rtspClient.heartbeatStats() : null;
             if (hb != null) single.put("heartbeat", hb);
             m.put("single", single);
@@ -1600,6 +1602,8 @@ public class Decoder extends Activity
                     c.put("audio", i == quadAudio);
                     Map<String, Object> ufo = cell.flowUfoStats();
                     if (ufo != null) c.put("flowufo", ufo);
+                    Map<String, Object> jl = cell.jieliStats();
+                    if (jl != null) c.put("jieli", jl);
                     Map<String, Object> hb = cell.heartbeatStats();
                     if (hb != null) c.put("heartbeat", hb);
                 }
@@ -1670,6 +1674,7 @@ public class Decoder extends Activity
         if (RtpListener.Url.matches(url)) return "UDP listen";
         if (HttpMjpeg.matches(url)) return "HTTP";
         if (FlowUfo.Url.matches(url)) return "FLOW-UFO UDP";
+        if (Jieli.Url.matches(url)) return "Jieli RTP";
         Transport.Mode m = StreamProbe.probeMode(mTransports[i]);
         return "check over " + (m == Transport.Mode.MULTICAST ? "multicast" : m.name());
     }

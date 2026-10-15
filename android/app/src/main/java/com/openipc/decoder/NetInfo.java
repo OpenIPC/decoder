@@ -20,6 +20,7 @@ import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
+import java.net.Socket;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -74,27 +75,62 @@ final class NetInfo {
      * Qodo on #188), else the interface bound to.
      */
     static String bindToNetworkOf(DatagramSocket socket, InetAddress target) {
-        Context ctx = App.context;
-        if (ctx == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-            return "default";
-        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return "default";
         try {
-            ConnectivityManager cm =
-                    (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
-            if (cm == null) return "default";
-            for (Network n : cm.getAllNetworks()) {
-                LinkProperties lp = cm.getLinkProperties(n);
-                if (lp == null) continue;
-                for (LinkAddress la : lp.getLinkAddresses()) {
-                    if (!sameSubnet(la.getAddress(), la.getPrefixLength(), target)) continue;
-                    n.bindSocket(socket);
-                    return "bound to " + lp.getInterfaceName();
-                }
-            }
+            Found f = networkOf(target);
+            if (f == null) return "default";
+            f.network.bindSocket(socket);
+            return "bound to " + f.name;
         } catch (Exception e) {
             Log.w(TAG, "No network bound for " + target.getHostAddress() + ": " + e.getMessage());
+            return "default";
         }
-        return "default";
+    }
+
+    /**
+     * The same for a TCP socket that is not connected yet (the CTP connection of a jieli://
+     * slot, #187); binding one needs Android 6.
+     */
+    static String bindToNetworkOf(Socket socket, InetAddress target) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return "default";
+        try {
+            Found f = networkOf(target);
+            if (f == null) return "default";
+            f.network.bindSocket(socket);
+            return "bound to " + f.name;
+        } catch (Exception e) {
+            Log.w(TAG, "No network bound for " + target.getHostAddress() + ": " + e.getMessage());
+            return "default";
+        }
+    }
+
+    private static final class Found {
+        final Network network;
+        final String name;
+
+        Found(Network network, String name) {
+            this.network = network;
+            this.name = name;
+        }
+    }
+
+    /** The network whose own subnet holds {@code target}, or null. */
+    private static Found networkOf(InetAddress target) {
+        Context ctx = App.context;
+        if (ctx == null) return null;
+        ConnectivityManager cm =
+                (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) return null;
+        for (Network n : cm.getAllNetworks()) {
+            LinkProperties lp = cm.getLinkProperties(n);
+            if (lp == null) continue;
+            for (LinkAddress la : lp.getLinkAddresses()) {
+                if (sameSubnet(la.getAddress(), la.getPrefixLength(), target)) {
+                    return new Found(n, lp.getInterfaceName());
+                }
+            }
+        }
+        return null;
     }
 
     /** {@code a} and {@code b} share the first {@code prefix} bits (and the address family). */

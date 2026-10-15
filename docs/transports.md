@@ -102,6 +102,8 @@ For example Majestic's `http://user:password@<camera>/mjpeg`: a `multipart/x-mix
 
 `flowufo://192.168.169.1:8800` (or `flowufo://` alone) plays the video of toy drones with a `FLOW-UFO-xxxxxx` Wi‑Fi access point. It exists only in a test build so far ([#187](https://github.com/OpenIPC/decoder/issues/187), PR [#188](https://github.com/OpenIPC/decoder/pull/188)), not in the releases. Port 8800 (the default) probes 8801 as well and keeps the port that answers. Options: `?qpara=<8 hex digits>` and `?dqt=zigzag|raster|q50`. Setup, options and status: [toys.md](toys.md#flow-ufo).
 
+`jieli://192.168.80.1` (or `jieli://` alone) plays toy drones with an `HF_xxxxxxxx` Wi‑Fi (Jieli AC79 camera): CTP commands on TCP 3333 ask for the stream, which is expected as RTP/JPEG on the phone's UDP port 6666 (test build only, video path unverified). Options: `?w=`, `?h=`, `?fps=`, `?rtp=<port>`, `?format=0|1`. See [toys.md](toys.md#hf--jieli-toys).
+
 RTSP slots on `rtsp://<host>:7070/webcam` (KY UFO and other cooingdv toys) also send the toy's UDP heartbeat `01 01` to port 7099 once a second; `?heartbeat=<port>` turns it on for other RTSP URLs, `?heartbeat=off` off. See [toys.md](toys.md#ky-ufo-rtsp-toys).
 
 ## Codecs
