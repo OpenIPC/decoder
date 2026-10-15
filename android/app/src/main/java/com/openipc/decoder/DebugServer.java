@@ -234,6 +234,9 @@ final class DebugServer {
                 android.os.SystemClock.elapsedRealtime() / 1000);
     }
 
+    /** The report's first line. */
+    static final String REPORT_TITLE = "OpenIPC Decoder report";
+
     /** report-YYYYMMDD-HHMMSS.txt, local time. */
     static String reportName(Date now) {
         return "report-" + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(now) + ".txt";
@@ -246,7 +249,7 @@ final class DebugServer {
      */
     static String reportText(Map<String, Object> stats, String log, Date now, long uptimeS) {
         StringBuilder sb = new StringBuilder(64 * 1024);
-        sb.append("OpenIPC Decoder report\n");
+        sb.append(REPORT_TITLE).append('\n');
         sb.append("App: OpenIPC Decoder ").append(BuildConfig.VERSION_NAME)
                 .append(" (").append(BuildConfig.VERSION_CODE).append("), git ")
                 .append(BuildConfig.GIT_HASH).append('\n');

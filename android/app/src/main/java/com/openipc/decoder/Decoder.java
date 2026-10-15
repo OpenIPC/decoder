@@ -620,6 +620,12 @@ public class Decoder extends Activity
 
         Intent intent = getIntent();
         String link = intent.getStringExtra(Intent.EXTRA_TEXT);
+        // A report shared back to the app (#207) is no camera link (Qodo on #208)
+        if (link != null && link.startsWith(DebugServer.REPORT_TITLE)) {
+            Log.i(TAG, "Shared text is a report, not a link: ignored");
+            intent.removeExtra(Intent.EXTRA_TEXT);
+            link = null;
+        }
         if (link != null) {
             Log.d(TAG, "Link: " + Uri.parse(link).getHost());
             mHosts[mActive] = sanitizeUrl(link);
@@ -1935,16 +1941,25 @@ public class Decoder extends Activity
         values.put(MediaStore.Downloads.IS_PENDING, 1);
         Uri uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
         if (uri == null) throw new IOException("MediaStore did not create " + name);
-        try (OutputStream os = resolver.openOutputStream(uri)) {
-            if (os == null) throw new IOException("MediaStore gave no stream for " + name);
-            os.write(data);
+        try {
+            try (OutputStream os = resolver.openOutputStream(uri)) {
+                if (os == null) throw new IOException("MediaStore gave no stream for " + name);
+                os.write(data);
+            }
+            // Published only when the pending flag is really cleared (Qodo on #208)
+            values.clear();
+            values.put(MediaStore.Downloads.IS_PENDING, 0);
+            if (resolver.update(uri, values, null, null) != 1) {
+                throw new IOException("MediaStore did not publish " + name);
+            }
         } catch (IOException | RuntimeException e) {
-            resolver.delete(uri, null, null);
+            try {
+                resolver.delete(uri, null, null);
+            } catch (RuntimeException ignored) {
+                // Nothing more to clean up
+            }
             throw e;
         }
-        values.clear();
-        values.put(MediaStore.Downloads.IS_PENDING, 0);
-        resolver.update(uri, values, null, null);
         return uri;
     }
 
@@ -1967,9 +1982,15 @@ public class Decoder extends Activity
         return writeFile(own, name, data);
     }
 
+    /** Never over an earlier file: report-…-2.txt and so on if the name is taken (Qodo on #208). */
     private static File writeFile(File dir, String name, byte[] data) throws IOException {
         if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("cannot create " + dir);
+        int dot = name.lastIndexOf('.');
         File f = new File(dir, name);
+        for (int n = 2; !f.createNewFile(); n++) {
+            if (n > 99) throw new IOException("no free name for " + name + " in " + dir);
+            f = new File(dir, name.substring(0, dot) + "-" + n + name.substring(dot));
+        }
         try (FileOutputStream os = new FileOutputStream(f)) {
             os.write(data);
         }
@@ -1997,11 +2018,27 @@ public class Decoder extends Activity
             send.putExtra(Intent.EXTRA_TEXT, body);
         }
         try {
-            if (getPackageManager().queryIntentActivities(send, 0).isEmpty()) {
+            // Not to this app itself: it takes shared text as a camera link (Qodo on #208)
+            boolean target = false;
+            for (android.content.pm.ResolveInfo ri
+                    : getPackageManager().queryIntentActivities(send, 0)) {
+                if (ri.activityInfo != null
+                        && !getPackageName().equals(ri.activityInfo.packageName)) {
+                    target = true;
+                    break;
+                }
+            }
+            if (!target) {
                 Log.i(TAG, "Report: no app to share it with");
                 return;
             }
-            startActivity(Intent.createChooser(send, "Share report"));
+            Intent chooser = Intent.createChooser(send, "Share report");
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                chooser.putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS,
+                        new android.content.ComponentName[] {
+                                new android.content.ComponentName(this, Decoder.class)});
+            }
+            startActivity(chooser);
         } catch (ActivityNotFoundException | SecurityException e) {
             Log.w(TAG, "Report: cannot share it: " + e.getMessage());
         }
@@ -2406,6 +2443,9 @@ public class Decoder extends Activity
         switch (keyCode) {
             case KeyEvent.KEYCODE_DPAD_CENTER:
             case KeyEvent.KEYCODE_ENTER:
+                // A held OK toggles once: a long OK on Debug closes the menu while the key is
+                // still down, its repeats must not open it again (#207, Qodo on #208)
+                if (event.getRepeatCount() > 0) return true;
                 if (menuManager.isPopupShowing()) {
                     menuManager.dismissPopup();
                 } else {
