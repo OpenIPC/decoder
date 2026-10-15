@@ -107,6 +107,12 @@ class RtspSession {
     private volatile boolean listening;
     /** Client of a flowufo:// slot (#187), else null: it probes on its own when silent. */
     private volatile FlowUfo.Client ufo;
+    /** Heartbeat of the RTSP connection now (#187), else null; counts of the earlier ones. */
+    private volatile UdpHeartbeat heartbeat;
+    private volatile int heartbeatsBefore;
+    private volatile int heartbeatErrorsBefore;
+    private volatile boolean heartbeatUsed;
+    private volatile boolean heartbeatLogged;
     private Thread networkThread;
     private Thread watchdogThread;
 
@@ -210,6 +216,7 @@ class RtspSession {
     private void closeSocketLocked() {
         if (listener != null) listener.close();
         if (ufo != null) ufo.close();
+        if (heartbeat != null) heartbeat.close();
         if (udp != null) {
             udp.close();
             if (udpPlaying) return;
@@ -311,9 +318,11 @@ class RtspSession {
         }
         Conn c = null;
         UdpReceiver rx = null;
+        UdpHeartbeat hb = null;
         String session = null;
         try {
             s.connect(new InetSocketAddress(u.host, u.port), CONNECT_TIMEOUT_MS);
+            if (u.heartbeatPort > 0) hb = startHeartbeat(gen, s, u.heartbeatPort);
             s.setTcpNoDelay(true);
             s.setSoTimeout(HANDSHAKE_TIMEOUT_MS);
             BufferedInputStream in = new BufferedInputStream(s.getInputStream(), 65536);
@@ -493,6 +502,7 @@ class RtspSession {
                 Keepalive k = keepalive;
                 if (k != null && k.conn == c) keepalive = null;
             }
+            stopHeartbeat(hb);
             if (rx != null) {
                 rx.close();
                 if (session != null && !s.isClosed()) {
@@ -597,6 +607,51 @@ class RtspSession {
             }
         }
         throw new IOException("401 Unauthorized");
+    }
+
+    /**
+     * The cooingdv heartbeat (#187): 01 01 to the camera's UDP port every second, from the
+     * address of the RTSP connection, while the connection lasts. Logged at the first start.
+     */
+    private UdpHeartbeat startHeartbeat(int gen, Socket s, int port) {
+        UdpHeartbeat h = new UdpHeartbeat(tag, s.getLocalAddress(),
+                new InetSocketAddress(s.getInetAddress(), port));
+        synchronized (lock) {
+            if (gen != generation) return null;
+            stopHeartbeat(heartbeat);
+            heartbeat = h;
+            heartbeatUsed = true;
+        }
+        try {
+            h.start(!heartbeatLogged);
+            heartbeatLogged = true;
+        } catch (IOException e) {
+            Log.w(TAG, tag + ": no heartbeat socket: " + e.getMessage());
+        }
+        return h;
+    }
+
+    /**
+     * Ends the heartbeat {@code h} of a connection; when it is the current one its counts
+     * go to the totals of the stats. A newer connection's heartbeat is left alone.
+     */
+    private void stopHeartbeat(UdpHeartbeat h) {
+        if (h == null) return;
+        h.close();
+        synchronized (lock) {
+            if (heartbeat != h) return;
+            heartbeatsBefore += h.sent();
+            heartbeatErrorsBefore += h.errors();
+            heartbeat = null;
+        }
+    }
+
+    /** Heartbeat statistics for /stats.json once an RTSP slot used one (#187), else null. */
+    Map<String, Object> heartbeatStats() {
+        if (!heartbeatUsed) return null;
+        synchronized (lock) {
+            return UdpHeartbeat.stats(heartbeat, heartbeatsBefore, heartbeatErrorsBefore);
+        }
     }
 
     /** FLOW-UFO statistics for /stats.json while a flowufo:// slot runs (#187), else null. */
@@ -1191,6 +1246,12 @@ class RtspSession {
         String userInfo;
         /** URL without credentials, used in requests. */
         String requestUrl;
+        /**
+         * UDP port for the cooingdv heartbeat (#187), or 0 for none: 7099 for
+         * rtsp://{host}:7070/webcam, else ?heartbeat={port}; ?heartbeat=off turns it off. The
+         * option is ours: it is taken out of the URL sent to the camera.
+         */
+        int heartbeatPort;
 
         static Url parse(String url) throws IOException {
             if (url == null) throw new IOException("Camera slot not configured");
@@ -1237,8 +1298,49 @@ class RtspSession {
                 u.host = hostPort;
             }
             if (u.host.isEmpty()) throw new IOException("Invalid RTSP URL: host is missing");
+            rest = takeHeartbeat(u, rest);
             u.requestUrl = scheme + "://" + authority + rest;
             return u;
+        }
+
+        /** Sets heartbeatPort from path and query; returns them without our option. */
+        private static String takeHeartbeat(Url u, String rest) throws IOException {
+            int q = rest.indexOf('?');
+            String path = q >= 0 ? rest.substring(0, q) : rest;
+            if (u.port == 7070 && (path.equalsIgnoreCase("/webcam")
+                    || path.equalsIgnoreCase("/webcam/"))) {
+                u.heartbeatPort = UdpHeartbeat.DEFAULT_PORT;
+            }
+            if (q < 0) return rest;
+            StringBuilder kept = new StringBuilder();
+            boolean found = false;
+            for (String param : rest.substring(q + 1).split("&", -1)) {
+                int eq = param.indexOf('=');
+                String name = (eq < 0 ? param : param.substring(0, eq)).toLowerCase(Locale.ROOT);
+                if (!name.equals("heartbeat")) {
+                    if (kept.length() > 0) kept.append('&');
+                    kept.append(param);
+                    continue;
+                }
+                found = true;
+                String v = eq < 0 ? "" : param.substring(eq + 1).trim().toLowerCase(Locale.ROOT);
+                if (v.equals("off") || v.equals("0")) {
+                    u.heartbeatPort = 0;
+                } else {
+                    try {
+                        u.heartbeatPort = Integer.parseInt(v);
+                    } catch (NumberFormatException e) {
+                        u.heartbeatPort = -1;
+                    }
+                    if (u.heartbeatPort <= 0 || u.heartbeatPort > 65535) {
+                        throw new IOException("Invalid heartbeat port: " + v
+                                + " (a UDP port, e.g. heartbeat=7099, or heartbeat=off)");
+                    }
+                }
+            }
+            // Untouched unless our option was there
+            if (!found) return rest;
+            return kept.length() > 0 ? path + "?" + kept : path;
         }
 
         private static int parsePort(String s, String url) throws IOException {

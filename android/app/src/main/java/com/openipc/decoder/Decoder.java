@@ -1558,6 +1558,8 @@ public class Decoder extends Activity
             // The toy drone's protocol counters (#187)
             Map<String, Object> ufo = rtspClient != null ? rtspClient.flowUfoStats() : null;
             if (ufo != null) single.put("flowufo", ufo);
+            Map<String, Object> hb = rtspClient != null ? rtspClient.heartbeatStats() : null;
+            if (hb != null) single.put("heartbeat", hb);
             m.put("single", single);
         }
         QuadCell[] cells = quadCells;
@@ -1598,6 +1600,8 @@ public class Decoder extends Activity
                     c.put("audio", i == quadAudio);
                     Map<String, Object> ufo = cell.flowUfoStats();
                     if (ufo != null) c.put("flowufo", ufo);
+                    Map<String, Object> hb = cell.heartbeatStats();
+                    if (hb != null) c.put("heartbeat", hb);
                 }
                 list.add(c);
             }

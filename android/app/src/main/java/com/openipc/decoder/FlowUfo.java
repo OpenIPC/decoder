@@ -13,24 +13,33 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
+import java.net.Inet4Address;
 import java.net.InetAddress;
-import java.net.InetSocketAddress;
+import java.net.InterfaceAddress;
+import java.net.NetworkInterface;
 import java.net.SocketTimeoutException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Enumeration;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 /**
- * Cheap Wi-Fi toy drones with a "FLOW-UFO-xxxxxx" access point (a BL60x camera) send MJPEG
- * over UDP from 192.168.169.1:8800 in a protocol of their own (#187). A short probe wakes the
- * drone; it then sends every JPEG frame, cut into fragments of 1024 bytes, to the address the
- * probe came from, and the client acknowledges the last four frames every 25 ms: what arrived,
- * what is missing, and which frame to send whole. A frame carries only the entropy-coded data
- * of the scan: the client puts the JPEG headers in front (standard tables at the quality the
- * fragment names). Video only: flight commands are never sent. Written from a description of
- * the client side and not yet checked against a drone: what is a guess says so, and the log
- * shows the raw bytes that would settle it. Pure Java apart from the log.
+ * Cheap Wi-Fi toy drones with a "FLOW-UFO-xxxxxx" / "FLOW_xxxxxx" access point (a BL60x
+ * camera) send MJPEG over UDP from 192.168.169.1 in a protocol of their own (#187). A short
+ * probe to port 8800 (BL608 engine) or 8801 (BL618 engine) wakes the drone; it then sends
+ * every JPEG frame, cut into fragments of 1024 bytes, from source port 1234 to the address the
+ * probe came from, and the client acknowledges the last four frames: what arrived, what is
+ * missing, and which frame to send next. A frame carries only the entropy-coded data of the
+ * scan: the client puts the JPEG headers in front. Video only: flight commands are never sent.
+ *
+ * The same protocol is implemented by the open-source project turbodrone (Apache-2.0,
+ * github.com/marshallrichards/turbodrone, "wifi_uav") and works there on real drones; the
+ * values taken over from its observations (quality parameters, both ports, which slots go into
+ * the acknowledgement, the raster-order tables of ?dqt=raster) say so where they are used.
+ * No code of it is used. Pure Java apart from the log.
  */
 final class FlowUfo {
     private static final String TAG = "OpenIPCDecoder";
@@ -38,11 +47,20 @@ final class FlowUfo {
     static final String SCHEME = "flowufo://";
     static final String DEFAULT_HOST = "192.168.169.1";
     static final int DEFAULT_PORT = 8800;
+    /**
+     * The port of the BL618 engine. The vendor library starts both engines, on 8800 and 8801,
+     * and keeps the one that delivers frames (turbodrone docs/research/wifi_uav.md): a slot on
+     * 8800 (the default) probes both and locks onto the first that answers.
+     */
+    static final int BL618_PORT = 8801;
 
-    /** Wakes the drone up; sent every PROBE_MS until the first fragment. */
+    /** Wakes the drone up; sent every PROBE_MS (BL618: PROBE_MS_BL618) until it answers. */
     static final byte[] PROBE = {(byte) 0xEF, 0x00, 0x04, 0x00};
     static final long PROBE_MS = 100;
+    static final long PROBE_MS_BL618 = 200;
     static final long ACK_MS = 25;
+    /** The BL618 engine acknowledges every 50 ms, and only when there is a record to send. */
+    static final long ACK_MS_BL618 = 50;
     /** No fragment for longer: the last frame is over, the acknowledgement asks for the next. */
     static final long QUIET_MS = 19;
     /**
@@ -65,10 +83,17 @@ final class FlowUfo {
 
     // The acknowledgement: a fixed header, then one record per frame
     static final int ACK_HEADER = 0x58;
-    /** Quality parameters the vendor app sends by default (25, 50, 35, 75). */
-    static final byte[] QPARA = {0x19, 0x32, 0x23, 0x4B};
+    /**
+     * Quality parameters at 0x52 of the acknowledgement: 32 4B 14 2D, the bytes turbodrone
+     * sends to real drones (#187). The vendor app's own default was read as 19 32 23 4B; that
+     * one, or any other, can be given with ?qpara= (8 hex digits).
+     */
+    static final byte[] QPARA = {0x32, 0x4B, 0x14, 0x2D};
     static final int SLOTS = 4;
-    /** A slot this many frames behind the newest asks for its next frame whole. */
+    /**
+     * A slot this many frames behind the newest is left out of the acknowledgement, as
+     * turbodrone does: the drone has moved on, asking for it again only holds it up.
+     */
     static final int LAG = 5;
     /** Fragments in a row this far behind the newest frame: the drone counts from 1 again. */
     static final int RESTART_RUN = 8;
@@ -89,14 +114,44 @@ final class FlowUfo {
     static final int DEFAULT_WIDTH = 640;
     static final int DEFAULT_HEIGHT = 360;
 
+    /**
+     * Quantization tables of the header, ?dqt= (#187). ZIGZAG (default): the Annex K tables
+     * scaled to the quality byte of the fragment, in zig-zag order as the JPEG standard has
+     * DQT. RASTER: unscaled Annex K tables in raster (row-major) order, quality ignored: what
+     * turbodrone writes, and it shows real drones' frames. Q50: unscaled, zig-zag. Which one
+     * matches the drone's encoder is not known yet; the tester compares.
+     */
+    static final int DQT_ZIGZAG = 0;
+    static final int DQT_RASTER = 1;
+    static final int DQT_Q50 = 2;
+    static final String[] DQT_NAMES = {"zigzag", "raster", "q50"};
+
+    /** Zig-zag position i to raster (row-major) position. */
+    private static final int[] RASTER_OF_ZIGZAG = {
+            0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5,
+            12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28,
+            35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51,
+            58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63
+    };
+
     private FlowUfo() {}
 
     // ====================== URL ======================
 
-    /** flowufo://[host][:port][/...]: the drone's address, 192.168.169.1:8800 when left out. */
+    /**
+     * flowufo://[host][:port][/...][?option=value&...]: the drone's address, 192.168.169.1:8800
+     * when left out. Port 8800 (also when left out) probes 8801 as well; any other port only
+     * itself. Options, as in udp:// URLs (unknown ones are ignored, bad values refused):
+     * qpara=8 hex digits (the quality parameters of the acknowledgement, default 324B142D),
+     * dqt=zigzag|raster|q50 (the quantization tables of the JPEG header, default zigzag).
+     */
     static final class Url {
         String host = DEFAULT_HOST;
         int port = DEFAULT_PORT;
+        /** Probed as well as port until one answers, or 0. Not final so tests can move it. */
+        int alternatePort;
+        byte[] qpara = QPARA.clone();
+        int dqt = DQT_ZIGZAG;
 
         static boolean matches(String url) {
             return url != null && url.trim().toLowerCase(Locale.ROOT).startsWith(SCHEME);
@@ -114,6 +169,12 @@ final class FlowUfo {
                 }
             }
             String authority = rest.substring(0, end).trim();
+            String query = "";
+            int q = rest.indexOf('?');
+            int hash = rest.indexOf('#');
+            if (q >= 0 && (hash < 0 || q < hash)) {
+                query = rest.substring(q + 1, hash >= 0 ? hash : rest.length());
+            }
             Url u = new Url();
             String host = authority;
             int colon = authority.lastIndexOf(':');
@@ -138,11 +199,55 @@ final class FlowUfo {
                 char ch = u.host.charAt(i);
                 if (ch <= 0x20 || ch == 0x7F || ch == '@') throw new IOException("Bad host in URL");
             }
+            u.alternatePort = u.port == DEFAULT_PORT ? BL618_PORT : 0;
+            for (String param : query.split("&")) {
+                int eq = param.indexOf('=');
+                if (eq < 0) continue;
+                String name = param.substring(0, eq).trim().toLowerCase(Locale.ROOT);
+                String value = param.substring(eq + 1).trim().toLowerCase(Locale.ROOT);
+                if (name.equals("qpara") || name.equals("q")) {
+                    u.qpara = parseQpara(value);
+                } else if (name.equals("dqt")) {
+                    u.dqt = Arrays.asList(DQT_NAMES).indexOf(value);
+                    if (u.dqt < 0) {
+                        throw new IOException("Unknown dqt: " + value + " (zigzag, raster or q50)");
+                    }
+                }
+            }
             return u;
         }
 
+        /** Exactly 8 hex digits, e.g. 19322348, as 4 bytes. */
+        static byte[] parseQpara(String v) throws IOException {
+            if (v.length() != 8) throw new IOException("qpara needs 8 hex digits: " + v);
+            byte[] b = new byte[4];
+            for (int i = 0; i < 4; i++) {
+                int hi = Character.digit(v.charAt(2 * i), 16);
+                int lo = Character.digit(v.charAt(2 * i + 1), 16);
+                if (hi < 0 || lo < 0) throw new IOException("qpara needs 8 hex digits: " + v);
+                b[i] = (byte) (hi << 4 | lo);
+            }
+            return b;
+        }
+
+        /** The ports probed: the given one, then the alternate one if any. */
+        int[] ports() {
+            return alternatePort > 0 && alternatePort != port
+                    ? new int[] {port, alternatePort} : new int[] {port};
+        }
+
         String endpoint() {
-            return (host.indexOf(':') >= 0 ? "[" + host + "]" : host) + ":" + port;
+            return endpoint(port);
+        }
+
+        String endpoint(int p) {
+            return (host.indexOf(':') >= 0 ? "[" + host + "]" : host) + ":" + p;
+        }
+
+        /** "192.168.169.1:8800 and :8801", or the one endpoint. */
+        String probed() {
+            int[] p = ports();
+            return p.length > 1 ? endpoint(p[0]) + " and :" + p[1] : endpoint(p[0]);
         }
     }
 
@@ -171,8 +276,12 @@ final class FlowUfo {
         int width;
         int height;
         int quality;
-        /** 01 01 at 0x34: the camera family whose layout this is. */
-        boolean gl;
+        /**
+         * Main and flow camera status at 0x34 and 0x35 (turbodrone docs: the vendor library
+         * passes them on with the frame). Shown in the stats, not used.
+         */
+        int mainCamera;
+        int flowCamera;
         /** The packet parsed last; its data starts at dataOffset. */
         byte[] buf;
         int dataOffset;
@@ -189,7 +298,8 @@ final class FlowUfo {
             width = u16(b, off + 0x2C);
             height = u16(b, off + 0x2E);
             quality = b[off + 0x30] & 0xFF;
-            gl = b[off + 0x34] == 1 && b[off + 0x35] == 1;
+            mainCamera = b[off + 0x34] & 0xFF;
+            flowCamera = b[off + 0x35] & 0xFF;
             buf = b;
             dataOffset = off + FRAGMENT_HEADER;
             dataLength = len - FRAGMENT_HEADER;
@@ -278,8 +388,11 @@ final class FlowUfo {
         volatile int delivered;
         volatile int lost;
         volatile int late;
-        volatile int wholeRequests;
+        /** Records left out because their slot lagged LAG or more frames behind. */
+        volatile int lagging;
         volatile int nextRequests;
+        /** Quality parameters of the acknowledgement. */
+        byte[] qpara = QPARA;
         /** The frame numbers started from 1 again (the drone restarted). */
         volatile int restarts;
 
@@ -377,11 +490,11 @@ final class FlowUfo {
         /**
          * The acknowledgement for now, into {@code out} (ACK_CAPACITY bytes); returns its
          * length. Per slot: complete (status 1) or still collecting (0) with the mask of the
-         * fragments received; a slot LAG or more frames behind the newest asks for its next
-         * frame whole instead (3, no mask). The frame coming in now is left out until the
-         * fragments pause; after QUIET_MS without any, when every frame is complete, a record
-         * asks for the frame after the newest. Unverified: whether the drone needs or uses any
-         * of it, the record order, and that the paused frame is included again.
+         * fragments received; a slot LAG or more frames behind the newest is left out (as in
+         * turbodrone), and does not hold up the request for the next frame either. The frame
+         * coming in now is left out until the fragments pause; after QUIET_MS without any, when
+         * every frame is complete, a record asks for the frame after the newest (status 3).
+         * Unverified: the record order, and that the paused frame is included again.
          */
         int buildAck(byte[] out, long nowMs) {
             boolean quiet = nowMs - lastFragmentMs > QUIET_MS;
@@ -393,15 +506,13 @@ final class FlowUfo {
                 // At or below the base the drone is done with it: no record, and an incomplete
                 // one does not hold up the request for the next frame (Qodo on #188)
                 if (s.seq == 0 || s.seq <= base) continue;
+                if (maxSeq - s.seq >= LAG) {
+                    lagging++;
+                    continue;
+                }
                 any = true;
                 if (s.status != STATUS_COMPLETE) allComplete = false;
                 if (s.seq == current && !quiet) continue;
-                if (maxSeq - s.seq >= LAG) {
-                    pos = wholeRecord(out, pos, s.seq + SLOTS);
-                    records++;
-                    wholeRequests++;
-                    continue;
-                }
                 int words = (s.total + 31) / 32;
                 le64(out, pos, s.seq);
                 boolean complete = s.status == STATUS_COMPLETE;
@@ -419,7 +530,7 @@ final class FlowUfo {
                 records++;
                 nextRequests++;
             }
-            ackHeader(out, pos, records);
+            ackHeader(out, pos, records, qpara);
             return pos;
         }
 
@@ -433,9 +544,12 @@ final class FlowUfo {
 
     /**
      * The fixed part of an acknowledgement: EF 02, length, 02 02 00 01, record count, then no
-     * command (counter 0, length 0, 0x40 zero bytes), QPARA and active camera 0.
+     * command (counter 0, length 0, 0x40 zero bytes), the quality parameters and active camera
+     * 0. The vendor app and turbodrone put the current stick command in there, a neutral one
+     * when idle; this app never does: a viewer must not be able to move a toy, and a neutral
+     * command is still a command (it can hold a drone that the remote is flying).
      */
-    static void ackHeader(byte[] out, int length, int records) {
+    static void ackHeader(byte[] out, int length, int records, byte[] qpara) {
         out[0] = (byte) 0xEF;
         out[1] = 0x02;
         le16(out, 2, length);
@@ -447,7 +561,7 @@ final class FlowUfo {
         le32(out, 0x0C, 0);
         le16(out, 0x10, 0);
         Arrays.fill(out, 0x12, 0x52, (byte) 0);
-        System.arraycopy(QPARA, 0, out, 0x52, QPARA.length);
+        System.arraycopy(qpara, 0, out, 0x52, 4);
         out[0x56] = 0;
         out[0x57] = 0;
     }
@@ -456,10 +570,105 @@ final class FlowUfo {
 
     /** The headers in front of a body: SOI, DQT, SOF0, DHT, SOS (605 bytes as configured). */
     static byte[] jpegHeader(int quality, int width, int height) {
-        int q = quality >= 1 && quality <= 100 ? quality : DEFAULT_QUALITY;
+        return jpegHeader(quality, width, height, DQT_ZIGZAG);
+    }
+
+    static byte[] jpegHeader(int quality, int width, int height, int dqt) {
         return JpegAssembler.headersSampled(LUMA_SAMPLING, width > 0 ? width : DEFAULT_WIDTH,
-                height > 0 ? height : DEFAULT_HEIGHT, JpegAssembler.ijgTables(q), 0,
+                height > 0 ? height : DEFAULT_HEIGHT, dqtTables(dqt, quality), 0,
                 RESTART_INTERVAL);
+    }
+
+    /** Luma then chroma table, 64 bytes each, in the order DQT carries them for {@code dqt}. */
+    static byte[] dqtTables(int dqt, int quality) {
+        if (dqt == DQT_Q50) return JpegAssembler.ijgTables(50);
+        if (dqt == DQT_RASTER) {
+            // Q50 is the unscaled Annex K table; put each value at its raster position
+            byte[] zz = JpegAssembler.ijgTables(50);
+            byte[] out = new byte[128];
+            for (int t = 0; t < 128; t += 64) {
+                for (int k = 0; k < 64; k++) out[t + RASTER_OF_ZIGZAG[k]] = zz[t + k];
+            }
+            return out;
+        }
+        return JpegAssembler.ijgTables(quality >= 1 && quality <= 100 ? quality : DEFAULT_QUALITY);
+    }
+
+    /** For the stats and the log: which tables, e.g. "zigzag Q75" or "raster (unscaled)". */
+    static String dqtLabel(int dqt, int quality) {
+        if (dqt == DQT_ZIGZAG) {
+            return "zigzag Q" + (quality >= 1 && quality <= 100 ? quality : DEFAULT_QUALITY);
+        }
+        return DQT_NAMES[dqt] + " (unscaled)";
+    }
+
+    // ====================== Subnet hint ======================
+
+    /**
+     * A hint when the slot cannot be right for the phone's networks (#187), or null: the
+     * target is the phone itself, or the phone is on a network of another toy family than the
+     * address. {@code local}: the phone's IPv4 addresses.
+     */
+    static String subnetHint(InetAddress target, List<InetAddress> local) {
+        if (!(target instanceof Inet4Address) || local == null) return null;
+        boolean own = local.contains(target);
+        boolean on1 = false;
+        boolean on169 = false;
+        boolean on80 = false;
+        for (InetAddress a : local) {
+            on1 |= in24(a, 1);
+            on169 |= in24(a, 169);
+            on80 |= in24(a, 80);
+        }
+        StringBuilder parts = new StringBuilder();
+        byte[] b = target.getAddress();
+        if (own) {
+            sentence(parts, target.getHostAddress() + " is this phone; the toy is usually "
+                    + (b[0] & 0xFF) + "." + (b[1] & 0xFF) + "." + (b[2] & 0xFF) + ".1");
+        }
+        if (on1 && !on169 && (own || in24(target, 169))) {
+            sentence(parts, "This network looks like a KY UFO RTSP toy: try"
+                    + " rtsp://192.168.1.1:7070/webcam");
+        }
+        if (on169 && !on1 && in24(target, 1)) {
+            sentence(parts, "This phone is on 192.168.169.x: the toy is usually"
+                    + " flowufo://192.168.169.1");
+        }
+        if (on80 && !on169 && !on1) {
+            sentence(parts, "Toys on 192.168.80.x (HF_ Wi-Fi) use another protocol, not supported"
+                    + " yet");
+        }
+        return parts.length() > 0 ? parts.toString() : null;
+    }
+
+    private static void sentence(StringBuilder sb, String s) {
+        if (sb.length() > 0) sb.append(". ");
+        sb.append(s);
+    }
+
+    /** {@code a} is in 192.168.{@code third}.0/24. */
+    private static boolean in24(InetAddress a, int third) {
+        if (!(a instanceof Inet4Address)) return false;
+        byte[] b = a.getAddress();
+        return (b[0] & 0xFF) == 192 && (b[1] & 0xFF) == 168 && (b[2] & 0xFF) == third;
+    }
+
+    /** The phone's IPv4 addresses on interfaces that are up. */
+    static List<InetAddress> localAddresses() {
+        List<InetAddress> list = new ArrayList<>();
+        try {
+            Enumeration<NetworkInterface> e = NetworkInterface.getNetworkInterfaces();
+            while (e != null && e.hasMoreElements()) {
+                NetworkInterface n = e.nextElement();
+                if (!n.isUp() || n.isLoopback()) continue;
+                for (InterfaceAddress ia : n.getInterfaceAddresses()) {
+                    if (ia.getAddress() instanceof Inet4Address) list.add(ia.getAddress());
+                }
+            }
+        } catch (Exception ignored) {
+            // No hint then
+        }
+        return list;
     }
 
     /**
@@ -500,18 +709,30 @@ final class FlowUfo {
 
     /**
      * The receive loop on the calling thread: probes, fragments, acknowledgements and the
-     * timers between them, until {@code keepGoing} fails or close().
+     * timers between them, until {@code keepGoing} fails or close(). Each probed port has a
+     * socket of its own: the drone answers from source port 1234 whichever port was probed,
+     * so only the socket the packets arrive on tells which engine answered. The first 0x93
+     * packet from the toy's address locks the client onto that socket and port (acks go
+     * there); the other socket is closed, and opened again when the drone goes quiet and the
+     * probes start over.
      */
     static final class Client implements Closeable {
         private final String tag;
         private final Url url;
         private final SocketSetup setup;
-        private volatile DatagramSocket socket;
+        private final int[] ports;
+        /** One socket per probed port; null once another port is locked. Guarded by itself. */
+        private final DatagramSocket[] sockets;
         private volatile boolean closed;
+        /** Index of the port the drone answers on, or -1 while it has not. */
+        private volatile int locked = -1;
+        /** The phone's addresses for the subnet hint; null: the real ones. For tests. */
+        List<InetAddress> localForHint;
 
         final Window window = new Window();
         private final Fragment fragment = new Fragment();
         private final byte[] ack = new byte[ACK_CAPACITY];
+        private final DatagramPacket out = new DatagramPacket(ack, 0);
         private final byte[][] jpegOut = new byte[1][];
         private byte[] header;
         /** Quality and size the header was made for. */
@@ -523,6 +744,7 @@ final class FlowUfo {
         private volatile boolean receiving;
         private volatile boolean playing;
         private volatile String network = "default";
+        private volatile String hint;
         private volatile int probes;
         private volatile int acks;
         private volatile int packets;
@@ -536,8 +758,10 @@ final class FlowUfo {
         private volatile String lastService;
         private volatile String firstHeader;
         private volatile String size;
-        private volatile int quality;
-        private volatile boolean gl = true;
+        private volatile String dqtUsed;
+        private volatile int mainCamera = -1;
+        private volatile int flowCamera = -1;
+        private int cameraChanges;
         private volatile float fragmentsPerS;
         private volatile float framesPerS;
         /** Any fragment from the drone, usable or not: it is still there. */
@@ -547,43 +771,101 @@ final class FlowUfo {
             this.tag = tag;
             this.url = url;
             this.setup = setup;
+            ports = url.ports();
+            sockets = new DatagramSocket[ports.length];
+            window.qpara = url.qpara;
         }
 
         @Override
         public void close() {
             closed = true;
-            DatagramSocket s = socket;
-            if (s != null) s.close();
+            synchronized (sockets) {
+                for (DatagramSocket s : sockets) {
+                    if (s != null) s.close();
+                }
+            }
+        }
+
+        /** BL618 (port 8801) probes every 200 ms, BL608 and others every 100 ms. */
+        static long probeInterval(int port) {
+            return port == BL618_PORT ? PROBE_MS_BL618 : PROBE_MS;
+        }
+
+        /** BL618 acknowledges every 50 ms and only with a record; BL608 every 25 ms. */
+        static long ackInterval(int port) {
+            return port == BL618_PORT ? ACK_MS_BL618 : ACK_MS;
+        }
+
+        static boolean ackNeedsRecord(int port) {
+            return port == BL618_PORT;
+        }
+
+        static String engine(int port) {
+            return port == DEFAULT_PORT ? "BL608" : port == BL618_PORT ? "BL618" : "port " + port;
+        }
+
+        /** The port the drone answers on, or -1. */
+        int lockedPort() {
+            int i = locked;
+            return i >= 0 ? ports[i] : -1;
         }
 
         String probingText(boolean again) {
-            return (again ? "The toy went quiet: probing " : "Waiting for the toy: probing ")
-                    + url.endpoint() + (again ? " again" : "");
+            String t = (again ? "The toy went quiet: probing " : "Waiting for the toy: probing ")
+                    + url.probed() + (again ? " again" : "");
+            String h = hint;
+            return h != null ? t + ". " + h : t;
         }
 
-        private DatagramSocket open(InetAddress target) throws IOException {
+        private void open(int i, InetAddress target) throws IOException {
             DatagramSocket s = new DatagramSocket();
             try {
                 s.setReceiveBufferSize(1024 * 1024);
             } catch (IOException ignored) {}
             if (setup != null) network = setup.prepare(s, target);
-            socket = s;
-            if (closed) s.close();
-            return s;
+            synchronized (sockets) {
+                if (sockets[i] != null) sockets[i].close();
+                sockets[i] = s;
+                if (closed) s.close();
+            }
+        }
+
+        private void closeSocket(int i) {
+            synchronized (sockets) {
+                if (sockets[i] != null) sockets[i].close();
+                sockets[i] = null;
+            }
+        }
+
+        private DatagramSocket socket(int i) {
+            synchronized (sockets) {
+                return sockets[i];
+            }
+        }
+
+        private String localPorts() {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < ports.length; i++) {
+                DatagramSocket s = socket(i);
+                if (s == null) continue;
+                if (sb.length() > 0) sb.append(", ");
+                sb.append(s.getLocalPort()).append(" for ").append(ports[i]);
+            }
+            return sb.toString();
         }
 
         void run(UdpReceiver.Condition keepGoing, Listener listener) throws IOException {
             InetAddress address = InetAddress.getByName(url.host);
-            InetSocketAddress target = new InetSocketAddress(address, url.port);
-            DatagramSocket s = open(address);
-            Log.i(TAG, tag + ": FLOW-UFO: probing " + url.endpoint() + " from local port "
-                    + s.getLocalPort() + " (network: " + network + ")");
+            hint = subnetHint(address, localForHint != null ? localForHint : localAddresses());
+            if (hint != null) Log.w(TAG, tag + ": FLOW-UFO: " + hint);
+            for (int i = 0; i < ports.length; i++) open(i, address);
+            Log.i(TAG, tag + ": FLOW-UFO: probing " + url.probed() + " from local port "
+                    + localPorts() + " (network: " + network + "), qpara "
+                    + hex(url.qpara, 0, 4) + ", dqt " + DQT_NAMES[url.dqt]);
             listener.onState(false, probingText(false));
             byte[] rx = new byte[2048];
             DatagramPacket in = new DatagramPacket(rx, rx.length);
-            DatagramPacket probe = new DatagramPacket(PROBE, PROBE.length, target);
-            DatagramPacket out = new DatagramPacket(ack, 0, target);
-            long nextProbe = 0;
+            long[] nextProbe = new long[ports.length];
             long nextAck = 0;
             long rateMark = now();
             int rateFragments = 0;
@@ -605,88 +887,149 @@ final class FlowUfo {
                     if (receiving && t - lastFragmentAt > resetMs) {
                         Log.w(TAG, tag + ": FLOW-UFO: no fragment for " + resetMs
                                 + " ms, probing again (" + summary() + ")");
-                        probeAgain(listener, t);
-                        nextProbe = t;
+                        probeAgain(listener, address);
+                        Arrays.fill(nextProbe, t);
                     }
                     if (receiving && t >= nextSummary) {
                         nextSummary = t + 30_000;
                         Log.i(TAG, tag + ": FLOW-UFO: " + summary());
                     }
                     boolean sendFailed = false;
-                    if (!receiving && t >= nextProbe) {
-                        nextProbe = t + PROBE_MS;
-                        sendFailed = !send(s, probe);
-                        if (!sendFailed) probes++;
-                    } else if (receiving && t >= nextAck) {
+                    int lk = locked;
+                    if (!receiving) {
+                        for (int i = 0; i < ports.length; i++) {
+                            DatagramSocket s = socket(i);
+                            if (s == null || t < nextProbe[i]) continue;
+                            nextProbe[i] = t + probeInterval(ports[i]);
+                            if (send(s, PROBE, PROBE.length, address, ports[i])) {
+                                probes++;
+                            } else {
+                                sendFailed = true;
+                            }
+                        }
+                    } else if (lk >= 0 && t >= nextAck) {
                         // Behind schedule (a slow thread) is caught up, not sent in a burst
-                        nextAck = Math.max(nextAck + ACK_MS, t);
+                        int port = ports[lk];
+                        nextAck = Math.max(nextAck + ackInterval(port), t);
                         int len = window.buildAck(ack, t);
-                        out.setLength(len);
-                        sendFailed = !send(s, out);
-                        if (!sendFailed) acks++;
+                        if (len > ACK_HEADER || !ackNeedsRecord(port)) {
+                            if (send(socket(lk), ack, len, address, port)) {
+                                acks++;
+                            } else {
+                                sendFailed = true;
+                            }
+                        }
                     }
                     if (sendFailed) {
-                        // Off the toy's Wi-Fi, or its network went away: a new socket after
+                        // Off the toy's Wi-Fi, or its network went away: new sockets after
                         // 3 s of failures, bound again to whatever network reaches it now. The
-                        // drone sends to the port of the probe: the new port probes at once
+                        // drone sends to the port of the probe: the new ports probe at once
                         // (Qodo on #188)
                         if (failingSince == 0) failingSince = t;
                         if (t - failingSince >= 3000) {
                             failingSince = 0;
-                            s.close();
-                            s = open(address);
-                            Log.w(TAG, tag + ": FLOW-UFO: new socket after send errors, local port "
-                                    + s.getLocalPort() + " (network: " + network + ")");
-                            if (receiving) probeAgain(listener, t);
-                            nextProbe = t;
+                            if (receiving) probeAgain(listener, address);
+                            locked = -1;
+                            for (int i = 0; i < ports.length; i++) open(i, address);
+                            Log.w(TAG, tag + ": FLOW-UFO: new sockets after send errors, local"
+                                    + " port " + localPorts() + " (network: " + network + ")");
+                            Arrays.fill(nextProbe, t);
                         }
                     } else {
                         failingSince = 0;
                     }
-                    long wake = receiving ? nextAck : nextProbe;
-                    int timeout = (int) Math.max(1, Math.min(100, wake - now()));
-                    try {
-                        s.setSoTimeout(timeout);
-                        in.setLength(rx.length);
-                        s.receive(in);
-                    } catch (SocketTimeoutException e) {
-                        continue;
+                    long wake = Long.MAX_VALUE;
+                    if (receiving) {
+                        wake = nextAck;
+                    } else {
+                        for (int i = 0; i < ports.length; i++) {
+                            if (socket(i) != null) wake = Math.min(wake, nextProbe[i]);
+                        }
                     }
-                    if (!in.getAddress().equals(address)) {
+                    int timeout = (int) Math.max(1, Math.min(100, wake - now()));
+                    int got = -1;
+                    lk = locked;
+                    if (lk >= 0) {
+                        if (receive(socket(lk), in, rx, timeout)) got = lk;
+                    } else {
+                        // Not locked yet: each socket in turn; what is not read waits in its
+                        // buffer for the next turn
+                        int each = Math.max(1, timeout / ports.length);
+                        for (int i = 0; i < ports.length && got < 0; i++) {
+                            DatagramSocket s = socket(i);
+                            if (s != null && receive(s, in, rx, each)) got = i;
+                        }
+                    }
+                    if (got < 0) continue;
+                    // By source address only: the drone sends from port 1234, not the probed one
+                    if (!address.equals(in.getAddress())) {
                         if (++foreign <= 3) {
                             Log.w(TAG, tag + ": FLOW-UFO: packet from " + in.getAddress()
                                     + ", not the toy: ignored");
                         }
                         continue;
                     }
+                    if (locked < 0 && packetType(rx, 0, in.getLength()) >= 0) lock(got, in);
                     handle(rx, in.getLength(), listener);
                 }
             } catch (IOException e) {
                 if (closed) return;
                 throw e;
             } finally {
-                s.close();
+                close();
             }
         }
 
-        /** Back to probing: the stream is gone. */
-        private void probeAgain(Listener listener, long t) {
+        private boolean receive(DatagramSocket s, DatagramPacket in, byte[] rx, int timeout)
+                throws IOException {
+            if (s == null) return false;
+            try {
+                s.setSoTimeout(timeout);
+                in.setData(rx);
+                s.receive(in);
+                return true;
+            } catch (SocketTimeoutException e) {
+                return false;
+            }
+        }
+
+        /** The drone answered on ports[i]: acks go there, the other probes stop. */
+        private void lock(int i, DatagramPacket from) {
+            locked = i;
+            for (int j = 0; j < ports.length; j++) {
+                if (j != i) closeSocket(j);
+            }
+            Log.i(TAG, tag + ": FLOW-UFO: the toy answers the probe to port " + ports[i] + " ("
+                    + engine(ports[i]) + "), from port " + from.getPort()
+                    + (ports.length > 1 ? "; the other port is not probed any more" : ""));
+        }
+
+        /** Back to probing on every port: the stream is gone. */
+        private void probeAgain(Listener listener, InetAddress address) throws IOException {
             resets++;
             receiving = false;
             playing = false;
             window.reset();
+            locked = -1;
+            for (int i = 0; i < ports.length; i++) {
+                if (socket(i) == null) open(i, address);
+            }
             listener.onState(false, probingText(true));
         }
 
-        private boolean send(DatagramSocket s, DatagramPacket p) {
+        private boolean send(DatagramSocket s, byte[] data, int len, InetAddress a, int port) {
+            if (s == null) return false;
             try {
-                s.send(p);
+                out.setData(data, 0, len);
+                out.setAddress(a);
+                out.setPort(port);
+                s.send(out);
                 return true;
             } catch (IOException e) {
                 sendErrors++;
                 lastError = e.getMessage();
                 if (sendErrors <= 3 || sendErrors % 100 == 0) {
-                    Log.w(TAG, tag + ": FLOW-UFO: cannot send to " + url.endpoint() + " ("
+                    Log.w(TAG, tag + ": FLOW-UFO: cannot send to " + url.endpoint(port) + " ("
                             + sendErrors + "): " + e.getMessage()
                             + "; is this device on the toy's Wi-Fi?");
                 }
@@ -723,7 +1066,8 @@ final class FlowUfo {
                 if (firstHeader == null) firstHeader = hex(b, 0, FRAGMENT_HEADER);
                 Log.i(TAG, tag + ": FLOW-UFO: first fragment after " + probes + " probes: "
                         + hex(b, 0, FRAGMENT_HEADER));
-                listener.onState(true, "Receiving from the toy at " + url.endpoint() + "…");
+                listener.onState(true, "Receiving from the toy at "
+                        + url.endpoint(lockedPort() > 0 ? lockedPort() : url.port) + "…");
             }
             int n = window.fragments;
             if (n < 5) {
@@ -732,24 +1076,28 @@ final class FlowUfo {
                         + fragment.bodyLength + ", " + fragment.width + "x" + fragment.height
                         + " Q" + fragment.quality + ", bytes 0x08-0x17: " + hex(b, 0x08, 16));
             }
-            if (!fragment.gl && gl) {
-                gl = false;
-                Log.w(TAG, tag + ": FLOW-UFO: bytes 0x34/0x35 are " + hex(b, 0x34, 2)
-                        + ", not 01 01: another camera family, frames may not decode");
+            if (fragment.mainCamera != mainCamera || fragment.flowCamera != flowCamera) {
+                boolean first = mainCamera < 0;
+                mainCamera = fragment.mainCamera;
+                flowCamera = fragment.flowCamera;
+                if (++cameraChanges <= 5) {
+                    Log.i(TAG, tag + ": FLOW-UFO: camera status (0x34/0x35): main " + mainCamera
+                            + ", flow " + flowCamera + (first ? "" : " (changed)"));
+                }
             }
             Slot done = window.add(fragment, t);
             if (done == null) return;
             if (header == null || done.quality != headerQuality || done.width != headerWidth
                     || done.height != headerHeight) {
-                header = jpegHeader(done.quality, done.width, done.height);
+                header = jpegHeader(done.quality, done.width, done.height, url.dqt);
                 headerQuality = done.quality;
                 headerWidth = done.width;
                 headerHeight = done.height;
-                quality = done.quality;
                 size = done.width + "x" + done.height;
+                dqtUsed = dqtLabel(url.dqt, done.quality);
                 Log.i(TAG, tag + ": FLOW-UFO: frames " + size + " Q" + done.quality
                         + (done.quality >= 1 && done.quality <= 100 ? ""
-                                : " (not a quality, Q" + DEFAULT_QUALITY + " tables)"));
+                                : " (not a quality)") + ", tables " + dqtUsed);
             }
             int length = jpeg(header, done.body, done.bodyLength, jpegOut);
             if (!playing) {
@@ -764,8 +1112,8 @@ final class FlowUfo {
         private String summary() {
             Window w = window;
             return String.format(Locale.ROOT, "%.1f fps, %.0f fragments/s, %d frames, %d lost,"
-                            + " %d late, %d whole requests, %d next requests, %d acks, %d bad",
-                    framesPerS, fragmentsPerS, w.delivered, w.lost, w.late, w.wholeRequests,
+                            + " %d late, %d lagging left out, %d next requests, %d acks, %d bad",
+                    framesPerS, fragmentsPerS, w.delivered, w.lost, w.late, w.lagging,
                     w.nextRequests, acks, badPackets);
         }
 
@@ -774,13 +1122,26 @@ final class FlowUfo {
             Window w = window;
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("state", playing ? "playing" : receiving ? "receiving" : "probing");
-            m.put("target", url.endpoint());
+            m.put("target", url.probed());
+            int lp = lockedPort();
+            if (lp > 0) {
+                m.put("port", lp);
+                m.put("engine", engine(lp));
+            }
             m.put("network", network);
+            if (hint != null) m.put("hint", hint);
+            m.put("qpara", hex(url.qpara, 0, 4));
+            m.put("dqt", dqtUsed != null ? dqtUsed : DQT_NAMES[url.dqt]);
             m.put("frames_per_s", Math.round(framesPerS * 10) / 10f);
             m.put("fragments_per_s", Math.round(fragmentsPerS));
             if (size != null) m.put("size", size);
-            if (size != null) m.put("quality", quality);
-            m.put("gl", gl);
+            if (size != null) m.put("quality", headerQuality);
+            if (mainCamera >= 0) {
+                Map<String, Object> cam = new LinkedHashMap<>();
+                cam.put("main", mainCamera);
+                cam.put("flow", flowCamera);
+                m.put("camera_status", cam);
+            }
             m.put("probes", probes);
             m.put("acks", acks);
             m.put("packets", packets);
@@ -795,7 +1156,7 @@ final class FlowUfo {
             m.put("frames_complete", w.completed);
             m.put("frames_lost", w.lost);
             m.put("frames_late", w.late);
-            m.put("whole_requests", w.wholeRequests);
+            m.put("lagging_left_out", w.lagging);
             m.put("next_requests", w.nextRequests);
             m.put("resets", resets);
             m.put("seq_restarts", w.restarts);

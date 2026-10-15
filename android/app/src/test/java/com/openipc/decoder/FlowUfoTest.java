@@ -196,7 +196,14 @@ public class FlowUfoTest {
         assertEquals(640, f.width);
         assertEquals(360, f.height);
         assertEquals(75, f.quality);
-        assertTrue(f.gl);
+        // Camera status bytes: main and flow camera
+        assertEquals(1, f.mainCamera);
+        assertEquals(1, f.flowCamera);
+        p[0x34] = 0;
+        p[0x35] = 2;
+        f = parsed(p);
+        assertEquals(0, f.mainCamera);
+        assertEquals(2, f.flowCamera);
         assertEquals(FlowUfo.FRAGMENT_HEADER, f.dataOffset);
         assertEquals(1024, f.dataLength);
         assertSame(p, f.buf);
@@ -239,7 +246,7 @@ public class FlowUfoTest {
         String header = "EF 02 %s  02 02 00 01  %s  00 00 00 00  00 00"
                 + " 00000000000000000000000000000000 00000000000000000000000000000000"
                 + " 00000000000000000000000000000000 00000000000000000000000000000000"
-                + " 19 32 23 4B  00 00";
+                + " 32 4B 14 2D  00 00";
         byte[] expected = bytes(String.format(header, "6C 00", "01 00 00 00")
                 + " 01 00 00 00 00 00 00 00  01 00 00 00  14 00 00 00  FF FF FF FF");
         assertArrayEquals(expected, ack(w, 1015));
@@ -278,7 +285,7 @@ public class FlowUfoTest {
     }
 
     @Test
-    public void lateSlotAsksForItsNextFrameWhole() {
+    public void lateSlotIsLeftOut() {
         FlowUfo.Window w = new FlowUfo.Window();
         byte[] body = new byte[100];
         // Frames 1..4 and 6, each one fragment; frame 5 (slot of frame 1) never comes
@@ -286,15 +293,32 @@ public class FlowUfoTest {
             assertNotNull(w.add(parsed(piece(seq, body, 0)), 0));
         }
         List<long[]> r = records(ack(w, 5));
-        // Slot 0 (frame 1) is 5 behind: frame 5 whole; 3 and 4 complete; 6 is arriving
-        assertEquals(3, r.size());
-        assertArrayEquals(new long[] {5, FlowUfo.STATUS_WHOLE, 16}, Arrays.copyOf(r.get(0), 3));
-        assertArrayEquals(new long[] {3, FlowUfo.STATUS_COMPLETE, 20}, Arrays.copyOf(r.get(1), 3));
-        assertArrayEquals(new long[] {4, FlowUfo.STATUS_COMPLETE, 20}, Arrays.copyOf(r.get(2), 3));
-        assertEquals(1, w.wholeRequests);
+        // Slot 0 (frame 1) is 5 behind: no record (as in turbodrone); 3 and 4 complete; 6 (in
+        // the slot of 2) is arriving
+        assertEquals(2, r.size());
+        assertArrayEquals(new long[] {3, FlowUfo.STATUS_COMPLETE, 20}, Arrays.copyOf(r.get(0), 3));
+        assertArrayEquals(new long[] {4, FlowUfo.STATUS_COMPLETE, 20}, Arrays.copyOf(r.get(1), 3));
+        assertEquals(1, w.lagging);
+        for (long[] x : r) assertFalse("no seq+4 request", x[1] == FlowUfo.STATUS_WHOLE);
         // Frame 9 takes slot 0: frame 1 was complete, frame 5 never came
         w.add(parsed(piece(9, body, 0)), 10);
         assertEquals(1, w.lost);
+    }
+
+    @Test
+    public void incompleteLateSlotDoesNotHoldUpTheNextRequest() {
+        FlowUfo.Window w = new FlowUfo.Window();
+        byte[] body = new byte[2000];
+        byte[] one = Arrays.copyOf(body, 10);
+        // Frame 1 misses its second fragment; frames 2, 3, 4 and 6 complete
+        w.add(parsed(piece(1, body, 0)), 0);
+        for (long seq : new long[] {2, 3, 4, 6}) assertNotNull(w.add(parsed(piece(seq, one, 0)), 0));
+        List<long[]> r = records(ack(w, 100));
+        // Quiet: 6, 3, 4 complete, then frame 7 asked for; frame 1 (5 behind) left out
+        long[] last = r.get(r.size() - 1);
+        assertArrayEquals(new long[] {7, FlowUfo.STATUS_WHOLE, 16}, Arrays.copyOf(last, 3));
+        for (long[] x : r) assertFalse("frame 1 left out", x[0] == 1);
+        assertEquals(1, w.nextRequests);
     }
 
     @Test
@@ -876,5 +900,256 @@ public class FlowUfoTest {
         assertTrue(NetInfo.sameSubnet(InetAddress.getByName("192.168.1.2"), 16, toy));
         assertFalse(NetInfo.sameSubnet(InetAddress.getByName("fe80::1"), 64, toy));
         assertFalse(NetInfo.sameSubnet(phone, 33, toy));
+    }
+
+    // ====================== Options, ports, hints (#187, after turbodrone) ======================
+
+    @Test
+    public void urlOptions() throws IOException {
+        FlowUfo.Url u = FlowUfo.Url.parse("flowufo://");
+        assertArrayEquals(bytes("32 4B 14 2D"), u.qpara);
+        assertEquals(FlowUfo.DQT_ZIGZAG, u.dqt);
+        u = FlowUfo.Url.parse("flowufo://192.168.169.1:8800?qpara=19322348&dqt=raster");
+        assertEquals("192.168.169.1", u.host);
+        assertEquals(8800, u.port);
+        assertArrayEquals(bytes("19 32 23 48"), u.qpara);
+        assertEquals(FlowUfo.DQT_RASTER, u.dqt);
+        u = FlowUfo.Url.parse("flowufo://192.168.169.1:8800?q=19322348");
+        assertArrayEquals(bytes("19 32 23 48"), u.qpara);
+        u = FlowUfo.Url.parse("flowufo://?DQT=Q50&other=1#x");
+        assertEquals(FlowUfo.DEFAULT_HOST, u.host);
+        assertEquals(FlowUfo.DQT_Q50, u.dqt);
+        u = FlowUfo.Url.parse("flowufo://10.0.0.5/?dqt=zigzag&qpara=aabbccdd");
+        assertEquals("10.0.0.5", u.host);
+        assertEquals(FlowUfo.DQT_ZIGZAG, u.dqt);
+        assertArrayEquals(bytes("AA BB CC DD"), u.qpara);
+        for (String bad : new String[] {"flowufo://?qpara=1932234", "flowufo://?qpara=1932234G",
+                "flowufo://?qpara=193223480", "flowufo://?dqt=natural", "flowufo://?dqt="}) {
+            try {
+                FlowUfo.Url.parse(bad);
+                fail(bad);
+            } catch (IOException expected) {
+                // ok
+            }
+        }
+    }
+
+    @Test
+    public void portsProbed() throws IOException {
+        // 8800, given or not, probes the BL618 port 8801 too; any other port only itself
+        assertArrayEquals(new int[] {8800, 8801}, FlowUfo.Url.parse("flowufo://").ports());
+        assertArrayEquals(new int[] {8800, 8801},
+                FlowUfo.Url.parse("flowufo://192.168.169.1:8800").ports());
+        assertArrayEquals(new int[] {8801},
+                FlowUfo.Url.parse("flowufo://192.168.169.1:8801").ports());
+        assertArrayEquals(new int[] {9000}, FlowUfo.Url.parse("flowufo://:9000").ports());
+        assertEquals("192.168.169.1:8800 and :8801", FlowUfo.Url.parse("flowufo://").probed());
+        assertEquals("192.168.169.1:8801", FlowUfo.Url.parse("flowufo://:8801").probed());
+    }
+
+    @Test
+    public void bl618Timing() {
+        assertEquals(100, FlowUfo.Client.probeInterval(8800));
+        assertEquals(200, FlowUfo.Client.probeInterval(8801));
+        assertEquals(25, FlowUfo.Client.ackInterval(8800));
+        assertEquals(50, FlowUfo.Client.ackInterval(8801));
+        assertEquals(25, FlowUfo.Client.ackInterval(9000));
+        assertFalse(FlowUfo.Client.ackNeedsRecord(8800));
+        assertTrue(FlowUfo.Client.ackNeedsRecord(8801));
+        assertEquals("BL608", FlowUfo.Client.engine(8800));
+        assertEquals("BL618", FlowUfo.Client.engine(8801));
+        assertEquals("port 9000", FlowUfo.Client.engine(9000));
+    }
+
+    @Test
+    public void ackCarriesTheQualityParametersAndNoCommand() throws IOException {
+        FlowUfo.Window w = new FlowUfo.Window();
+        byte[] a = ack(w, 0);
+        assertEquals(FlowUfo.ACK_HEADER, a.length);
+        assertArrayEquals(bytes("32 4B 14 2D 00 00"), Arrays.copyOfRange(a, 0x52, 0x58));
+        // Command counter, command length and the command itself: all zero
+        for (int i = 0x0C; i < 0x52; i++) assertEquals("byte " + i, 0, a[i]);
+        w.qpara = FlowUfo.Url.parse("flowufo://?qpara=19322348").qpara;
+        assertArrayEquals(bytes("19 32 23 48 00 00"), Arrays.copyOfRange(ack(w, 0), 0x52, 0x58));
+    }
+
+    @Test
+    public void dqtOrders() {
+        byte[] raster = FlowUfo.dqtTables(FlowUfo.DQT_RASTER, 75);
+        // Annex K row by row: luma 16 11 10 16 24 40 51 61 / 12 12 14 19 26 58 60 55
+        assertArrayEquals(bytes("10 0B 0A 10 18 28 33 3D  0C 0C 0E 13 1A 3A 3C 37"),
+                Arrays.copyOf(raster, 16));
+        // Chroma 17 18 24 47 99 99 99 99 / 18 21 26 66 99 99 99 99
+        assertArrayEquals(bytes("11 12 18 2F 63 63 63 63  12 15 1A 42 63 63 63 63"),
+                Arrays.copyOfRange(raster, 64, 80));
+        // Unscaled whatever the quality byte says
+        assertArrayEquals(raster, FlowUfo.dqtTables(FlowUfo.DQT_RASTER, 20));
+        byte[] zz = JpegAssembler.ijgTables(50);
+        for (int k = 0; k < 64; k++) {
+            assertEquals(zz[k], raster[NATURAL[k]]);
+            assertEquals(zz[64 + k], raster[64 + NATURAL[k]]);
+        }
+        assertArrayEquals(zz, FlowUfo.dqtTables(FlowUfo.DQT_Q50, 90));
+        assertArrayEquals(JpegAssembler.ijgTables(90), FlowUfo.dqtTables(FlowUfo.DQT_ZIGZAG, 90));
+        assertArrayEquals(zz, FlowUfo.dqtTables(FlowUfo.DQT_ZIGZAG, 0));
+        // In the header: luma after "FF DB 00 43 00", chroma after "FF DB 00 43 01"
+        byte[] h = FlowUfo.jpegHeader(75, 640, 360, FlowUfo.DQT_RASTER);
+        assertEquals(605, h.length);
+        assertArrayEquals(Arrays.copyOf(raster, 64), Arrays.copyOfRange(h, 7, 71));
+        assertArrayEquals(Arrays.copyOfRange(raster, 64, 128), Arrays.copyOfRange(h, 76, 140));
+        assertArrayEquals(FlowUfo.jpegHeader(75, 640, 360),
+                FlowUfo.jpegHeader(75, 640, 360, FlowUfo.DQT_ZIGZAG));
+        assertEquals("zigzag Q75", FlowUfo.dqtLabel(FlowUfo.DQT_ZIGZAG, 75));
+        assertEquals("zigzag Q50", FlowUfo.dqtLabel(FlowUfo.DQT_ZIGZAG, 0));
+        assertEquals("raster (unscaled)", FlowUfo.dqtLabel(FlowUfo.DQT_RASTER, 75));
+        assertEquals("q50 (unscaled)", FlowUfo.dqtLabel(FlowUfo.DQT_Q50, 75));
+    }
+
+    private static InetAddress ip(String s) throws IOException {
+        return InetAddress.getByName(s);
+    }
+
+    @Test
+    public void subnetHints() throws Exception {
+        String ky = "This network looks like a KY UFO RTSP toy: try rtsp://192.168.1.1:7070/webcam";
+        // #187: the K200 slot pointed at the phone itself, on a 192.168.1.x network
+        List<InetAddress> on1 = Collections.singletonList(ip("192.168.1.100"));
+        assertEquals("192.168.1.100 is this phone; the toy is usually 192.168.1.1. " + ky,
+                FlowUfo.subnetHint(ip("192.168.1.100"), on1));
+        assertEquals(ky, FlowUfo.subnetHint(ip("192.168.169.1"), on1));
+        assertNull(FlowUfo.subnetHint(ip("192.168.1.1"), on1));
+        assertNull(FlowUfo.subnetHint(ip("10.0.0.5"), on1));
+        List<InetAddress> on169 = Collections.singletonList(ip("192.168.169.2"));
+        assertNull(FlowUfo.subnetHint(ip("192.168.169.1"), on169));
+        assertEquals("192.168.169.2 is this phone; the toy is usually 192.168.169.1",
+                FlowUfo.subnetHint(ip("192.168.169.2"), on169));
+        assertEquals("This phone is on 192.168.169.x: the toy is usually flowufo://192.168.169.1",
+                FlowUfo.subnetHint(ip("192.168.1.1"), on169));
+        assertEquals("Toys on 192.168.80.x (HF_ Wi-Fi) use another protocol, not supported yet",
+                FlowUfo.subnetHint(ip("192.168.169.1"),
+                        Collections.singletonList(ip("192.168.80.3"))));
+        // On both networks: no guess
+        assertNull(FlowUfo.subnetHint(ip("192.168.169.1"),
+                Arrays.asList(ip("192.168.1.5"), ip("192.168.169.2"))));
+        assertNull(FlowUfo.subnetHint(ip("192.168.169.1"), Collections.emptyList()));
+        assertNull(FlowUfo.subnetHint(ip("::1"), on1));
+    }
+
+    @Test
+    public void hintInTheStatusText() throws Exception {
+        try (DatagramSocket drone = new DatagramSocket(0, InetAddress.getLoopbackAddress())) {
+            FlowUfo.Url u = FlowUfo.Url.parse("flowufo://127.0.0.1:" + drone.getLocalPort());
+            FlowUfo.Client client = new FlowUfo.Client("test", u, null);
+            client.localForHint = Collections.singletonList(InetAddress.getByName("127.0.0.1"));
+            List<String> states = Collections.synchronizedList(new ArrayList<>());
+            CountDownLatch first = new CountDownLatch(1);
+            Thread t = new Thread(() -> {
+                try {
+                    client.run(() -> true, new FlowUfo.Listener() {
+                        @Override
+                        public void onState(boolean receiving, String text) {
+                            states.add(text);
+                            first.countDown();
+                        }
+
+                        @Override
+                        public void onFrame(byte[] buf, int length) {}
+                    });
+                } catch (IOException ignored) {
+                    // closed
+                }
+            });
+            t.start();
+            try {
+                assertTrue(first.await(3, TimeUnit.SECONDS));
+                assertEquals("Waiting for the toy: probing 127.0.0.1:" + drone.getLocalPort()
+                        + ". 127.0.0.1 is this phone; the toy is usually 127.0.0.1", states.get(0));
+                assertNotNull(client.stats().get("hint"));
+            } finally {
+                client.close();
+                t.join(2000);
+            }
+        }
+    }
+
+    /** The next probe arriving at {@code drone}; returns where it came from. */
+    private static SocketAddress probeAt(DatagramSocket drone) throws IOException {
+        byte[] buf = new byte[64];
+        long deadline = System.currentTimeMillis() + 3000;
+        while (System.currentTimeMillis() < deadline) {
+            DatagramPacket p = new DatagramPacket(buf, buf.length);
+            try {
+                drone.receive(p);
+            } catch (SocketTimeoutException e) {
+                continue;
+            }
+            if (Arrays.equals(FlowUfo.PROBE, Arrays.copyOf(buf, p.getLength()))) {
+                return p.getSocketAddress();
+            }
+        }
+        throw new AssertionError("no probe");
+    }
+
+    @Test
+    public void probesBothPortsAndLocksOntoTheOneThatAnswers() throws Exception {
+        InetAddress lo = InetAddress.getLoopbackAddress();
+        try (DatagramSocket a = new DatagramSocket(0, lo);
+             DatagramSocket b = new DatagramSocket(0, lo);
+             DatagramSocket from1234 = new DatagramSocket(0, lo)) {
+            a.setSoTimeout(200);
+            b.setSoTimeout(200);
+            // a stands for 8800, b for 8801
+            FlowUfo.Url u = FlowUfo.Url.parse("flowufo://127.0.0.1:" + a.getLocalPort());
+            u.alternatePort = b.getLocalPort();
+            assertArrayEquals(new int[] {a.getLocalPort(), b.getLocalPort()}, u.ports());
+            FlowUfo.Client client = new FlowUfo.Client("test", u, null);
+            client.localForHint = Collections.emptyList();
+            Thread t = new Thread(() -> {
+                try {
+                    client.run(() -> true, new FlowUfo.Listener() {
+                        @Override
+                        public void onState(boolean receiving, String text) {}
+
+                        @Override
+                        public void onFrame(byte[] buf, int length) {}
+                    });
+                } catch (IOException ignored) {
+                    // closed
+                }
+            });
+            t.start();
+            try {
+                // Both ports are probed, each from a socket of its own
+                SocketAddress phoneA = probeAt(a);
+                SocketAddress phoneB = probeAt(b);
+                assertFalse(phoneA.equals(phoneB));
+                assertEquals(-1, client.lockedPort());
+                // The engine behind b answers, from another source port (the drone's 1234)
+                byte[] f = piece(1, new byte[2000], 0);
+                from1234.send(new DatagramPacket(f, f.length, phoneB));
+                // Acknowledgements go to b, to the port that was probed
+                nextAck(b, System.currentTimeMillis() + 3000);
+                assertEquals(b.getLocalPort(), client.lockedPort());
+                assertEquals(b.getLocalPort(), client.stats().get("port"));
+                // a gets nothing any more once what was sent before the lock is read
+                a.setSoTimeout(50);
+                try {
+                    while (true) a.receive(new DatagramPacket(new byte[64], 64));
+                } catch (SocketTimeoutException expected) {
+                    // drained
+                }
+                a.setSoTimeout(400);
+                try {
+                    a.receive(new DatagramPacket(new byte[64], 64));
+                    fail("probe to the other port after the lock");
+                } catch (SocketTimeoutException expected) {
+                    // ok
+                }
+            } finally {
+                client.close();
+                t.join(2000);
+            }
+            assertFalse(t.isAlive());
+        }
     }
 }

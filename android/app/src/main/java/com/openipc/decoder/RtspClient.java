@@ -89,6 +89,8 @@ class RtspClient implements RtspSession.Callback {
     long getBitrateMarkNs() { return session.getBitrateMarkNs(); }
     /** FLOW-UFO statistics while a flowufo:// slot plays (#187), else null. */
     java.util.Map<String, Object> flowUfoStats() { return session.flowUfoStats(); }
+    /** The cooingdv heartbeat once this slot used one (#187), else null. */
+    java.util.Map<String, Object> heartbeatStats() { return session.heartbeatStats(); }
 
     void start() {
         nalAssembler.reset();
