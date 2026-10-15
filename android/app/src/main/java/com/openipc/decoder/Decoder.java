@@ -8,6 +8,7 @@
 package com.openipc.decoder;
 
 import android.annotation.SuppressLint;
+import android.annotation.TargetApi;
 import android.app.Activity;
 
 import android.content.ActivityNotFoundException;
@@ -18,6 +19,7 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.graphics.Insets;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -38,6 +40,7 @@ import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -153,6 +156,10 @@ public class Decoder extends Activity
     // Pinch-to-zoom
     private ScaleGestureDetector mScaleDetector;
     private GestureDetector mGestureDetector;
+    // A swipe from the screen edge or a drag is no tap that opens the menu (#213)
+    private TapGuard tapGuard;
+    /** The system's gesture insets (left, top, right, bottom), Android 10+. */
+    private final int[] gestureInsets = new int[4];
     private float mZoomScale = 1.0f;
     private float mPanX;
     private float mPanY;
@@ -270,6 +277,7 @@ public class Decoder extends Activity
             }
         });
 
+        tapGuard = new TapGuard(ViewConfiguration.get(this).getScaledTouchSlop());
         // Pinch-to-zoom
         mScaleDetector = new ScaleGestureDetector(this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
             @Override public boolean onScale(ScaleGestureDetector d) {
@@ -297,6 +305,7 @@ public class Decoder extends Activity
             }
             @Override public boolean onDoubleTap(MotionEvent e) { resetZoom(); return true; }
             @Override public boolean onSingleTapConfirmed(MotionEvent e) {
+                if (!tapGuard.wasTap()) return true;
                 menuManager.showMenu(menuAnchor, quadEnabled, mActive, mVersion,
                         BuildConfig.GIT_HASH, mHosts);
                 return true;
@@ -324,14 +333,18 @@ public class Decoder extends Activity
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Bars that stay shown while the video has the focus (not the transient ones after
-            // a swipe, which the app does not see) go away again after a moment (#202)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             View decor = getWindow().getDecorView();
             decor.setOnApplyWindowInsetsListener((v, insets) -> {
-                v.removeCallbacks(hideBarsRunnable);
-                if (hasWindowFocus() && insets.isVisible(WindowInsets.Type.systemBars())) {
-                    v.postDelayed(hideBarsRunnable, BARS_REHIDE_MS);
+                saveGestureInsets(insets);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    // Bars that stay shown while the video has the focus (not the transient
+                    // ones after a swipe, which the app does not see) go away again after a
+                    // moment (#202)
+                    v.removeCallbacks(hideBarsRunnable);
+                    if (hasWindowFocus() && insets.isVisible(WindowInsets.Type.systemBars())) {
+                        v.postDelayed(hideBarsRunnable, BARS_REHIDE_MS);
+                    }
                 }
                 return v.onApplyWindowInsets(insets);
             });
@@ -869,9 +882,11 @@ public class Decoder extends Activity
             for (int col = 0; col < size; col++) {
                 int idx = size == 1 ? U_CELL : row * size + col;
                 quadViews[idx] = new SurfaceView(this);
-                quadViews[idx].setOnClickListener(cv ->
-                        menuManager.showMenu(findViewById(R.id.decoder), quadEnabled, mActive, mVersion,
-                                BuildConfig.GIT_HASH, mHosts));
+                quadViews[idx].setOnClickListener(cv -> {
+                    if (!touchTapOrKey(cv)) return;
+                    menuManager.showMenu(findViewById(R.id.decoder), quadEnabled, mActive, mVersion,
+                            BuildConfig.GIT_HASH, mHosts);
+                });
                 // Each cell is a FrameLayout so overlays can be stacked on the video
                 FrameLayout cell = new FrameLayout(this);
                 cell.addView(quadViews[idx], new FrameLayout.LayoutParams(
@@ -932,8 +947,11 @@ public class Decoder extends Activity
         hint.setPadding(dp(12), dp(12), dp(12), dp(12));
         hint.setBackgroundColor(Color.BLACK);
         // Like the camera cells and the video view: a tap opens the menu
-        hint.setOnClickListener(v -> menuManager.showMenu(findViewById(R.id.decoder),
-                quadEnabled, mActive, mVersion, BuildConfig.GIT_HASH, mHosts));
+        hint.setOnClickListener(v -> {
+            if (!touchTapOrKey(v)) return;
+            menuManager.showMenu(findViewById(R.id.decoder),
+                    quadEnabled, mActive, mVersion, BuildConfig.GIT_HASH, mHosts);
+        });
         return hint;
     }
 
@@ -2128,6 +2146,58 @@ public class Decoder extends Activity
         jpegRenderer.release();
         mVideoSurface = next;
         videoDecoder.setSurface(next);
+    }
+
+    /** The system's gesture insets, where a swipe is the system's and no tap (#213). */
+    @TargetApi(Build.VERSION_CODES.Q)
+    @SuppressWarnings("deprecation")
+    private void saveGestureInsets(WindowInsets insets) {
+        Insets g = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                ? insets.getInsets(WindowInsets.Type.systemGestures())
+                : insets.getSystemGestureInsets();
+        gestureInsets[0] = g.left;
+        gestureInsets[1] = g.top;
+        gestureInsets[2] = g.right;
+        gestureInsets[3] = g.bottom;
+    }
+
+    /**
+     * Every touch of the window passes here before the views get it: TapGuard follows the
+     * sequence, so the menu opens on a real tap only, not on a swipe from the edge that shows
+     * the bars (#213) or a drag. Keys (remote, D-pad) do not come here.
+     */
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        if (tapGuard == null) return super.dispatchTouchEvent(ev);
+        switch (ev.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN: {
+                View decor = getWindow().getDecorView();
+                tapGuard.down(ev.getX(), ev.getY(), decor.getWidth(), decor.getHeight(),
+                        TapGuard.edgeZone(gestureInsets, mDensity));
+                break;
+            }
+            case MotionEvent.ACTION_MOVE:
+            case MotionEvent.ACTION_UP:
+                tapGuard.moveTo(ev.getX(), ev.getY());
+                break;
+            case MotionEvent.ACTION_POINTER_DOWN:
+                tapGuard.secondFinger();
+                break;
+            case MotionEvent.ACTION_CANCEL:
+                tapGuard.cancel();
+                break;
+            default:
+                break;
+        }
+        return super.dispatchTouchEvent(ev);
+    }
+
+    /**
+     * A click on a cell or the U hint opens the menu: from a key (remote, D-pad) always, from
+     * a touch only when it was a real tap (#213).
+     */
+    private boolean touchTapOrKey(View v) {
+        return !v.isInTouchMode() || tapGuard.wasTap();
     }
 
     private int dp(float dp) {
