@@ -48,12 +48,6 @@ final class DecodePlanner {
      */
     static final long FAILED_RETRY_MS = 60 * 60_000;
     /**
-     * Losses below a proven load count as a transient (#189): demoted, but the capacity and the
-     * failed load stay at least at the proven load. A second such demotion within this time
-     * means the proven load is wrong after all: it is handled as any other failure.
-     */
-    static final long TRANSIENT_WINDOW_MS = 10 * 60_000;
-    /**
      * After the grid starts, every decoder starts at once and all of them lose frames for a
      * second or two: no decision on losses that early (#148). Set by the app; 0 in tests.
      */
@@ -121,8 +115,13 @@ final class DecodePlanner {
     private long lastLossMs = -1;
     /** The last demotion or failed-load retry: the next retry is timed from it (#189). */
     private long lastFailMs = -1;
-    /** The last demotion counted as a transient, or -1 (#189). */
-    private long lastTransientMs = -1;
+    /**
+     * Losses below a proven load count as a transient once (#189): demoted, but the capacity
+     * and the failed load stay at least at the proven load. The next such demotion is handled
+     * as any other failure (the proven load was wrong after all), unless a load at least as
+     * high has played PROBE_QUIET_MS without losses again in between (Qodo on #190).
+     */
+    private boolean transientUsed;
 
     /** No loss-based decision for this long after the first step (#148). */
     void setWarmup(long ms) { warmupMs = ms; }
@@ -200,16 +199,20 @@ final class DecodePlanner {
             lossyTimes.addLast(nowMs);
             quietSinceMs = nowMs;
             lastLossMs = nowMs;
-        } else if (nowMs - quietSinceMs >= PROBE_QUIET_MS && load > proven) {
-            // A load that played without losses long enough is within this device's means
-            proven = load;
-            probeWaitMs = PROBE_QUIET_MS;
-            if (load > capacity) {
-                capacity = load;
-                learnt = true;
+        } else if (nowMs - quietSinceMs >= PROBE_QUIET_MS && load >= proven) {
+            // Proven again: a later transient is forgiven once more (#189)
+            transientUsed = false;
+            if (load > proven) {
+                // A load that played without losses long enough is within this device's means
+                proven = load;
+                probeWaitMs = PROBE_QUIET_MS;
+                if (load > capacity) {
+                    capacity = load;
+                    learnt = true;
+                }
+                // A failure at about this load was a fluke: do not hold promotions back by it
+                if (load >= failedLoad * FAILED_MARGIN) failedLoad = Long.MAX_VALUE;
             }
-            // A failure at about this load was a fluke: do not hold promotions back by it
-            if (load >= failedLoad * FAILED_MARGIN) failedLoad = Long.MAX_VALUE;
         }
         if (lastChangeMs >= 0 && nowMs - lastChangeMs < SETTLE_MS) return Decision.NONE;
 
@@ -220,11 +223,9 @@ final class DecodePlanner {
                 if (c.full && !c.paused && c.playing && c.known) {
                     lastFailMs = nowMs;
                     // Below a load that played quietly: a transient (other apps, a stalled
-                    // stream), unless one came shortly before; only the cell goes back (#189)
-                    boolean repeated = lastTransientMs >= 0
-                            && nowMs - lastTransientMs < TRANSIENT_WINDOW_MS;
-                    if (load < proven && !repeated) {
-                        lastTransientMs = nowMs;
+                    // stream), the first time; only the cell goes back (#189)
+                    if (load < proven && !transientUsed) {
+                        transientUsed = true;
                         capacity = Math.max(minCapacity, Math.max(proven, Math.min(capacity,
                                 Math.round(load * 0.9))));
                         learnt = true;

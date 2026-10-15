@@ -462,14 +462,38 @@ public class DecodePlannerTest {
         assertEquals(DecodePlanner.Action.DEMOTE, until(p, cells, t, 10_000).action);
         cells.get(0).lossy = false;
         assertEquals(DecodePlanner.Action.PROMOTE, until(p, cells, t, 10_000).action);
-        // The same losses again a few minutes later: the proven load was wrong after all
-        for (long end = t[0] + 3 * 60_000; t[0] < end; t[0] += 1000) apply(cells, p.step(cells, t[0]));
+        // The same losses again, even much later (Qodo on #190): the proven load was wrong
+        for (long end = t[0] + 15 * 60_000; t[0] < end; t[0] += 1000) apply(cells, p.step(cells, t[0]));
         assertEquals(3, full(cells));
         cells.get(0).lossy = true;
         DecodePlanner.Decision d = until(p, cells, t, 10_000);
         assertEquals(DecodePlanner.Action.DEMOTE, d.action);
         assertEquals(3 * each, p.failedLoad());
         assertEquals(floor, p.capacity());
+    }
+
+    @Test
+    public void aTransientIsForgivenAgainOnceTheProvenLoadPlaysQuietlyAgain() {
+        long floor = DecodePlanner.fullLoad(1920, 1080, 30);
+        DecodePlanner p = new DecodePlanner(464_979, true, 446_770, floor);
+        long[] t = {0};
+        List<DecodePlanner.Cell> cells = provenAtThree(p, 312_338 / 3, t);
+        for (DecodePlanner.Cell c : cells) c.fullLoad = 239_719 / 3;
+        cells.get(0).lossy = true;
+        assertEquals(DecodePlanner.Action.DEMOTE, until(p, cells, t, 10_000).action);
+        cells.get(0).lossy = false;
+        assertEquals(DecodePlanner.Action.PROMOTE, until(p, cells, t, 10_000).action);
+        // The proven load plays without losses again
+        for (DecodePlanner.Cell c : cells) c.fullLoad = 312_338 / 3;
+        for (long end = t[0] + DecodePlanner.PROBE_QUIET_MS + 1000; t[0] < end; t[0] += 1000) {
+            apply(cells, p.step(cells, t[0]));
+        }
+        // Another transient: still not a failure
+        for (DecodePlanner.Cell c : cells) c.fullLoad = 239_719 / 3;
+        cells.get(0).lossy = true;
+        assertEquals(DecodePlanner.Action.DEMOTE, until(p, cells, t, 10_000).action);
+        assertTrue(p.capacity() >= 312_336);
+        assertEquals(446_770, p.failedLoad());
     }
 
     @Test
