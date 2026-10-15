@@ -30,8 +30,8 @@ final class NetInfo {
             "rmnet", "rev_rmnet", "ccmni", "v4-", "clat", "seth", "pdp", "wwan"};
 
     /**
-     * IPv4 addresses of every interface that is up, the ones worth showing to a user who has
-     * to type one in (#87, #96): Wi-Fi first, then Ethernet, then the rest (#203).
+     * The debug page's addresses (#87, #96): private IPv4 of every interface that is up and
+     * not mobile data, Wi-Fi first, then Ethernet, then the rest (#203).
      */
     static List<String> addresses() {
         Map<String, List<InetAddress>> byInterface = new LinkedHashMap<>();
@@ -44,6 +44,31 @@ final class NetInfo {
             Log.w(TAG, "No local address: " + e.getMessage());
         }
         return lanAddresses(byInterface);
+    }
+
+    /**
+     * Every IPv4 address a pushed RTP stream can arrive on (the UDP receiver listens on all of
+     * them), mobile data and public ones too, for the U view's hint (#68, Qodo on #206):
+     * no loopback, link-local or wildcard address.
+     */
+    static List<String> udpAddresses() {
+        List<String> out = new ArrayList<>();
+        try {
+            for (NetworkInterface nif : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                if (!nif.isUp()) continue;
+                for (InetAddress a : Collections.list(nif.getInetAddresses())) {
+                    if (isUsable(a) && !out.contains(a.getHostAddress())) out.add(a.getHostAddress());
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "No local address: " + e.getMessage());
+        }
+        return out;
+    }
+
+    static boolean isUsable(InetAddress a) {
+        return a instanceof Inet4Address && !a.isLoopbackAddress() && !a.isLinkLocalAddress()
+                && !a.isAnyLocalAddress();
     }
 
     /**

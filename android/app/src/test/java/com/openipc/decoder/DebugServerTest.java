@@ -64,6 +64,18 @@ public class DebugServerTest {
         assertFalse(NetInfo.isShown(ip("fd12::1")));
     }
 
+    @Test
+    public void udpAddressesKeepPublicOnes() throws Exception {
+        // The U view's hint: a pushed stream may come over any IPv4 address (Qodo on #206)
+        assertTrue(NetInfo.isUsable(ip("192.168.1.20")));
+        assertTrue(NetInfo.isUsable(ip("8.8.8.8")));
+        assertTrue(NetInfo.isUsable(ip("100.64.1.2")));
+        assertFalse(NetInfo.isUsable(ip("127.0.0.1")));
+        assertFalse(NetInfo.isUsable(ip("169.254.1.1")));
+        assertFalse(NetInfo.isUsable(ip("0.0.0.0")));
+        assertFalse(NetInfo.isUsable(ip("fd12::1")));
+    }
+
     private static Map<String, List<InetAddress>> interfaces(String... nameAndAddresses)
             throws Exception {
         Map<String, List<InetAddress>> m = new LinkedHashMap<>();
