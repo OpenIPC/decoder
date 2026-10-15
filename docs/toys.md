@@ -5,6 +5,7 @@
 - [FLOW-UFO](#flow-ufo)
 - [An unknown toy](#an-unknown-toy)
 - [What to send in a report](#what-to-send-in-a-report)
+- [Tested toys](#tested-toys)
 
 ## How such toys stream
 
@@ -79,3 +80,19 @@ Open an [issue](https://github.com/OpenIPC/decoder/issues) (one per toy model) w
 6. A **traffic capture** while the vendor app shows video: for example with [PCAPdroid](https://github.com/emanuele-f/PCAPdroid) on the phone (no root needed), filtered to the vendor app, saved as a `.pcap` file. A minute is enough. This shows what the toy expects and sends.
 
 Do not send the vendor app itself or parts of it. The capture contains only the traffic between the phone and the toy; it has no passwords of yours if only the vendor app is captured.
+
+## Tested toys
+
+<p align="center">
+  <img src="img/toys_187.jpg" alt="Three toy drones tested in #187: a grey D16 on its box, an orange drone on the Drone YL3 box, and a grey drone with black guards" width="640">
+</p>
+
+The drones a tester checked in [#187](https://github.com/OpenIPC/decoder/issues/187) (photo by the tester):
+
+| Toy | Wi‑Fi | Family | URL | Status |
+|---|---|---|---|---|
+| D16 (grey, on its box) | `FLOW_…` | FLOW-UFO, WIFI UAV app | `flowufo://192.168.169.1:8800` | video works |
+| K200 | `FLY-UFO-…` | KY UFO, RTSP | `rtsp://192.168.1.1:7070/webcam` | video works; the picture comes sideways ([#200](https://github.com/OpenIPC/decoder/issues/200)) |
+| Drone YL3 (box with a screen remote) | `HF_…` | Jieli AC79, DVRunning 2 app | `jieli://192.168.80.1` (test build) | in testing |
+
+Which of the orange and the grey drone with black guards is the K200 and which is the YL3 will be added when the tester confirms.
