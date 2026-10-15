@@ -71,6 +71,12 @@ class RtspSession {
          * Returns true if it was usable; only those feed the watchdog.
          */
         default boolean onJpegFrame(byte[] buf, int offset, int length) { return false; }
+
+        /**
+         * What a flowufo:// slot waits for while it has no picture (#187), e.g. "Waiting for
+         * the toy: probing 192.168.169.1:8800"; shown instead of the plain status.
+         */
+        default void onDetail(String text) {}
     }
 
     private final String tag;
@@ -99,6 +105,8 @@ class RtspSession {
     private RtpListener listener;
     /** A udp:// slot is listening: silence is reported, never "fixed" by a rebind. */
     private volatile boolean listening;
+    /** Client of a flowufo:// slot (#187), else null: it probes on its own when silent. */
+    private volatile FlowUfo.Client ufo;
     private Thread networkThread;
     private Thread watchdogThread;
 
@@ -201,6 +209,7 @@ class RtspSession {
      */
     private void closeSocketLocked() {
         if (listener != null) listener.close();
+        if (ufo != null) ufo.close();
         if (udp != null) {
             udp.close();
             if (udpPlaying) return;
@@ -273,7 +282,7 @@ class RtspSession {
                     }
                 }
             }
-            if (active && !listening
+            if (active && !listening && ufo == null
                     && System.nanoTime() / 1_000_000 - lastPacketMs > watchdogMs) {
                 Log.w(TAG, tag + ": stream is inactive, reconnecting");
                 active = false;
@@ -293,6 +302,7 @@ class RtspSession {
     private boolean connect(int gen) throws IOException {
         if (RtpListener.Url.matches(url)) return listen(gen, RtpListener.Url.parse(url));
         if (HttpMjpeg.matches(url)) return httpMjpeg(gen, HttpMjpeg.Url.parse(url));
+        if (FlowUfo.Url.matches(url)) return flowUfo(gen, FlowUfo.Url.parse(url));
         Url u = Url.parse(url);
         Socket s = new Socket();
         synchronized (lock) {
@@ -587,6 +597,76 @@ class RtspSession {
             }
         }
         throw new IOException("401 Unauthorized");
+    }
+
+    /** FLOW-UFO statistics for /stats.json while a flowufo:// slot runs (#187), else null. */
+    Map<String, Object> flowUfoStats() {
+        FlowUfo.Client c = ufo;
+        return c != null ? c.stats() : null;
+    }
+
+    /**
+     * A flowufo:// slot (#187): the toy drone's own protocol over UDP, JPEG frames to
+     * onJpegFrame. The client probes until the drone answers and again after it went quiet,
+     * so the watchdog leaves it alone. Returns true once it ran, like a PLAY that succeeded.
+     */
+    private boolean flowUfo(int gen, FlowUfo.Url u) throws IOException {
+        FlowUfo.Client c = new FlowUfo.Client(tag, u, NetInfo::bindToNetworkOf);
+        synchronized (lock) {
+            if (gen != generation) return false;
+            ufo = c;
+            keepalive = null;
+            lastPacketMs = System.nanoTime() / 1_000_000;
+            streamBytes = 0;
+            bitrateMarkNs = System.nanoTime();
+            active = true;
+        }
+        try {
+            Sdp sdp = new Sdp();
+            sdp.videoJpeg = true;
+            sdp.videoPt = Sdp.PT_JPEG;
+            callback.onSdp(sdp);
+            final boolean[] first = {true};
+            final boolean[] started = {false};
+            c.run(() -> active && gen == generation, new FlowUfo.Listener() {
+                @Override
+                public void onState(boolean receiving, String text) {
+                    if (gen != generation) return;
+                    if (receiving) {
+                        inUse = "FLOW-UFO UDP";
+                    } else {
+                        inUse = null;
+                        // The toy went quiet: say so, the next frame reports "connected" again
+                        status(gen, started[0] ? "disconnected" : "buffering");
+                        started[0] = true;
+                        first[0] = true;
+                    }
+                    callback.onDetail(text);
+                }
+
+                @Override
+                public void onFrame(byte[] buf, int length) {
+                    if (gen != generation) return;
+                    streamBytes += length;
+                    if (callback.onJpegFrame(buf, 0, length)) {
+                        lastPacketMs = System.nanoTime() / 1_000_000;
+                        if (first[0]) {
+                            first[0] = false;
+                            status(gen, "connected");
+                        }
+                    }
+                }
+            });
+            return true;
+        } finally {
+            synchronized (lock) {
+                if (ufo == c) {
+                    ufo = null;
+                    inUse = null;
+                }
+            }
+            c.close();
+        }
     }
 
     private boolean listen(int gen, RtpListener.Url u) throws IOException {

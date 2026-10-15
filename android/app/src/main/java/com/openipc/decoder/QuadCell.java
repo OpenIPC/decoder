@@ -56,6 +56,8 @@ class QuadCell implements RtspSession.Callback {
     private volatile String state = "connecting";
     /** What keeps the cell from playing (connection error, decoder limit), or null. */
     private volatile String problem;
+    /** What a flowufo:// cell waits for (#187), shown instead of "Buffering…", or null. */
+    private volatile String detail;
     /** Why the cell was paused to relieve the decoder (#83), or null. */
     private volatile String pausedReason;
     private volatile long decoderStartedMs;
@@ -293,6 +295,11 @@ class QuadCell implements RtspSession.Callback {
     }
 
     @Override
+    public void onDetail(String text) {
+        detail = text;
+    }
+
+    @Override
     public void onFailure(String message) {
         // A decoder problem stays visible; the connection retries on its own
         String p = problem;
@@ -351,6 +358,8 @@ class QuadCell implements RtspSession.Callback {
         if (p != null) return p;
         String st = state;
         if (!"connected".equals(st)) {
+            String d = detail;
+            if (d != null) return d;
             if ("disconnected".equals(st)) return "Disconnected";
             return "buffering".equals(st) ? "Buffering…" : "Connecting…";
         }
@@ -416,6 +425,9 @@ class QuadCell implements RtspSession.Callback {
     static boolean isKeyFrameNal(int type, boolean h265) {
         return h265 ? type >= 16 && type <= 21 : type == 5;
     }
+
+    /** FLOW-UFO statistics of a flowufo:// cell (#187), else null. */
+    java.util.Map<String, Object> flowUfoStats() { return session.flowUfoStats(); }
 
     /** Transport in use, with the mode after a fallback (#112). */
     String transportLabel() { return Transport.label(session.transportInUse(), transport); }

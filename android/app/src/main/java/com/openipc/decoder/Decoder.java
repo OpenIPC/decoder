@@ -228,6 +228,7 @@ public class Decoder extends Activity
                 menuManager.updateQuality(avg);
                 menuManager.applyQualityToActive(quadEnabled, mActive);
             }
+            @Override public void onDetail(String text) { showStatusDetail(text); }
         });
         rtspClient.setAudioManager(audioManager);
         menuManager = new MenuManager(this, mDensity);
@@ -721,6 +722,18 @@ public class Decoder extends Activity
         String transport = inUse != null
                 ? Transport.label(inUse, mTransports[mActive]) + " • " : "";
         statusText.setText("Connected • " + transport + videoCodec + aCodec + bps);
+    }
+
+    /**
+     * What a flowufo:// slot waits for (#187), in place of the plain status; posted after the
+     * status it belongs to, so it wins. Not shown once the stream plays.
+     */
+    private void showStatusDetail(String text) {
+        runOnUiThread(() -> {
+            if (statusText == null || "connected".equals(singleState)) return;
+            statusText.setText(text);
+            statusText.setVisibility(View.VISIBLE);
+        });
     }
 
     private void updateStatus(String status) {
@@ -1542,6 +1555,9 @@ public class Decoder extends Activity
             // Frames shown in the last second and the playback mode of S (#153)
             single.put("out_fps", singleOutFps);
             single.put("decode", slides ? "key frames" : "full");
+            // The toy drone's protocol counters (#187)
+            Map<String, Object> ufo = rtspClient != null ? rtspClient.flowUfoStats() : null;
+            if (ufo != null) single.put("flowufo", ufo);
             m.put("single", single);
         }
         QuadCell[] cells = quadCells;
@@ -1580,6 +1596,8 @@ public class Decoder extends Activity
                             ? cell.keyLoad() : cell.fullLoad());
                     c.put("paused", cell.isPaused());
                     c.put("audio", i == quadAudio);
+                    Map<String, Object> ufo = cell.flowUfoStats();
+                    if (ufo != null) c.put("flowufo", ufo);
                 }
                 list.add(c);
             }
@@ -1647,6 +1665,7 @@ public class Decoder extends Activity
         }
         if (RtpListener.Url.matches(url)) return "UDP listen";
         if (HttpMjpeg.matches(url)) return "HTTP";
+        if (FlowUfo.Url.matches(url)) return "FLOW-UFO UDP";
         Transport.Mode m = StreamProbe.probeMode(mTransports[i]);
         return "check over " + (m == Transport.Mode.MULTICAST ? "multicast" : m.name());
     }
