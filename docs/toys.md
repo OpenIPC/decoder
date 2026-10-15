@@ -41,7 +41,7 @@ Whether a toy can be played here depends on its protocol. Toys that do offer RTS
 | Toy address | `192.168.169.1`, UDP port 8800 |
 | Slot URL | `flowufo://192.168.169.1:8800` (or `flowufo://` alone) |
 | Status | **in testing**, not in the releases: issue [#187](https://github.com/OpenIPC/decoder/issues/187), PR [#188](https://github.com/OpenIPC/decoder/pull/188) |
-| Test build | [flowufo-187-test1](https://github.com/OpenIPC/decoder/releases/tag/flowufo-187-test1) (2.10 with the FLOW-UFO transport; installs over the release and keeps the settings) |
+| Test build | [toys-187-test2](https://github.com/OpenIPC/decoder/releases/tag/toys-187-test2) (2.11 with the FLOW-UFO, Jieli and KY UFO changes; installs over the release and keeps the settings) |
 
 What the toy does, as far as is known:
 
