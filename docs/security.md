@@ -37,6 +37,7 @@ The [debug server](debug.md) on port 8085 has no password and no encryption. It 
 
 - answers only local-network clients: loopback, link-local (169.254/16, fe80::/10), the IPv4 private ranges 10/8, 172.16/12, 192.168/16, and IPv6 unique-local fc00::/7. Every other address gets `403 Forbidden: local network only`;
 - is read-only (`GET` only) and has no setting that changes the app;
+- `/report.txt` (and the report the app saves, [Save report](debug.md#save-report)) is `/stats.json` and `/log` together, redacted once more as a whole;
 - never shows a login or password: URLs, statuses and log lines are [redacted](#log-redaction), and the snapshot shows the picture and the cell texts only.
 
 Anyone on the same LAN can see the camera pictures and hosts through it. On a network you do not trust, close the app when you do not need it.
@@ -64,7 +65,7 @@ The built-in browser opens the camera's web interface with JavaScript enabled. H
 |---|---|
 | `INTERNET` | streams, WebUI, the debug server |
 | `CHANGE_WIFI_MULTICAST_STATE` | the multicast lock for multicast RTP on Wi‑Fi |
-| `WRITE_EXTERNAL_STORAGE` (Android ≤ 9), `READ_EXTERNAL_STORAGE` (≤ 12) | screenshots to `Pictures/OpenIPC` on older Android versions |
+| `WRITE_EXTERNAL_STORAGE` (Android ≤ 9), `READ_EXTERNAL_STORAGE` (≤ 12) | screenshots to `Pictures/OpenIPC` and reports to `Download/OpenIPC` on older Android versions |
 
 No location, camera, microphone or account permissions. No analytics and no Google services.
 
