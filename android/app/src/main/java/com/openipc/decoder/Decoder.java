@@ -10,6 +10,8 @@ package com.openipc.decoder;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 
+import android.content.ActivityNotFoundException;
+import android.content.ClipData;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -45,8 +47,11 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
@@ -423,8 +428,9 @@ public class Decoder extends Activity
             if (quadStats[i] == null || c == null) continue;
             quadStats[i].setVisibility(showStats ? View.VISIBLE : View.GONE);
         }
-        Toast.makeText(this, showStats ? "Debug text on" : "Debug text off",
-                Toast.LENGTH_SHORT).show();
+        // The report is on the same item (#207): said where it is seen
+        Toast.makeText(this, showStats ? "Debug text on \u00b7 hold Debug to save a report"
+                : "Debug text off", Toast.LENGTH_SHORT).show();
     }
 
     /** One line http://<address>:8085/ per device address while the debug text is on. */
@@ -1782,6 +1788,11 @@ public class Decoder extends Activity
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == REQUEST_STORAGE_FOR_REPORT) {
+            // Refused: saved all the same, in the app's own folder (#207)
+            startSavingReport();
+            return;
+        }
         if (requestCode != REQUEST_STORAGE_FOR_SCREENSHOT) return;
         if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
             takeScreenshot();
@@ -1844,6 +1855,156 @@ public class Decoder extends Activity
         }
         bitmap.recycle();
         runOnUiThread(() -> isTakingScreenshot = false);
+    }
+
+    // ====================== Save report (#207) ======================
+
+    private static final int REQUEST_STORAGE_FOR_REPORT = 2;
+    /** Shared as text when there is no file to share (Android 9 and older): Binder's limit. */
+    private static final int REPORT_SHARE_TEXT_MAX = 50_000;
+    private boolean isSavingReport;
+
+    /** Long press on Debug: the debug page's /report.txt as a file, then the Share sheet. */
+    @Override
+    public void onSaveReport() {
+        if (isSavingReport) return;
+        // Android 6-9 write to the shared Download folder: the runtime permission, like
+        // screenshots (#28); Android 10+ go through MediaStore with none
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                && Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                && checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] {android.Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                    REQUEST_STORAGE_FOR_REPORT);
+            return;
+        }
+        startSavingReport();
+    }
+
+    private void startSavingReport() {
+        if (isSavingReport) return;
+        isSavingReport = true;
+        // The state is read on the UI thread, up to a timeout: the report is made beside it
+        new Thread(this::saveReport, "report").start();
+    }
+
+    /** On the report thread. */
+    private void saveReport() {
+        Date now = new Date();
+        String name = DebugServer.reportName(now);
+        String text;
+        Uri uri = null;
+        String where;
+        try {
+            text = DebugServer.get().reportText(now);
+            byte[] data = text.getBytes(StandardCharsets.UTF_8);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                uri = writeReportToDownloads(name, data);
+                where = Environment.DIRECTORY_DOWNLOADS + "/OpenIPC/" + name;
+            } else {
+                where = writeReportFile(name, data).getAbsolutePath();
+            }
+        } catch (IOException | RuntimeException e) {
+            Log.e(TAG, "Could not save the report", e);
+            runOnUiThread(() -> {
+                isSavingReport = false;
+                Toast.makeText(this, "Failed to save the report", Toast.LENGTH_LONG).show();
+            });
+            return;
+        }
+        Log.i(TAG, "Report saved: " + where);
+        final Uri shared = uri;
+        final String report = text;
+        final String at = where;
+        runOnUiThread(() -> {
+            isSavingReport = false;
+            Toast.makeText(this, "Report saved: " + at, Toast.LENGTH_LONG).show();
+            if (!isFinishing()) shareReport(name, shared, report, at);
+        });
+    }
+
+    /** Android 10+: Download/OpenIPC through MediaStore, no permission. */
+    @android.annotation.TargetApi(Build.VERSION_CODES.Q)
+    private Uri writeReportToDownloads(String name, byte[] data) throws IOException {
+        android.content.ContentResolver resolver = getContentResolver();
+        ContentValues values = new ContentValues();
+        values.put(MediaStore.Downloads.DISPLAY_NAME, name);
+        values.put(MediaStore.Downloads.MIME_TYPE, "text/plain");
+        values.put(MediaStore.Downloads.RELATIVE_PATH,
+                Environment.DIRECTORY_DOWNLOADS + "/OpenIPC");
+        values.put(MediaStore.Downloads.IS_PENDING, 1);
+        Uri uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+        if (uri == null) throw new IOException("MediaStore did not create " + name);
+        try (OutputStream os = resolver.openOutputStream(uri)) {
+            if (os == null) throw new IOException("MediaStore gave no stream for " + name);
+            os.write(data);
+        } catch (IOException | RuntimeException e) {
+            resolver.delete(uri, null, null);
+            throw e;
+        }
+        values.clear();
+        values.put(MediaStore.Downloads.IS_PENDING, 0);
+        resolver.update(uri, values, null, null);
+        return uri;
+    }
+
+    /**
+     * Android 9 and older: Download/OpenIPC with the storage permission; without it (refused,
+     * no shared storage) the app's own folder, which needs none.
+     */
+    @SuppressWarnings("deprecation")
+    private File writeReportFile(String name, byte[] data) throws IOException {
+        File shared = new File(Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOWNLOADS), "OpenIPC");
+        try {
+            return writeFile(shared, name, data);
+        } catch (IOException | SecurityException e) {
+            Log.w(TAG, "Report: " + shared + " not writable (" + e.getMessage()
+                    + "), saving in the app's folder");
+        }
+        File own = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+        if (own == null) own = new File(getFilesDir(), "reports");
+        return writeFile(own, name, data);
+    }
+
+    private static File writeFile(File dir, String name, byte[] data) throws IOException {
+        if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("cannot create " + dir);
+        File f = new File(dir, name);
+        try (FileOutputStream os = new FileOutputStream(f)) {
+            os.write(data);
+        }
+        return f;
+    }
+
+    /**
+     * The system Share sheet, to send the report later (Telegram, mail). The file itself on
+     * Android 10+; older versions have no FileProvider here, so the text, cut to a size an
+     * intent can carry, with where the whole file is. Skipped where nothing can take it, as
+     * on most TV boxes.
+     */
+    private void shareReport(String name, Uri uri, String text, String where) {
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_SUBJECT, "OpenIPC Decoder " + name);
+        if (uri != null) {
+            send.putExtra(Intent.EXTRA_STREAM, uri);
+            send.setClipData(ClipData.newRawUri(name, uri));
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } else {
+            String body = text.length() <= REPORT_SHARE_TEXT_MAX ? text
+                    : text.substring(0, REPORT_SHARE_TEXT_MAX)
+                            + "\n... cut here; the whole report is in " + where + "\n";
+            send.putExtra(Intent.EXTRA_TEXT, body);
+        }
+        try {
+            if (getPackageManager().queryIntentActivities(send, 0).isEmpty()) {
+                Log.i(TAG, "Report: no app to share it with");
+                return;
+            }
+            startActivity(Intent.createChooser(send, "Share report"));
+        } catch (ActivityNotFoundException | SecurityException e) {
+            Log.w(TAG, "Report: cannot share it: " + e.getMessage());
+        }
     }
 
     private void updateResolution(int width, int height) {

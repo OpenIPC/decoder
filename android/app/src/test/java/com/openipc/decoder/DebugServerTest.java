@@ -15,10 +15,12 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -139,5 +141,76 @@ public class DebugServerTest {
         assertEquals("GET / HTTP/1.0", head("GET / HTTP/1.0\n\n"));
         assertNull(head(""));
         assertNull(head("\r\n\r\n"));
+    }
+
+    // ====================== Save report (#207) ======================
+
+    @Test
+    public void reportHasHeaderStatsAndLogRedacted() {
+        Map<String, Object> stats = new LinkedHashMap<>();
+        stats.put("app", "OpenIPC Decoder");
+        // A source that forgot to redact: the whole text is redacted once more
+        stats.put("url", "rtsp://root:hunter2@192.168.1.10:554/stream=0");
+        String log = "10-15 12:00:00.000  1  2 I OpenIPCDecoder: Connecting to "
+                + "rtsp://admin:s3cret@cam/stream=0?password=pw42\n"
+                + "10-15 12:00:01.000  1  2 D OpenIPCDecoder: > Authorization: Basic cm9vdDox\n";
+        String r = DebugServer.reportText(stats, log, new Date(0), 3 * 3600 + 62);
+
+        assertTrue(r, r.startsWith("OpenIPC Decoder report\n"));
+        assertTrue(r, r.contains("\nApp: OpenIPC Decoder " + BuildConfig.VERSION_NAME + " ("
+                + BuildConfig.VERSION_CODE + "), git " + BuildConfig.GIT_HASH + "\n"));
+        assertTrue(r, r.contains("\nDevice: "));
+        assertTrue(r, r.contains("\nAndroid: "));
+        assertTrue(r, r.contains("\nTime: "));
+        assertTrue(r, r.contains("\nUptime: 3h 1m 2s\n"));
+
+        int json = r.indexOf("\n== stats.json ==\n{\n  \"app\": \"OpenIPC Decoder\",\n");
+        int logAt = r.indexOf("\n== log ==\n");
+        assertTrue(r, json > 0);
+        assertTrue(r, logAt > json);
+        assertTrue(r, r.contains("192.168.1.10:554/stream=0"));
+        assertTrue(r, r.endsWith("Authorization: Basic ***\n"));
+        for (String secret : new String[] {"hunter2", "s3cret", "admin", "pw42", "cm9vdDox",
+                "root:"}) {
+            assertFalse(secret + " in\n" + r, r.contains(secret));
+        }
+    }
+
+    @Test
+    public void reportNameAndUptime() {
+        String name = DebugServer.reportName(new Date());
+        assertTrue(name, name.matches("report-\\d{8}-\\d{6}\\.txt"));
+        assertEquals("0s", DebugServer.uptime(0));
+        assertEquals("5m 0s", DebugServer.uptime(300));
+        assertEquals("1d 0h 0m 1s", DebugServer.uptime(86401));
+    }
+
+    @Test
+    public void reportIsServedAsADownload() throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        new DebugServer().serve(out, "/report.txt", "");
+        String reply = out.toString("UTF-8");
+        int end = reply.indexOf("\r\n\r\n");
+        assertTrue(reply, end > 0);
+        String head = reply.substring(0, end + 2);
+        String body = reply.substring(end + 4);
+        assertTrue(head, head.startsWith("HTTP/1.1 200 OK\r\n"));
+        assertTrue(head, head.contains("\r\nContent-Type: text/plain; charset=utf-8\r\n"));
+        assertTrue(head, head.matches("(?s).*\r\nContent-Disposition: attachment; "
+                + "filename=\"report-\\d{8}-\\d{6}\\.txt\"\r\n.*"));
+        assertTrue(head, head.contains("\r\nContent-Length: "
+                + body.getBytes(StandardCharsets.UTF_8).length + "\r\n"));
+        assertTrue(body, body.startsWith("OpenIPC Decoder report\n"));
+        assertTrue(body, body.contains("\n== stats.json ==\n"));
+        assertTrue(body, body.contains("\n== log ==\n"));
+    }
+
+    @Test
+    public void pageLinksTheReport() throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        new DebugServer().serve(out, "/", "");
+        String page = out.toString("UTF-8");
+        assertTrue(page.contains("href=\"/report.txt\""));
+        assertFalse(page.substring(page.indexOf("\r\n\r\n") + 4).contains("\n"));
     }
 }
