@@ -20,7 +20,6 @@ import org.junit.After;
 import org.junit.Test;
 import org.w3c.dom.NodeList;
 
-import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -35,16 +34,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-
-import javax.imageio.IIOImage;
-import javax.imageio.ImageIO;
-import javax.imageio.ImageTypeSpecifier;
-import javax.imageio.ImageWriteParam;
-import javax.imageio.ImageWriter;
-import javax.imageio.metadata.IIOMetadata;
-import javax.imageio.metadata.IIOMetadataNode;
-import javax.imageio.plugins.jpeg.JPEGQTable;
-import javax.imageio.stream.ImageOutputStream;
 
 public class FlowUfoTest {
     /** Zig-zag position i to natural (row-major) position. */
@@ -462,49 +451,142 @@ public class FlowUfoTest {
 
     // ====================== Round trip through a real JPEG codec ======================
 
-    private static BufferedImage picture(int w, int h) {
-        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+    // Unit tests compile against android.jar, which has no java.awt or javax.imageio: the
+    // JDK's ImageIO (there at run time) is reached by reflection
+
+    /**
+     * Calls the public method {@code name} whose parameters take {@code args}, through a
+     * public type: the classes behind ImageIO's interfaces are in packages of the JDK that are
+     * not exported, so their own Method objects cannot be invoked.
+     */
+    private static Object call(Object target, String name, Object... args) throws Exception {
+        boolean statik = target instanceof Class;
+        Class<?> c = statik ? (Class<?>) target : target.getClass();
+        List<Class<?>> types = new ArrayList<>();
+        for (Class<?> k = c; k != null; k = k.getSuperclass()) {
+            types.add(k);
+            Collections.addAll(types, k.getInterfaces());
+        }
+        Exception last = new NoSuchMethodException(c.getName() + "." + name);
+        for (Class<?> k : types) {
+            if (!java.lang.reflect.Modifier.isPublic(k.getModifiers())) continue;
+            for (java.lang.reflect.Method m : k.getMethods()) {
+                if (!m.getName().equals(name) || !fits(m.getParameterTypes(), args)) continue;
+                try {
+                    return m.invoke(statik ? null : target, args);
+                } catch (IllegalAccessException e) {
+                    last = e;
+                }
+            }
+        }
+        throw last;
+    }
+
+    private static Object create(String className, Object... args) throws Exception {
+        for (java.lang.reflect.Constructor<?> k : Class.forName(className).getConstructors()) {
+            if (fits(k.getParameterTypes(), args)) return k.newInstance(args);
+        }
+        throw new NoSuchMethodException(className);
+    }
+
+    private static boolean fits(Class<?>[] types, Object[] args) {
+        if (types.length != args.length) return false;
+        for (int i = 0; i < types.length; i++) {
+            if (args[i] == null) {
+                if (types[i].isPrimitive()) return false;
+                continue;
+            }
+            Class<?> t = types[i] == int.class ? Integer.class
+                    : types[i] == boolean.class ? Boolean.class : types[i];
+            if (!t.isInstance(args[i])) return false;
+        }
+        return true;
+    }
+
+    private static Class<?> imageIo() throws Exception {
+        return Class.forName("javax.imageio.ImageIO");
+    }
+
+    /** A java.awt.image.BufferedImage. */
+    static final class Img {
+        final Object image;
+
+        Img(Object image) {
+            this.image = image;
+        }
+
+        int width() throws Exception {
+            return (Integer) call(image, "getWidth");
+        }
+
+        int height() throws Exception {
+            return (Integer) call(image, "getHeight");
+        }
+
+        int[] pixels() throws Exception {
+            int w = width();
+            return (int[]) call(image, "getRGB", 0, 0, w, height(), null, 0, w);
+        }
+
+        /** Decoded by ImageIO, or null when it cannot. */
+        static Img read(byte[] jpeg, int length) throws Exception {
+            Object img = call(imageIo(), "read", new ByteArrayInputStream(jpeg, 0, length));
+            return img != null ? new Img(img) : null;
+        }
+    }
+
+    private static Img picture(int w, int h) throws Exception {
+        // BufferedImage.TYPE_INT_RGB
+        Object img = create("java.awt.image.BufferedImage", w, h, 1);
+        int[] rgb = new int[w * h];
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
                 int r = x * 255 / Math.max(1, w - 1);
                 int g = y * 255 / Math.max(1, h - 1);
                 int b = ((x / 8 + y / 8) & 1) != 0 ? 200 : 40;
-                img.setRGB(x, y, r << 16 | g << 8 | b);
+                rgb[y * w + x] = r << 16 | g << 8 | b;
             }
         }
-        return img;
+        call(img, "setRGB", 0, 0, w, h, rgb, 0, w);
+        return new Img(img);
     }
 
     /** Baseline 4:4:4 JPEG with the IJG tables at {@code quality}, by ImageIO. */
-    static byte[] encode444(BufferedImage img, int quality) throws IOException {
-        ImageWriter writer = ImageIO.getImageWritersByFormatName("jpeg").next();
-        ImageWriteParam param = writer.getDefaultWriteParam();
-        IIOMetadata meta = writer.getDefaultImageMetadata(
-                ImageTypeSpecifier.createFromRenderedImage(img), param);
+    static byte[] encode444(Img img, int quality) throws Exception {
+        Object writer = ((java.util.Iterator<?>) call(imageIo(), "getImageWritersByFormatName",
+                "jpeg")).next();
+        Object param = call(writer, "getDefaultWriteParam");
+        Object type = call(Class.forName("javax.imageio.ImageTypeSpecifier"),
+                "createFromRenderedImage", img.image);
+        Object meta = call(writer, "getDefaultImageMetadata", type, param);
         String format = "javax_imageio_jpeg_image_1.0";
-        IIOMetadataNode root = (IIOMetadataNode) meta.getAsTree(format);
+        org.w3c.dom.Element root = (org.w3c.dom.Element) call(meta, "getAsTree", format);
         byte[] tables = JpegAssembler.ijgTables(quality);
         NodeList dqt = root.getElementsByTagName("dqtable");
         for (int i = 0; i < dqt.getLength(); i++) {
-            IIOMetadataNode n = (IIOMetadataNode) dqt.item(i);
+            org.w3c.dom.Element n = (org.w3c.dom.Element) dqt.item(i);
             int id = Integer.parseInt(n.getAttribute("qtableId"));
             int[] natural = new int[64];
             for (int k = 0; k < 64; k++) natural[NATURAL[k]] = tables[id * 64 + k] & 0xFF;
-            n.setUserObject(new JPEGQTable(natural));
+            call(n, "setUserObject", create("javax.imageio.plugins.jpeg.JPEGQTable",
+                    (Object) natural));
         }
         NodeList comps = root.getElementsByTagName("componentSpec");
         for (int i = 0; i < comps.getLength(); i++) {
-            IIOMetadataNode n = (IIOMetadataNode) comps.item(i);
+            org.w3c.dom.Element n = (org.w3c.dom.Element) comps.item(i);
             n.setAttribute("HsamplingFactor", "1");
             n.setAttribute("VsamplingFactor", "1");
         }
-        meta.setFromTree(format, root);
+        call(meta, "setFromTree", format, root);
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        try (ImageOutputStream out = ImageIO.createImageOutputStream(bytes)) {
-            writer.setOutput(out);
-            writer.write(null, new IIOImage(img, null, meta), param);
+        Object out = call(imageIo(), "createImageOutputStream", bytes);
+        try {
+            call(writer, "setOutput", out);
+            Object image = create("javax.imageio.IIOImage", img.image, null, meta);
+            call(writer, "write", null, image, param);
         } finally {
-            writer.dispose();
+            call(out, "close");
+            call(writer, "dispose");
         }
         return bytes.toByteArray();
     }
@@ -543,34 +625,31 @@ public class FlowUfoTest {
         return out;
     }
 
-    private static BufferedImage decode(byte[] jpeg, int length) throws IOException {
-        return ImageIO.read(new ByteArrayInputStream(withJfif(jpeg, length)));
-    }
-
-    private static int[] pixels(BufferedImage img) {
-        return img.getRGB(0, 0, img.getWidth(), img.getHeight(), null, 0, img.getWidth());
+    private static Img decode(byte[] jpeg, int length) throws Exception {
+        byte[] j = withJfif(jpeg, length);
+        return Img.read(j, j.length);
     }
 
     @Test
-    public void scanWithOurHeadersDecodesLikeTheOriginal() throws IOException {
+    public void scanWithOurHeadersDecodesLikeTheOriginal() throws Exception {
         for (int q : new int[] {5, 10, 25, 50, 75, 100}) {
             for (int[] size : new int[][] {{64, 48}, {50, 30}}) {
-                BufferedImage src = picture(size[0], size[1]);
+                Img src = picture(size[0], size[1]);
                 byte[] original = encode444(src, q);
                 byte[] scan = scanOf(original);
                 byte[][] out = new byte[1][];
                 int n = FlowUfo.jpeg(FlowUfo.jpegHeader(q, size[0], size[1]), scan, scan.length,
                         out);
-                BufferedImage a = ImageIO.read(new ByteArrayInputStream(original));
-                BufferedImage b = decode(out[0], n);
+                Img a = Img.read(original, original.length);
+                Img b = decode(out[0], n);
                 assertNotNull("Q" + q, b);
-                assertEquals(size[0], b.getWidth());
-                assertEquals(size[1], b.getHeight());
-                assertArrayEquals("Q" + q + " " + size[0] + "x" + size[1], pixels(a), pixels(b));
+                assertEquals(size[0], b.width());
+                assertEquals(size[1], b.height());
+                assertArrayEquals("Q" + q + " " + size[0] + "x" + size[1], a.pixels(), b.pixels());
                 if (q >= 75) {
                     // And close to the picture itself: colours are not mixed up
-                    int[] p = pixels(src);
-                    int[] r = pixels(b);
+                    int[] p = src.pixels();
+                    int[] r = b.pixels();
                     long err = 0;
                     for (int k = 0; k < p.length; k++) {
                         for (int sh = 0; sh <= 16; sh += 8) {
@@ -605,7 +684,7 @@ public class FlowUfoTest {
     @Test
     public void fakeDroneOnLoopback() throws Exception {
         FlowUfo.resetMs = 400;
-        BufferedImage src = picture(160, 120);
+        Img src = picture(160, 120);
         byte[] original = encode444(src, 75);
         byte[] body = scanOf(original);
         int total = (body.length + 1023) / 1024;
@@ -684,10 +763,9 @@ public class FlowUfoTest {
                 byte[][] expected = new byte[1][];
                 int n = FlowUfo.jpeg(FlowUfo.jpegHeader(75, 160, 120), body, body.length, expected);
                 assertArrayEquals(Arrays.copyOf(expected[0], n), jpeg);
-                BufferedImage got = decode(jpeg, jpeg.length);
-                assertEquals(160, got.getWidth());
-                assertArrayEquals(pixels(ImageIO.read(new ByteArrayInputStream(original))),
-                        pixels(got));
+                Img got = decode(jpeg, jpeg.length);
+                assertEquals(160, got.width());
+                assertArrayEquals(Img.read(original, original.length).pixels(), got.pixels());
 
                 // Then: frame 1 complete, frame 2 asked for whole
                 boolean asked = false;
