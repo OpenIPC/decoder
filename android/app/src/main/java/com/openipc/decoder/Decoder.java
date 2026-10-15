@@ -913,7 +913,7 @@ public class Decoder extends Activity
     /** Shown over the U cell until its first frame: where to send the stream. */
     private TextView udpHintCell() {
         TextView hint = new TextView(this);
-        hint.setText(udpHintText(NetInfo.addresses(), UDP_RTP_PORT));
+        hint.setText(udpHintText(NetInfo.udpAddresses(), UDP_RTP_PORT));
         hint.setTextColor(Color.GRAY);
         hint.setTextSize(13);
         hint.setGravity(Gravity.CENTER);
@@ -931,7 +931,7 @@ public class Decoder extends Activity
         if (v == null) return;
         View overlay = ((View) v.getParent()).findViewWithTag("quad_overlay_" + U_CELL);
         if (!(overlay instanceof TextView) || overlay.getVisibility() != View.VISIBLE) return;
-        String text = udpHintText(NetInfo.addresses(), UDP_RTP_PORT);
+        String text = udpHintText(NetInfo.udpAddresses(), UDP_RTP_PORT);
         TextView hint = (TextView) overlay;
         if (!text.contentEquals(hint.getText())) hint.setText(text);
     }
@@ -1066,7 +1066,7 @@ public class Decoder extends Activity
             overlay.setBackgroundColor(Color.BLACK);
             cell.addView(overlay);
         } else if (i == U_CELL) {
-            ((TextView) overlay).setText(udpHintText(NetInfo.addresses(), UDP_RTP_PORT));
+            ((TextView) overlay).setText(udpHintText(NetInfo.udpAddresses(), UDP_RTP_PORT));
         }
         overlay.setVisibility(View.VISIBLE);
         overlay.bringToFront();
@@ -1526,7 +1526,7 @@ public class Decoder extends Activity
         if (udpViewShown) {
             Map<String, Object> udp = new LinkedHashMap<>();
             udp.put("port", UDP_RTP_PORT);
-            udp.put("addresses", NetInfo.addresses());
+            udp.put("addresses", NetInfo.udpAddresses());
             m.put("udp", udp);
         } else if (!quadEnabled) {
             Map<String, Object> single = new LinkedHashMap<>();
