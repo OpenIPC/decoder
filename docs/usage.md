@@ -44,7 +44,7 @@ The menu is one grid: the eight slots on top, two rows of four below. Every word
 | **Slides** | The playback mode: every frame, or key frames only, see [Slides](#slides). Does not change the view |
 | **Exit** | Close the app. The small text under it is the version and build hash (`v2.10, <hash>`) |
 | **Reset** | Clear all settings after a confirmation, see [Reset](#reset) |
-| **Debug** | Text in the corner of every multi-view cell (resolution, codec, decoded/received fps, key frames, status), or none |
+| **Debug** | Text in the corner of every multi-view cell (resolution, codec, decoded/received fps, key frames, status), or none. **Long press** (remote: hold **OK**, or **Menu** on Debug): [save a report](debug.md#save-report) to `Download/OpenIPC` and share it |
 | **UDP** | [The U cell](#the-u-cell) full-screen |
 
 Items that are on (Grid, Slides, Debug, UDP and the active slot) have an orange fill; the item the remote is on has a light blue frame. On a narrow screen or with a large font the labels are shortened with an ellipsis rather than clipped.

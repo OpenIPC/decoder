@@ -17,6 +17,8 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -30,7 +32,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * Serves what the decoder knows about itself on port 8085, for a browser or curl:
  * {@code /} a page refreshing itself, {@code /stats.json} the same as JSON, {@code /log} the
- * app's recent log. Always on; a client outside the local network gets 403. GET only, one
+ * app's recent log, {@code /report.txt} both in one file to download (#207). Always on; a client outside the local network gets 403. GET only, one
  * request per connection, short timeouts and a few workers: it must never get in the way of
  * decoding. Logins and passwords never leave the device (redacted like the log, #55).
  */
@@ -93,7 +95,8 @@ final class DebugServer {
     /** Bumped when the source changes: a picture of an earlier source is never served. */
     private volatile int sourceGen;
 
-    private DebugServer() {}
+    /** Package-private for the tests: no threads, nothing bound. */
+    DebugServer() {}
 
     /** The one server of the process, started on first use and kept for its lifetime. */
     static synchronized DebugServer get() {
@@ -179,25 +182,7 @@ final class DebugServer {
                 query = path.substring(q + 1);
                 path = path.substring(0, q);
             }
-            switch (path) {
-                case "/":
-                case "/index.html":
-                    reply(out, 200, "text/html; charset=utf-8", PAGE);
-                    break;
-                case "/stats.json":
-                    reply(out, 200, "application/json; charset=utf-8", toJson(snapshot(), true));
-                    break;
-                case "/snapshot.jpg":
-                    byte[] jpeg = snapshotJpeg(!("&" + query + "&").contains("&labels=0&"));
-                    if (jpeg != null) reply(out, 200, "image/jpeg", jpeg);
-                    else reply(out, 503, "text/plain", "No picture\n");
-                    break;
-                case "/log":
-                    reply(out, 200, "text/plain; charset=utf-8", log.text());
-                    break;
-                default:
-                    reply(out, 404, "text/plain", "Not found\n");
-            }
+            serve(out, path, query);
         } catch (IOException e) {
             // The client went away or was too slow: nothing to report
         } catch (RuntimeException e) {
@@ -205,6 +190,88 @@ final class DebugServer {
         } finally {
             deadline.cancel(false);
         }
+    }
+
+    /** Answers one GET of a LAN client (checked by the caller). */
+    void serve(OutputStream out, String path, String query) throws IOException {
+        switch (path) {
+            case "/":
+            case "/index.html":
+                reply(out, 200, "text/html; charset=utf-8", PAGE);
+                break;
+            case "/stats.json":
+                reply(out, 200, "application/json; charset=utf-8", toJson(snapshot(), true));
+                break;
+            case "/snapshot.jpg":
+                byte[] jpeg = snapshotJpeg(!("&" + query + "&").contains("&labels=0&"));
+                if (jpeg != null) reply(out, 200, "image/jpeg", jpeg);
+                else reply(out, 503, "text/plain", "No picture\n");
+                break;
+            case "/log":
+                reply(out, 200, "text/plain; charset=utf-8", log.text());
+                break;
+            case "/report.txt":
+                // Downloaded by the browser, not shown (#207)
+                Date now = new Date();
+                reply(out, 200, "text/plain; charset=utf-8",
+                        reportText(now).getBytes(StandardCharsets.UTF_8),
+                        "Content-Disposition: attachment; filename=\"" + reportName(now)
+                                + "\"\r\n");
+                break;
+            default:
+                reply(out, 404, "text/plain", "Not found\n");
+        }
+    }
+
+    // ====================== Report (#207) ======================
+
+    /**
+     * The report as the app saves it and /report.txt serves it: the same text both ways. Slow
+     * (the state is read on the UI thread, up to a timeout): not on the UI thread.
+     */
+    String reportText(Date now) {
+        return reportText(snapshot(), log.text(), now,
+                android.os.SystemClock.elapsedRealtime() / 1000);
+    }
+
+    /** report-YYYYMMDD-HHMMSS.txt, local time. */
+    static String reportName(Date now) {
+        return "report-" + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(now) + ".txt";
+    }
+
+    /**
+     * A header (app, version, git hash, device, Android, time, uptime), then the state as
+     * /stats.json has it, then the log ring. Both are redacted already; the whole text is
+     * redacted once more, so nothing that slipped in on the way leaves the device.
+     */
+    static String reportText(Map<String, Object> stats, String log, Date now, long uptimeS) {
+        StringBuilder sb = new StringBuilder(64 * 1024);
+        sb.append("OpenIPC Decoder report\n");
+        sb.append("App: OpenIPC Decoder ").append(BuildConfig.VERSION_NAME)
+                .append(" (").append(BuildConfig.VERSION_CODE).append("), git ")
+                .append(BuildConfig.GIT_HASH).append('\n');
+        sb.append("Device: ").append(android.os.Build.MANUFACTURER).append(' ')
+                .append(android.os.Build.MODEL).append('\n');
+        sb.append("Android: ").append(android.os.Build.VERSION.RELEASE).append(" (SDK ")
+                .append(android.os.Build.VERSION.SDK_INT).append(")\n");
+        sb.append("Time: ").append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US)
+                .format(now)).append('\n');
+        sb.append("Uptime: ").append(uptime(uptimeS)).append('\n');
+        sb.append("\n== stats.json ==\n");
+        sb.append(toJson(stats, true));
+        sb.append("\n== log ==\n");
+        sb.append(log != null ? log : "");
+        return redact(sb.toString());
+    }
+
+    /** 1d 2h 3m 4s; the leading zero units left out. */
+    static String uptime(long s) {
+        long d = s / 86400, h = s % 86400 / 3600, m = s % 3600 / 60;
+        StringBuilder sb = new StringBuilder();
+        if (d > 0) sb.append(d).append("d ");
+        if (d > 0 || h > 0) sb.append(h).append("h ");
+        if (d > 0 || h > 0 || m > 0) sb.append(m).append("m ");
+        return sb.append(s % 60).append('s').toString();
     }
 
     private Map<String, Object> snapshot() {
@@ -270,11 +337,18 @@ final class DebugServer {
 
     private static void reply(OutputStream out, int code, String type, byte[] data)
             throws IOException {
+        reply(out, code, type, data, "");
+    }
+
+    /** {@code extra}: more header lines, each ending with \r\n. */
+    private static void reply(OutputStream out, int code, String type, byte[] data, String extra)
+            throws IOException {
         String head = "HTTP/1.1 " + code + " " + reason(code) + "\r\n"
                 + "Content-Type: " + type + "\r\n"
                 + "Content-Length: " + data.length + "\r\n"
                 + "Cache-Control: no-store\r\n"
                 + (code == 405 ? "Allow: GET\r\n" : "")
+                + extra
                 + "Connection: close\r\n\r\n";
         out.write(head.getBytes(StandardCharsets.ISO_8859_1));
         out.write(data);
@@ -466,7 +540,8 @@ final class DebugServer {
             + "<div class=\"meta\"><span id=\"ver\"></span><span id=\"clock\"></span><span"
             + " id=\"up\"></span><span id=\"err\"></span></div>"
             + "<nav><a class=\"btn\" href=\"/stats.json\">JSON</a><a class=\"btn\" href=\"/log\">"
-            + "Log</a>"
+            + "Log</a><a class=\"btn\" href=\"/report.txt\" download"
+            + " title=\"Header, stats.json and the log in one file\">Save report</a>"
             + "<span>Info<span class=\"seg\" id=\"info\"><button value=\"1\">On</button>"
             + "<button value=\"0\">Off</button></span></span>"
             + "<span>Snapshot<span class=\"seg\" id=\"every\"><button value=\"3\">3 s</button>"

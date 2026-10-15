@@ -29,7 +29,7 @@ Whether a toy can be played here depends on its protocol. Toys that do offer RTS
 2. Android notices that the network has no internet and may ask *This network has no internet access. Stay connected?* Answer **yes** (and *Don't ask again*). Otherwise the phone may drop back to another Wi‑Fi or route traffic over mobile data.
 3. Mobile data may stay on, but some phones then send traffic for the toy's address over mobile data; if nothing arrives, try with mobile data off.
 4. Close the vendor app: the toy usually streams to one client only.
-5. While the phone is only on the toy's network, open the [debug pages](debug.md) on the phone itself: `http://127.0.0.1:8085/stats.json` and `http://127.0.0.1:8085/log`.
+5. While the phone is only on the toy's network, open the [debug pages](debug.md) on the phone itself: `http://127.0.0.1:8085/stats.json` and `http://127.0.0.1:8085/log`. Simpler: a **long press on Debug** in the menu [saves a report](debug.md#save-report) (stats and log in one file) to `Download/OpenIPC`; send it later, when the phone has internet again.
 
 ## FLOW-UFO
 
@@ -75,7 +75,7 @@ Open an [issue](https://github.com/OpenIPC/decoder/issues) (one per toy model) w
 2. The **vendor app**: its name, version and where it comes from (Google Play link).
 3. The phone model and Android version, the app version and hash (menu, under **Exit**).
 4. What you tried and what the app showed.
-5. `http://127.0.0.1:8085/stats.json` and `http://127.0.0.1:8085/log`, taken on the phone after about 30 s of trying.
+5. A **report file**, saved on the phone after about 30 s of trying: a long press on **Debug** in the menu writes `Download/OpenIPC/report-….txt` ([Save report](debug.md#save-report)). The toy's Wi‑Fi has no internet: save it there, leave the toy's network, then share it from the share sheet or attach the file from `Download/OpenIPC` to the issue. Without it, `http://127.0.0.1:8085/stats.json` and `http://127.0.0.1:8085/log`.
 6. A **traffic capture** while the vendor app shows video: for example with [PCAPdroid](https://github.com/emanuele-f/PCAPdroid) on the phone (no root needed), filtered to the vendor app, saved as a `.pcap` file. A minute is enough. This shows what the toy expects and sends.
 
 Do not send the vendor app itself or parts of it. The capture contains only the traffic between the phone and the toy; it has no passwords of yours if only the vendor app is captured.
