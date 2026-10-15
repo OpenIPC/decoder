@@ -83,16 +83,11 @@ Do not send the vendor app itself or parts of it. The capture contains only the 
 
 ## Tested toys
 
-<p align="center">
-  <img src="img/toys_187.jpg" alt="Three toy drones tested in #187: a grey D16 on its box, an orange drone on the Drone YL3 box, and a grey drone with black guards" width="640">
-</p>
-
-The drones a tester checked in [#187](https://github.com/OpenIPC/decoder/issues/187) (photo by the tester):
+The drones a tester checked in [#187](https://github.com/OpenIPC/decoder/issues/187):
 
 | Toy | Wi‑Fi | Family | URL | Status |
 |---|---|---|---|---|
-| D16 (grey, on its box) | `FLOW_…` | FLOW-UFO, WIFI UAV app | `flowufo://192.168.169.1:8800` | video works |
-| K200 (most likely the grey one with black guards) | `FLY-UFO-…` | KY UFO, RTSP | `rtsp://192.168.1.1:7070/webcam` | video works; the picture comes sideways ([#200](https://github.com/OpenIPC/decoder/issues/200)) |
-| Drone YL3 (most likely the orange one, lying on its box; the box shows a remote with a screen) | `HF_…` | Jieli AC79, DVRunning 2 app | `jieli://192.168.80.1` (test build) | in testing |
+| D16 | `FLOW_…` | FLOW-UFO, WIFI UAV app | `flowufo://192.168.169.1:8800` | video works |
+| K200 | `FLY-UFO-…` | KY UFO, RTSP | `rtsp://192.168.1.1:7070/webcam` | video works; the picture comes sideways ([#200](https://github.com/OpenIPC/decoder/issues/200)) |
+| Drone YL3 | `HF_…` | Jieli AC79, DVRunning 2 app | `jieli://192.168.80.1` (test build) | in testing |
 
-The orange drone and the grey one with black guards are matched to the K200 and the YL3 from the photo; the tester has yet to confirm.
