@@ -16,7 +16,6 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
-import android.graphics.Matrix;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -31,10 +30,11 @@ import android.view.GestureDetector;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.view.PixelCopy;
 import android.view.ScaleGestureDetector;
 import android.view.Surface;
+import android.view.SurfaceHolder;
 import android.view.SurfaceView;
-import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
@@ -85,7 +85,15 @@ public class Decoder extends Activity
     }, framePool);
 
     // --- UI components ---
-    private TextureView mSurface;
+    // A SurfaceView, like the grid cells (#61), not a TextureView (#76): the decoder renders
+    // to a layer of its own, not through the app's window buffer, whose queueBuffer stalled
+    // for seconds and longer with every grid/single switch on Mali TV boxes
+    private SurfaceView mSurface;
+    /** The SurfaceView is hidden for a moment to get a new surface after MJPEG (#119). */
+    private boolean recreatingSurface;
+    /** Size of the video view without zoom (fitVideo()), 0 before the first frame. */
+    private int mFitWidth;
+    private int mFitHeight;
     private Surface mVideoSurface;
     private TextView statusText;
     private float mDensity;
@@ -211,10 +219,8 @@ public class Decoder extends Activity
                     // A surface drawn with lockCanvas() cannot take a decoder any more: no
                     // decoder until the UI thread has put a new one in place (Qodo on #131)
                     surfacePending = true;
-                    runOnUiThread(() -> {
-                        recreateVideoSurface();
-                        surfacePending = false;
-                    });
+                    // Cleared once the new surface is there (surfaceCreated)
+                    runOnUiThread(Decoder.this::recreateVideoSurface);
                 }
                 // RtspClient configures the AudioManager itself, on its own audio route
             }
@@ -233,18 +239,30 @@ public class Decoder extends Activity
         statusText = findViewById(R.id.status_text);
         debugUrls = findViewById(R.id.debug_urls);
 
-        mSurface.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
-            @Override public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture st, int w, int h) {
-                replaceSurface(new Surface(st));
+        mSurface.getHolder().addCallback(new SurfaceHolder.Callback() {
+            @Override public void surfaceCreated(SurfaceHolder holder) {
+                // The surface belongs to the SurfaceView: used, never released, here
+                replaceSurface(holder.getSurface());
+                // A new surface: nothing drawn into it with lockCanvas() yet (#132)
+                jpegRenderer.takeCanvasDrawn();
+                surfacePending = false;
+                recreatingSurface = false;
             }
-            @Override public void onSurfaceTextureSizeChanged(android.graphics.SurfaceTexture st, int w, int h) {
-                replaceSurface(new Surface(st));
-            }
-            @Override public boolean onSurfaceTextureDestroyed(android.graphics.SurfaceTexture st) {
+            @Override public void surfaceChanged(SurfaceHolder holder, int format, int w, int h) {}
+            @Override public void surfaceDestroyed(SurfaceHolder holder) {
+                // Nothing may render into the surface once this returns: close the decoder,
+                // the decode thread makes a new one when the next surface is there
                 replaceSurface(null);
-                return true;
+                closeDecoder();
+                if (recreatingSurface) {
+                    // GONE has reached the surface: show the view again for a new one, unless
+                    // the grid or the U view has taken the screen meanwhile (as in QuadCell)
+                    recreatingSurface = false;
+                    mSurface.post(() -> {
+                        if (!quadEnabled && !udpViewShown) mSurface.setVisibility(View.VISIBLE);
+                    });
+                }
             }
-            @Override public void onSurfaceTextureUpdated(android.graphics.SurfaceTexture st) {}
         });
 
         // Pinch-to-zoom
@@ -1332,7 +1350,6 @@ public class Decoder extends Activity
                 // The request may have given up already: then no capture at all (#103)
                 if (abandoned.get()) return;
                 ref.set(snapshotCells(side));
-                if (abandoned.get()) recycleFrames(ref.getAndSet(null));
             } finally {
                 done.countDown();
             }
@@ -1347,19 +1364,10 @@ public class Decoder extends Activity
         if (!inTime) {
             abandoned.set(true);
             main.removeCallbacks(pick);
-            recycleFrames(ref.getAndSet(null));
             return null;
         }
         List<Snapshots.Cell> cells = ref.get();
         return cells != null ? Snapshots.render(cells, side[0], side[1], labels) : null;
-    }
-
-    /** Frames taken for a snapshot that will not be drawn. */
-    private static void recycleFrames(List<Snapshots.Cell> cells) {
-        if (cells == null) return;
-        for (Snapshots.Cell c : cells) {
-            if (c.frame != null) c.frame.recycle();
-        }
     }
 
     /**
@@ -1399,9 +1407,8 @@ public class Decoder extends Activity
                             && singleRenderedWithin(SNAPSHOT_LIVE_MS);
                     c.label = statusText != null && statusText.getVisibility() == View.VISIBLE
                             ? statusText.getText().toString() : c.live ? "Playing" : "No new frames";
-                    if (c.live) {
-                        c.frame = mSurface.getBitmap(width / size, Snapshots.height(width) / size);
-                    }
+                    // Copied with the grid cells, off the UI thread (#76)
+                    if (c.live) c.view = mSurface;
                 }
                 c.onScreen = onScreen(i);
                 cells.add(c);
@@ -1717,14 +1724,38 @@ public class Decoder extends Activity
             return;
         }
 
-        Bitmap bitmap = mSurface.getBitmap();
-        if (bitmap == null) {
+        // A SurfaceView has no getBitmap() (#76): PixelCopy, Android 7+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            Toast.makeText(this, "Screenshots need Android 7 or newer", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (mVideoWidth <= 0 || mVideoHeight <= 0
+                || !mSurface.getHolder().getSurface().isValid()) {
             Toast.makeText(this, "No video frame available", Toast.LENGTH_SHORT).show();
             return;
         }
+        // At the stream's own size, not the view's
+        Bitmap bitmap = Bitmap.createBitmap(mVideoWidth, mVideoHeight, Bitmap.Config.ARGB_8888);
         isTakingScreenshot = true;
-        // Encoding a full-resolution PNG takes long: do it off the UI thread (#35)
-        new Thread(() -> saveScreenshot(bitmap), "screenshot").start();
+        // Copied on the snapshot thread, the UI thread does not wait for it
+        boolean started = Snapshots.copy(mSurface, bitmap, result -> {
+            if (result == PixelCopy.SUCCESS) {
+                // Encoding a full-resolution PNG takes long: on a thread of its own (#35)
+                new Thread(() -> saveScreenshot(bitmap), "screenshot").start();
+            } else {
+                Log.d(TAG, "Screenshot copy failed: " + result);
+                bitmap.recycle();
+                runOnUiThread(() -> {
+                    isTakingScreenshot = false;
+                    Toast.makeText(this, "No video frame available", Toast.LENGTH_SHORT).show();
+                });
+            }
+        });
+        if (!started) {
+            bitmap.recycle();
+            isTakingScreenshot = false;
+            Toast.makeText(this, "No video frame available", Toast.LENGTH_SHORT).show();
+        }
     }
 
     @Override
@@ -1819,9 +1850,12 @@ public class Decoder extends Activity
             boxH = getResources().getDisplayMetrics().heightPixels;
         }
         int[] size = fitInside(mVideoWidth, mVideoHeight, boxW, boxH);
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(size[0], size[1]);
-        params.gravity = Gravity.CENTER;
-        mSurface.setLayoutParams(params);
+        mFitWidth = size[0];
+        mFitHeight = size[1];
+        // The surface keeps this size when zoom makes the view larger: SurfaceFlinger scales
+        // it, and a frame drawn with lockCanvas() (MJPEG) is not up to 5x the screen (#76)
+        mSurface.getHolder().setFixedSize(size[0], size[1]);
+        // Lays the view out at this size
         resetZoom();
     }
 
@@ -1833,18 +1867,27 @@ public class Decoder extends Activity
         return new int[] {Math.min(w, boxW), Math.min(h, boxH)};
     }
 
+    /**
+     * Zoom and pan of the single view. A SurfaceView has no setTransform() (#76), and its
+     * surface follows setScaleX() / setTranslationX() only from Android 7 on: the view itself
+     * is laid out mZoomScale times the fitted size, centred, and moved by the pan, which places
+     * the surface the same way on every Android version.
+     */
     private void applyZoomTransform() {
-        Matrix matrix = new Matrix();
-        float cx = mSurface.getWidth() / 2f;
-        float cy = mSurface.getHeight() / 2f;
-        matrix.postScale(mZoomScale, mZoomScale, cx, cy);
-        matrix.postTranslate(mPanX, mPanY);
-        mSurface.setTransform(matrix);
+        if (mFitWidth <= 0 || mFitHeight <= 0) return;
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                Math.round(mFitWidth * mZoomScale), Math.round(mFitHeight * mZoomScale));
+        params.gravity = Gravity.CENTER;
+        // With CENTER the left and top margins move the view off the centre
+        params.leftMargin = Math.round(mPanX);
+        params.topMargin = Math.round(mPanY);
+        mSurface.setLayoutParams(params);
     }
 
     private void clampPan() {
-        float maxX = (mSurface.getWidth() * (mZoomScale - 1)) / 2f;
-        float maxY = (mSurface.getHeight() * (mZoomScale - 1)) / 2f;
+        // Measured on the fitted size: the view's own size grows with the zoom now (#76)
+        float maxX = (mFitWidth * (mZoomScale - 1)) / 2f;
+        float maxY = (mFitHeight * (mZoomScale - 1)) / 2f;
         mPanX = Math.max(-maxX, Math.min(maxX, mPanX));
         mPanY = Math.max(-maxY, Math.min(maxY, mPanY));
     }
@@ -1859,14 +1902,8 @@ public class Decoder extends Activity
     private void replaceSurface(Surface next) {
         // The MJPEG decoder renders into the old surface: let go of it first (#132)
         jpegRenderer.release();
-        Surface prev = mVideoSurface;
         mVideoSurface = next;
         videoDecoder.setSurface(next);
-        if (prev != null) {
-            try { prev.release(); } catch (Exception e) {
-                Log.e(TAG, "Error releasing Surface", e);
-            }
-        }
     }
 
     private int dp(float dp) {
@@ -1907,10 +1944,24 @@ public class Decoder extends Activity
         }
     }
 
-    /** A new Surface on the TextureView, for a decoder after MJPEG was drawn (#119). */
+    /**
+     * A new surface, for a decoder after MJPEG was drawn with lockCanvas() (#119), UI thread:
+     * the SurfaceView is hidden and shown again, as a grid cell does (QuadCell, #139). GONE has
+     * to reach the surface first, so VISIBLE follows in surfaceDestroyed(), and surfacePending
+     * ends in surfaceCreated(). Hidden already, or no surface now: the next one is new anyway.
+     */
     private void recreateVideoSurface() {
-        android.graphics.SurfaceTexture st = mSurface != null ? mSurface.getSurfaceTexture() : null;
-        if (st != null) replaceSurface(new Surface(st));
+        // Hidden for a new surface already: surfaceCreated() ends the wait
+        if (recreatingSurface && mSurface != null && mSurface.getVisibility() != View.VISIBLE) {
+            return;
+        }
+        if (mSurface == null || mSurface.getVisibility() != View.VISIBLE
+                || !mSurface.getHolder().getSurface().isValid()) {
+            surfacePending = false;
+            return;
+        }
+        recreatingSurface = true;
+        mSurface.setVisibility(View.GONE);
     }
 
     /** The single view showed a frame within the last {@code ms} (video or MJPEG). */

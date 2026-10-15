@@ -51,10 +51,8 @@ final class Snapshots {
     static final class Cell {
         /** Slot number shown to the user (1-based), 0 for the U cell. */
         int slot;
-        /** Where the frame comes from in multi-view, or null. */
+        /** Where the frame comes from (a multi-view cell or the single view, #76), or null. */
         SurfaceView view;
-        /** Frame already taken on the UI thread (single view, TextureView), or null. */
-        Bitmap frame;
         /** Playing right now; otherwise only the label is drawn. */
         boolean live;
         String label;
@@ -106,7 +104,7 @@ final class Snapshots {
         Copy[] copies = new Copy[n];
         for (int i = 0; i < n; i++) {
             Cell c = cells.get(i);
-            if (c != null && c.frame == null && c.live && c.view != null) {
+            if (c != null && c.live && c.view != null) {
                 copies[i] = Copy.start(c.view, rects[i].width(), rects[i].height());
             }
         }
@@ -135,7 +133,7 @@ final class Snapshots {
             if (c == null) continue;
             Rect r = rects[i];
             int x = r.left, y = r.top, cw = r.width(), ch = r.height();
-            Bitmap frame = copies[i] != null ? copies[i].await(deadline) : c.frame;
+            Bitmap frame = copies[i] != null ? copies[i].await(deadline) : null;
             if (copies[i] != null && frame != null) copied++;
             boolean shown = c.live && frame != null;
             if (shown) {
@@ -189,6 +187,23 @@ final class Snapshots {
         }
     }
 
+    /**
+     * Copies what the SurfaceView shows into {@code into}, scaled to its size, on the snapshot
+     * thread, which also gets {@code done} (the single view's screenshot, #76). False if it
+     * cannot start: before Android 7 or without a surface.
+     */
+    static boolean copy(SurfaceView view, Bitmap into, PixelCopy.OnPixelCopyFinishedListener done) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return false;
+        try {
+            PixelCopy.request(view, into, done, copyHandler());
+            return true;
+        } catch (RuntimeException e) {
+            // The surface went away meanwhile
+            Log.d(TAG, "Snapshot copy failed: " + e.getMessage());
+            return false;
+        }
+    }
+
     /** One PixelCopy in flight. */
     private static final class Copy {
         final Bitmap bitmap;
@@ -201,18 +216,15 @@ final class Snapshots {
         static Copy start(SurfaceView view, int w, int h) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return null;
             Copy c = new Copy(Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888));
-            try {
-                PixelCopy.request(view, c.bitmap, r -> {
-                    c.result.set(r);
-                    c.done.countDown();
-                }, copyHandler());
+            if (copy(view, c.bitmap, r -> {
+                c.result.set(r);
+                c.done.countDown();
+            })) {
                 return c;
-            } catch (RuntimeException e) {
-                // The surface went away (the grid was rebuilt)
-                Log.d(TAG, "Snapshot copy failed: " + e.getMessage());
-                c.bitmap.recycle();
-                return null;
             }
+            // The surface went away (the grid was rebuilt)
+            c.bitmap.recycle();
+            return null;
         }
 
         /** The copied frame, or null if it failed or is not done by the deadline. */
