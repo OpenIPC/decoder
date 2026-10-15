@@ -71,10 +71,11 @@ final class NetInfo {
      * Binds {@code socket} to the network whose own subnet holds {@code target} (#187). A toy's
      * Wi-Fi has no internet: with mobile data on, Android may send even on-link traffic over the
      * default network instead. Returns what was done, for the log: "default" when no such
-     * network is found (or before Android 5.1), else the interface bound to.
+     * network is found (or before Android 6: Network.bindSocket(DatagramSocket) is API 23,
+     * Qodo on #188), else the interface bound to.
      */
     static String bindToNetworkOf(DatagramSocket socket, InetAddress target) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP_MR1) return "default";
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return "default";
         try {
             Found f = networkOf(target);
             if (f == null) return "default";

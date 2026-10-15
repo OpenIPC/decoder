@@ -781,7 +781,12 @@ public class FlowUfoTest {
         try (DatagramSocket drone = new DatagramSocket(0, InetAddress.getLoopbackAddress())) {
             drone.setSoTimeout(200);
             FlowUfo.Url u = FlowUfo.Url.parse("flowufo://127.0.0.1:" + drone.getLocalPort());
-            FlowUfo.Client client = new FlowUfo.Client("test", u, null);
+            java.util.concurrent.atomic.AtomicInteger setups =
+                    new java.util.concurrent.atomic.AtomicInteger();
+            FlowUfo.Client client = new FlowUfo.Client("test", u, (s, target) -> {
+                setups.incrementAndGet();
+                return "test";
+            });
             List<byte[]> frames = Collections.synchronizedList(new ArrayList<>());
             List<String> states = Collections.synchronizedList(new ArrayList<>());
             CountDownLatch frame = new CountDownLatch(1);
@@ -882,6 +887,8 @@ public class FlowUfoTest {
                 }
                 assertTrue(probed);
                 assertEquals("probing", client.stats().get("state"));
+                // A new socket, set up for the network again (Qodo on #188)
+                assertEquals(2, setups.get());
             } finally {
                 client.close();
                 t.join(2000);
@@ -1125,6 +1132,17 @@ public class FlowUfoTest {
                 SocketAddress phoneB = probeAt(b);
                 assertFalse(phoneA.equals(phoneB));
                 assertEquals(-1, client.lockedPort());
+                // A service message on a's socket does not lock it (Qodo on #188)
+                byte[] service = bytes("93 04 0E 00  01 00 00 00  02 00 00 00  55 5A");
+                from1234.send(new DatagramPacket(service, service.length, phoneA));
+                long until = System.currentTimeMillis() + 3000;
+                while (client.stats().get("service_messages").equals(0)
+                        && System.currentTimeMillis() < until) {
+                    Thread.sleep(10);
+                }
+                assertEquals(1, client.stats().get("service_messages"));
+                assertEquals(-1, client.lockedPort());
+                probeAt(b);
                 // The engine behind b answers, from another source port (the drone's 1234)
                 byte[] f = piece(1, new byte[2000], 0);
                 from1234.send(new DatagramPacket(f, f.length, phoneB));
