@@ -45,7 +45,7 @@ Ready-to-install builds are in the [**latest** release](https://github.com/OpenI
 | `decoder-v2.apk` | **Current version**, recommended |
 | `decoder.apk` | Legacy version from the `basic` branch |
 
-Every build is replaced in `latest` by the next one. Development is continuous, so there are no releases per version; every build is also posted with its version and commit to the OpenIPC Telegram channel ([our channels](https://openipc.org/our-channels)).
+Every build is replaced in `latest` by the next one. Development is continuous, so there are no releases per version; every `v2` and `basic` build is also posted with its version and commit to the OpenIPC Telegram channel ([our channels](https://openipc.org/our-channels)).
 
 A beta channel is available on [Google Play](https://play.google.com/apps/internaltest/4701231141824898735). To join it, send your e-mail through the [OpenIPC Telegram channels](https://openipc.org/our-channels).
 

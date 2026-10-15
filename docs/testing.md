@@ -49,13 +49,20 @@ CI is the reference: the project does not depend on local builds.
 
 - `v2` is **2.xx** (from 2.00). Every pull request that changes the app bumps `android/app/build.gradle` as its last commit before the merge: `versionName` +0.01, `versionCode` +1. Docs-only and CI-only pull requests do not.
 - `basic` keeps its 1.07.x line.
-- Development is continuous, so there is **no release per version** (#194). The [`latest`](https://github.com/OpenIPC/decoder/releases/tag/latest) release always holds the newest `v2` and `basic` builds. Every build is also posted to the OpenIPC Telegram channel with its version and commit, and that is where older builds can be found.
+- Development is continuous, so there is **no release per version** (#194). The [`latest`](https://github.com/OpenIPC/decoder/releases/tag/latest) release always holds the newest `v2` and `basic` builds. Every `v2` and `basic` build is also posted to the OpenIPC Telegram channel with its version and commit, and that is where their older builds can be found. Builds of other branches are only workflow artifacts of their runs (90 days).
 - **Test pre-releases**: to let a reporter test a branch, a pre-release named after the issue is made by hand from the branch's CI artifact, e.g. [`flowufo-187-test1`](https://github.com/OpenIPC/decoder/releases/tag/flowufo-187-test1) for #187. It is deleted when the test is over.
 
   ```sh
-  gh release create <name>-<issue>-test1 decoder-<name>-test1.apk --prerelease \
-    --target <commit> --title "… test build 1 (#<issue>)" --notes "…"
+  B=feat/my-branch                       # the branch to test
+  RUN=$(gh run list -R OpenIPC/decoder -b "$B" -e push -w Build -L 1 --json databaseId -q '.[0].databaseId')
+  gh run download "$RUN" -R OpenIPC/decoder -n "decoder-${B//\//-}"   # gives decoder-feat-my-branch.apk
+  cp "decoder-${B//\//-}.apk" decoder-my-test1.apk                    # the asset name the reporter sees
+  gh release create my-187-test1 decoder-my-test1.apk --prerelease \
+    --target "$(gh run view "$RUN" -R OpenIPC/decoder --json headSha -q .headSha)" \
+    --title "… test build 1 (#187)" --notes "…"
   ```
+
+  The tag (`my-187-test1`) and the asset name are free to choose; the artifact is always named after the branch.
 
 - The change history is the [merged pull requests](https://github.com/OpenIPC/decoder/pulls?q=is%3Apr+is%3Amerged+base%3Av2) and the [commits of `v2`](https://github.com/OpenIPC/decoder/commits/v2).
 - The installed version and build hash show in the menu (under **Exit**, `v2.10, <hash>`) and in `/stats.json` (`version`, `git`).
@@ -104,11 +111,11 @@ A mapping fits **only the build it came from**. Use the one whose build matches 
 | Build | Mapping |
 |---|---|
 | the current `v2` build | `decoder-v2-mapping.txt` in [`latest`](https://github.com/OpenIPC/decoder/releases/tag/latest) |
-| an older `v2` build, or any branch build | the artifact `decoder-v2-mapping` (or `decoder-<branch>-mapping`) of the CI run of that commit, kept 90 days: `gh run list -R OpenIPC/decoder -c <full commit hash>` finds the run |
+| an older `v2` build, or any branch build | the artifact `decoder-v2-mapping` (or `decoder-<branch>-mapping`) of the CI run that built it, kept 90 days. A push run is found by its commit (below). A manual run (*Run workflow* with `commit_hash`) is listed under the branch it was started on, not under the commit it built: `gh run list -R OpenIPC/decoder -w Build -e workflow_dispatch -b <branch>`, then pick the run by its time or ID |
 | builds before 2.08 | none: they were made before the mapping was kept (#181) |
 
 ```sh
-RUN=$(gh run list -R OpenIPC/decoder -c <commit> -w Build -L 1 --json databaseId -q '.[0].databaseId')
+RUN=$(gh run list -R OpenIPC/decoder -c <full commit hash> -e push -w Build -L 1 --json databaseId -q '.[0].databaseId')
 gh run download "$RUN" -R OpenIPC/decoder -n decoder-v2-mapping
 retrace decoder-v2-mapping.txt stacktrace.txt     # Android SDK command-line tools
 ```
