@@ -102,6 +102,22 @@ jobs:
           # APK only while in development; the .aab (bundleRelease) is for store uploads
           ./gradlew assembleRelease
           mv app/build/outputs/apk/release/app-release.apk ../${{ steps.vars.outputs.name }}.apk
+          # R8 mapping of this APK, to retrace obfuscated stack traces (#181). A build without
+          # minify has none: warn instead of failing
+          MAPPING=app/build/outputs/mapping/release/mapping.txt
+          if [ -f "$MAPPING" ]; then
+            cp "$MAPPING" ../${{ steps.vars.outputs.name }}-mapping.txt
+          else
+            echo "::warning::No R8 mapping.txt at $MAPPING"
+          fi
+
+      # Every build keeps its R8 mapping as a workflow artifact (#181)
+      - name: Upload mapping
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.vars.outputs.name }}-mapping
+          path: ${{ steps.vars.outputs.name }}-mapping.txt
+          if-no-files-found: warn
 
       # Working branches: keep the build as a workflow artifact only
       - name: Upload artifact
@@ -117,12 +133,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          files: ${{ steps.vars.outputs.name }}.apk
+          # The mapping goes next to the APK it belongs to (#181); a missing file is skipped
+          files: |
+            ${{ steps.vars.outputs.name }}.apk
+            ${{ steps.vars.outputs.name }}-mapping.txt
 
       # v2: every version gets a release of its own (#157), at the commit that was built, with
       # the APK and the merged PRs since the previous v2.* release. A push without a version
       # bump (docs, CI) only updates "latest" above. Not marked Latest: the README links
-      # releases/tag/latest
+      # releases/tag/latest. The R8 mapping of the same build is attached as mapping-<version>.txt
+      # (#181), so stack traces of that release can be retraced
       - name: Versioned release
         if: github.ref_name == 'v2'
         env:
@@ -133,24 +153,35 @@ jobs:
           if [ -z "$VER" ]; then echo "No versionName found"; exit 1; fi
           APK="decoder-v2-${VER}.apk"
           cp decoder-v2.apk "$APK"
-          # An existing release is complete only with its APK (Qodo on #158)
-          has_apk() {
-            gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null | grep -qx "$APK"
+          ASSETS=("$APK")
+          MAP="mapping-${VER}.txt"
+          if [ -f decoder-v2-mapping.txt ]; then
+            cp decoder-v2-mapping.txt "$MAP"
+            ASSETS+=("$MAP")
+          fi
+          # An existing release is complete only with its APK (Qodo on #158) and, when this build
+          # has one, its mapping (Qodo on #183). Fills MISSING with what it lacks
+          complete() {
+            local have
+            have=$(gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null) || have=""
+            MISSING=()
+            for a in "${ASSETS[@]}"; do grep -qx "$a" <<< "$have" || MISSING+=("$a"); done
+            [ ${#MISSING[@]} -eq 0 ]
           }
-          # Only the build of the tagged commit may add the missing APK (Qodo on #158)
-          repair_apk() {
+          # Only the build of the tagged commit may add the missing files (Qodo on #158)
+          repair() {
             TAGGED=$(gh api "repos/${{ github.repository }}/commits/$TAG" -q .sha)
             if [ "$TAGGED" = "$(git rev-parse HEAD)" ]; then
-              gh release upload "$TAG" "$APK" --clobber
+              gh release upload "$TAG" "${MISSING[@]}" --clobber
             else
-              echo "::warning::$TAG has no $APK and points to ${TAGGED:0:7}, not this build"
+              echo "::warning::$TAG has no ${MISSING[*]} and points to ${TAGGED:0:7}, not this build"
             fi
           }
           if gh release view "$TAG" >/dev/null 2>&1; then
-            if has_apk; then
+            if complete; then
               echo "Release $TAG exists: only latest was updated"
             else
-              repair_apk
+              repair
             fi
             exit 0
           fi
@@ -166,12 +197,12 @@ jobs:
           else
             NOTES=(--notes "First release of the 2.xx line (v2 branch). Earlier changes: https://github.com/${{ github.repository }}/commits/v2")
           fi
-          if ! gh release create "$TAG" "$APK" --target "$(git rev-parse HEAD)" \
+          if ! gh release create "$TAG" "${ASSETS[@]}" --target "$(git rev-parse HEAD)" \
               --title "OpenIPC Decoder ${VER}" --latest=false "${NOTES[@]}"; then
             # Another build of the same version created it meanwhile, or the upload failed:
-            # the release must exist and carry the APK, else the step fails
+            # the release must exist and carry the APK and the mapping, else the step fails
             gh release view "$TAG" >/dev/null
-            has_apk || repair_apk
+            complete || repair
           fi
 
       - name: Telegram
