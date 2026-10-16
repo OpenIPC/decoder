@@ -111,7 +111,6 @@ Every item, the remote, sharing a URL from another app and **Reset**: [Usage](do
 | [Security](docs/security.md) | credential store, debug server (LAN only), log redaction, no encryption on the network |
 | [Devices](docs/devices.md) | verified and not working devices, hardware decoder notes, device and camera reports |
 | [Drones and Wi‑Fi toys](docs/toys.md) | how toys stream, FLOW-UFO (in testing), what to try with an unknown toy, what to send |
-| [Laboratory](LABORATORY.md) | the test bench: devices, cameras, access, methods |
 
 The change history is the [merged pull requests](https://github.com/OpenIPC/decoder/pulls?q=is%3Apr+is%3Amerged+base%3Av2) and the [commits of v2](https://github.com/OpenIPC/decoder/commits/v2).
 

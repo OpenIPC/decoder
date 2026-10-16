@@ -125,7 +125,7 @@ Not supported: G.726, MP4A-LATM with in-band configuration (`cpresent=1`) ([#14]
 
 ## What the servers support
 
-Measured on the lab cameras; details and dates in [LABORATORY.md](../LABORATORY.md#what-the-servers-support).
+Measured on the lab cameras.
 
 | Feature | OpenIPC Majestic | XM (`H264DVR 1.0`) |
 |---|---|---|

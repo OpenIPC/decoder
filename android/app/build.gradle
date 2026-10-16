@@ -23,8 +23,8 @@ android {
         applicationId "com.openipc.decoder"
         minSdk 21
         targetSdk 36
-        versionCode 36
-        versionName "2.11"
+        versionCode 38
+        versionName "2.13"
 
         buildConfigField "String", "GIT_HASH", "\"${getGitHash()}\""
     }

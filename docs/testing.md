@@ -50,7 +50,7 @@ CI is the reference: the project does not depend on local builds.
 - `v2` is **2.xx** (from 2.00). Every pull request that changes the app bumps `android/app/build.gradle` as its last commit before the merge: `versionName` +0.01, `versionCode` +1. Docs-only and CI-only pull requests do not.
 - `basic` keeps its 1.07.x line.
 - Development is continuous, so there is **no release per version** (#194). The [`latest`](https://github.com/OpenIPC/decoder/releases/tag/latest) release always holds the newest `v2` and `basic` builds. Every `v2` and `basic` build is also posted to the OpenIPC Telegram channel with its version and commit, and that is where their older builds can be found. Builds of other branches are only workflow artifacts of their runs (90 days).
-- **Test pre-releases**: to let a reporter test a branch, a pre-release named after the issue is made by hand from the branch's CI artifact, e.g. [`flowufo-187-test1`](https://github.com/OpenIPC/decoder/releases/tag/flowufo-187-test1) for #187. It is deleted when the test is over.
+- **Test pre-releases**: to let a reporter test a branch, a pre-release named after the issue is made by hand from the branch's CI artifact, e.g. [`toys-187-test2`](https://github.com/OpenIPC/decoder/releases/tag/toys-187-test2) for #187. It is deleted when the test is over, or replaced by the next one.
 
   ```sh
   B=feat/my-branch                       # the branch to test
@@ -136,4 +136,4 @@ A release build needs a keystore at `android/key.jks` and `KEYSTORE_PASS`, `KEY_
 
 ## Device tests
 
-The bench (devices, cameras, addresses, adb access, scripts, log lines, pitfalls) is described in [LABORATORY.md](../LABORATORY.md). Test rounds run as GitHub issues that follow the structure of [#53](https://github.com/OpenIPC/decoder/issues/53). Reports from users: [devices.md](devices.md#reporting).
+Test rounds run as GitHub issues that follow the structure of [#53](https://github.com/OpenIPC/decoder/issues/53). Reports from users: [devices.md](devices.md#reporting).

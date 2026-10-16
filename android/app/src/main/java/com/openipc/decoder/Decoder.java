@@ -8,14 +8,18 @@
 package com.openipc.decoder;
 
 import android.annotation.SuppressLint;
+import android.annotation.TargetApi;
 import android.app.Activity;
 
+import android.content.ActivityNotFoundException;
+import android.content.ClipData;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.graphics.Insets;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -36,6 +40,7 @@ import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -45,8 +50,11 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
@@ -148,6 +156,12 @@ public class Decoder extends Activity
     // Pinch-to-zoom
     private ScaleGestureDetector mScaleDetector;
     private GestureDetector mGestureDetector;
+    // A swipe from the screen edge or a drag is no tap that opens the menu (#213)
+    private TapGuard tapGuard;
+    /** The system's gesture insets (left, top, right, bottom), Android 10+. */
+    private final int[] gestureInsets = new int[4];
+    /** Set from a touch's up until the click it posts has run (#213). */
+    private boolean clickFromTouch;
     private float mZoomScale = 1.0f;
     private float mPanX;
     private float mPanY;
@@ -266,6 +280,7 @@ public class Decoder extends Activity
             }
         });
 
+        tapGuard = new TapGuard(ViewConfiguration.get(this).getScaledTouchSlop());
         // Pinch-to-zoom
         mScaleDetector = new ScaleGestureDetector(this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
             @Override public boolean onScale(ScaleGestureDetector d) {
@@ -293,6 +308,7 @@ public class Decoder extends Activity
             }
             @Override public boolean onDoubleTap(MotionEvent e) { resetZoom(); return true; }
             @Override public boolean onSingleTapConfirmed(MotionEvent e) {
+                if (!tapGuard.wasTap()) return true;
                 menuManager.showMenu(menuAnchor, quadEnabled, mActive, mVersion,
                         BuildConfig.GIT_HASH, mHosts);
                 return true;
@@ -320,18 +336,23 @@ public class Decoder extends Activity
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            WindowInsetsController ctrl = getWindow().getInsetsController();
-            if (ctrl != null) {
-                ctrl.hide(WindowInsets.Type.navigationBars());
-                ctrl.setSystemBarsBehavior(
-                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-            }
-        } else {
-            //noinspection deprecation
-            getWindow().getDecorView().setSystemUiVisibility(
-                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            View decor = getWindow().getDecorView();
+            decor.setOnApplyWindowInsetsListener((v, insets) -> {
+                saveGestureInsets(insets);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    // Bars that stay shown while the video has the focus (not the transient
+                    // ones after a swipe, which the app does not see) go away again after a
+                    // moment (#202)
+                    v.removeCallbacks(hideBarsRunnable);
+                    if (hasWindowFocus() && insets.isVisible(WindowInsets.Type.systemBars())) {
+                        v.postDelayed(hideBarsRunnable, BARS_REHIDE_MS);
+                    }
+                }
+                return v.onApplyWindowInsets(insets);
+            });
         }
+        hideSystemBars();
 
         updateStatus("disconnected");
         DebugServer.get().setSource(debugSource);
@@ -424,8 +445,9 @@ public class Decoder extends Activity
             if (quadStats[i] == null || c == null) continue;
             quadStats[i].setVisibility(showStats ? View.VISIBLE : View.GONE);
         }
-        Toast.makeText(this, showStats ? "Debug text on" : "Debug text off",
-                Toast.LENGTH_SHORT).show();
+        // The report is on the same item (#207): said where it is seen
+        Toast.makeText(this, showStats ? "Debug text on \u00b7 hold Debug to save a report"
+                : "Debug text off", Toast.LENGTH_SHORT).show();
     }
 
     /** One line http://<address>:8085/ per device address while the debug text is on. */
@@ -501,7 +523,11 @@ public class Decoder extends Activity
     }
 
     @Override
-    public void onExit() { finishAndRemoveTask(); }
+    public void onExit() {
+        // Not left showing over a finishing activity (#205)
+        menuManager.dismissAll();
+        finishAndRemoveTask();
+    }
 
     /**
      * Reset (#171): stops every stream, deletes the stored settings, the key of the encrypted
@@ -615,6 +641,12 @@ public class Decoder extends Activity
 
         Intent intent = getIntent();
         String link = intent.getStringExtra(Intent.EXTRA_TEXT);
+        // A report shared back to the app (#207) is no camera link (Qodo on #208)
+        if (link != null && link.startsWith(DebugServer.REPORT_TITLE)) {
+            Log.i(TAG, "Shared text is a report, not a link: ignored");
+            intent.removeExtra(Intent.EXTRA_TEXT);
+            link = null;
+        }
         if (link != null) {
             Log.d(TAG, "Link: " + Uri.parse(link).getHost());
             mHosts[mActive] = sanitizeUrl(link);
@@ -865,9 +897,11 @@ public class Decoder extends Activity
             for (int col = 0; col < size; col++) {
                 int idx = size == 1 ? U_CELL : row * size + col;
                 quadViews[idx] = new SurfaceView(this);
-                quadViews[idx].setOnClickListener(cv ->
-                        menuManager.showMenu(findViewById(R.id.decoder), quadEnabled, mActive, mVersion,
-                                BuildConfig.GIT_HASH, mHosts));
+                quadViews[idx].setOnClickListener(cv -> {
+                    if (!touchTapOrKey()) return;
+                    menuManager.showMenu(findViewById(R.id.decoder), quadEnabled, mActive, mVersion,
+                            BuildConfig.GIT_HASH, mHosts);
+                });
                 // Each cell is a FrameLayout so overlays can be stacked on the video
                 FrameLayout cell = new FrameLayout(this);
                 cell.addView(quadViews[idx], new FrameLayout.LayoutParams(
@@ -921,15 +955,18 @@ public class Decoder extends Activity
     /** Shown over the U cell until its first frame: where to send the stream. */
     private TextView udpHintCell() {
         TextView hint = new TextView(this);
-        hint.setText(udpHintText(NetInfo.addresses(), UDP_RTP_PORT));
+        hint.setText(udpHintText(NetInfo.udpAddresses(), UDP_RTP_PORT));
         hint.setTextColor(Color.GRAY);
         hint.setTextSize(13);
         hint.setGravity(Gravity.CENTER);
         hint.setPadding(dp(12), dp(12), dp(12), dp(12));
         hint.setBackgroundColor(Color.BLACK);
         // Like the camera cells and the video view: a tap opens the menu
-        hint.setOnClickListener(v -> menuManager.showMenu(findViewById(R.id.decoder),
-                quadEnabled, mActive, mVersion, BuildConfig.GIT_HASH, mHosts));
+        hint.setOnClickListener(v -> {
+            if (!touchTapOrKey()) return;
+            menuManager.showMenu(findViewById(R.id.decoder),
+                    quadEnabled, mActive, mVersion, BuildConfig.GIT_HASH, mHosts);
+        });
         return hint;
     }
 
@@ -939,7 +976,7 @@ public class Decoder extends Activity
         if (v == null) return;
         View overlay = ((View) v.getParent()).findViewWithTag("quad_overlay_" + U_CELL);
         if (!(overlay instanceof TextView) || overlay.getVisibility() != View.VISIBLE) return;
-        String text = udpHintText(NetInfo.addresses(), UDP_RTP_PORT);
+        String text = udpHintText(NetInfo.udpAddresses(), UDP_RTP_PORT);
         TextView hint = (TextView) overlay;
         if (!text.contentEquals(hint.getText())) hint.setText(text);
     }
@@ -1074,7 +1111,7 @@ public class Decoder extends Activity
             overlay.setBackgroundColor(Color.BLACK);
             cell.addView(overlay);
         } else if (i == U_CELL) {
-            ((TextView) overlay).setText(udpHintText(NetInfo.addresses(), UDP_RTP_PORT));
+            ((TextView) overlay).setText(udpHintText(NetInfo.udpAddresses(), UDP_RTP_PORT));
         }
         overlay.setVisibility(View.VISIBLE);
         overlay.bringToFront();
@@ -1534,7 +1571,7 @@ public class Decoder extends Activity
         if (udpViewShown) {
             Map<String, Object> udp = new LinkedHashMap<>();
             udp.put("port", UDP_RTP_PORT);
-            udp.put("addresses", NetInfo.addresses());
+            udp.put("addresses", NetInfo.udpAddresses());
             m.put("udp", udp);
         } else if (!quadEnabled) {
             Map<String, Object> single = new LinkedHashMap<>();
@@ -1814,6 +1851,11 @@ public class Decoder extends Activity
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == REQUEST_STORAGE_FOR_REPORT) {
+            // Refused: saved all the same, in the app's own folder (#207)
+            startSavingReport();
+            return;
+        }
         if (requestCode != REQUEST_STORAGE_FOR_SCREENSHOT) return;
         if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
             takeScreenshot();
@@ -1876,6 +1918,187 @@ public class Decoder extends Activity
         }
         bitmap.recycle();
         runOnUiThread(() -> isTakingScreenshot = false);
+    }
+
+    // ====================== Save report (#207) ======================
+
+    private static final int REQUEST_STORAGE_FOR_REPORT = 2;
+    /** Shared as text when there is no file to share (Android 9 and older): Binder's limit. */
+    private static final int REPORT_SHARE_TEXT_MAX = 50_000;
+    private boolean isSavingReport;
+
+    /** Long press on Debug: the debug page's /report.txt as a file, then the Share sheet. */
+    @Override
+    public void onSaveReport() {
+        if (isSavingReport) return;
+        // Android 6-9 write to the shared Download folder: the runtime permission, like
+        // screenshots (#28); Android 10+ go through MediaStore with none
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                && Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                && checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] {android.Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                    REQUEST_STORAGE_FOR_REPORT);
+            return;
+        }
+        startSavingReport();
+    }
+
+    private void startSavingReport() {
+        if (isSavingReport) return;
+        isSavingReport = true;
+        // The state is read on the UI thread, up to a timeout: the report is made beside it
+        new Thread(this::saveReport, "report").start();
+    }
+
+    /** On the report thread. */
+    private void saveReport() {
+        Date now = new Date();
+        String name = DebugServer.reportName(now);
+        String text;
+        Uri uri = null;
+        String where;
+        try {
+            text = DebugServer.get().reportText(now);
+            byte[] data = text.getBytes(StandardCharsets.UTF_8);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                uri = writeReportToDownloads(name, data);
+                where = Environment.DIRECTORY_DOWNLOADS + "/OpenIPC/" + name;
+            } else {
+                where = writeReportFile(name, data).getAbsolutePath();
+            }
+        } catch (IOException | RuntimeException e) {
+            Log.e(TAG, "Could not save the report", e);
+            runOnUiThread(() -> {
+                isSavingReport = false;
+                Toast.makeText(this, "Failed to save the report", Toast.LENGTH_LONG).show();
+            });
+            return;
+        }
+        Log.i(TAG, "Report saved: " + where);
+        final Uri shared = uri;
+        final String report = text;
+        final String at = where;
+        runOnUiThread(() -> {
+            isSavingReport = false;
+            Toast.makeText(this, "Report saved: " + at, Toast.LENGTH_LONG).show();
+            if (!isFinishing()) shareReport(name, shared, report, at);
+        });
+    }
+
+    /** Android 10+: Download/OpenIPC through MediaStore, no permission. */
+    @android.annotation.TargetApi(Build.VERSION_CODES.Q)
+    private Uri writeReportToDownloads(String name, byte[] data) throws IOException {
+        android.content.ContentResolver resolver = getContentResolver();
+        ContentValues values = new ContentValues();
+        values.put(MediaStore.Downloads.DISPLAY_NAME, name);
+        values.put(MediaStore.Downloads.MIME_TYPE, "text/plain");
+        values.put(MediaStore.Downloads.RELATIVE_PATH,
+                Environment.DIRECTORY_DOWNLOADS + "/OpenIPC");
+        values.put(MediaStore.Downloads.IS_PENDING, 1);
+        Uri uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+        if (uri == null) throw new IOException("MediaStore did not create " + name);
+        try {
+            try (OutputStream os = resolver.openOutputStream(uri)) {
+                if (os == null) throw new IOException("MediaStore gave no stream for " + name);
+                os.write(data);
+            }
+            // Published only when the pending flag is really cleared (Qodo on #208)
+            values.clear();
+            values.put(MediaStore.Downloads.IS_PENDING, 0);
+            if (resolver.update(uri, values, null, null) != 1) {
+                throw new IOException("MediaStore did not publish " + name);
+            }
+        } catch (IOException | RuntimeException e) {
+            try {
+                resolver.delete(uri, null, null);
+            } catch (RuntimeException ignored) {
+                // Nothing more to clean up
+            }
+            throw e;
+        }
+        return uri;
+    }
+
+    /**
+     * Android 9 and older: Download/OpenIPC with the storage permission; without it (refused,
+     * no shared storage) the app's own folder, which needs none.
+     */
+    @SuppressWarnings("deprecation")
+    private File writeReportFile(String name, byte[] data) throws IOException {
+        File shared = new File(Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOWNLOADS), "OpenIPC");
+        try {
+            return writeFile(shared, name, data);
+        } catch (IOException | SecurityException e) {
+            Log.w(TAG, "Report: " + shared + " not writable (" + e.getMessage()
+                    + "), saving in the app's folder");
+        }
+        File own = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+        if (own == null) own = new File(getFilesDir(), "reports");
+        return writeFile(own, name, data);
+    }
+
+    /** Never over an earlier file: report-…-2.txt and so on if the name is taken (Qodo on #208). */
+    private static File writeFile(File dir, String name, byte[] data) throws IOException {
+        if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("cannot create " + dir);
+        int dot = name.lastIndexOf('.');
+        File f = new File(dir, name);
+        for (int n = 2; !f.createNewFile(); n++) {
+            if (n > 99) throw new IOException("no free name for " + name + " in " + dir);
+            f = new File(dir, name.substring(0, dot) + "-" + n + name.substring(dot));
+        }
+        try (FileOutputStream os = new FileOutputStream(f)) {
+            os.write(data);
+        }
+        return f;
+    }
+
+    /**
+     * The system Share sheet, to send the report later (Telegram, mail). The file itself on
+     * Android 10+; older versions have no FileProvider here, so the text, cut to a size an
+     * intent can carry, with where the whole file is. Skipped where nothing can take it, as
+     * on most TV boxes.
+     */
+    private void shareReport(String name, Uri uri, String text, String where) {
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_SUBJECT, "OpenIPC Decoder " + name);
+        if (uri != null) {
+            send.putExtra(Intent.EXTRA_STREAM, uri);
+            send.setClipData(ClipData.newRawUri(name, uri));
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } else {
+            String body = text.length() <= REPORT_SHARE_TEXT_MAX ? text
+                    : text.substring(0, REPORT_SHARE_TEXT_MAX)
+                            + "\n... cut here; the whole report is in " + where + "\n";
+            send.putExtra(Intent.EXTRA_TEXT, body);
+        }
+        try {
+            // Not to this app itself: it takes shared text as a camera link (Qodo on #208)
+            boolean target = false;
+            for (android.content.pm.ResolveInfo ri
+                    : getPackageManager().queryIntentActivities(send, 0)) {
+                if (ri.activityInfo != null
+                        && !getPackageName().equals(ri.activityInfo.packageName)) {
+                    target = true;
+                    break;
+                }
+            }
+            if (!target) {
+                Log.i(TAG, "Report: no app to share it with");
+                return;
+            }
+            Intent chooser = Intent.createChooser(send, "Share report");
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                chooser.putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS,
+                        new android.content.ComponentName[] {
+                                new android.content.ComponentName(this, Decoder.class)});
+            }
+            startActivity(chooser);
+        } catch (ActivityNotFoundException | SecurityException e) {
+            Log.w(TAG, "Report: cannot share it: " + e.getMessage());
+        }
     }
 
     private void updateResolution(int width, int height) {
@@ -1957,6 +2180,66 @@ public class Decoder extends Activity
         jpegRenderer.release();
         mVideoSurface = next;
         videoDecoder.setSurface(next);
+    }
+
+    /** The system's gesture insets, where a swipe is the system's and no tap (#213). */
+    @TargetApi(Build.VERSION_CODES.Q)
+    @SuppressWarnings("deprecation")
+    private void saveGestureInsets(WindowInsets insets) {
+        Insets g = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                ? insets.getInsets(WindowInsets.Type.systemGestures())
+                : insets.getSystemGestureInsets();
+        gestureInsets[0] = g.left;
+        gestureInsets[1] = g.top;
+        gestureInsets[2] = g.right;
+        gestureInsets[3] = g.bottom;
+    }
+
+    /**
+     * Every touch of the window passes here before the views get it: TapGuard follows the
+     * sequence, so the menu opens on a real tap only, not on a swipe from the edge that shows
+     * the bars (#213) or a drag. Keys (remote, D-pad) do not come here.
+     */
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        if (tapGuard == null) return super.dispatchTouchEvent(ev);
+        switch (ev.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN: {
+                View decor = getWindow().getDecorView();
+                tapGuard.down(ev.getX(), ev.getY(), decor.getWidth(), decor.getHeight(),
+                        TapGuard.edgeZone(gestureInsets, mDensity));
+                break;
+            }
+            case MotionEvent.ACTION_MOVE:
+                tapGuard.moveTo(ev.getX(), ev.getY());
+                break;
+            case MotionEvent.ACTION_UP:
+                tapGuard.up(ev.getX(), ev.getY());
+                clickFromTouch = true;
+                break;
+            case MotionEvent.ACTION_POINTER_DOWN:
+                tapGuard.secondFinger();
+                break;
+            case MotionEvent.ACTION_CANCEL:
+                tapGuard.cancel();
+                break;
+            default:
+                break;
+        }
+        boolean handled = super.dispatchTouchEvent(ev);
+        if (ev.getActionMasked() == MotionEvent.ACTION_UP) {
+            // A view clicks after the up, posted: this runs after that click
+            getWindow().getDecorView().post(() -> clickFromTouch = false);
+        }
+        return handled;
+    }
+
+    /**
+     * A click on a cell or the U hint opens the menu: from a key (remote, D-pad) or
+     * accessibility always, from a touch only when it was a real tap (#213).
+     */
+    private boolean touchTapOrKey() {
+        return !clickFromTouch || tapGuard.wasTap();
     }
 
     private int dp(float dp) {
@@ -2212,6 +2495,9 @@ public class Decoder extends Activity
 
     @Override
     protected void onDestroy() {
+        // The menu and the dialogs go with the activity, or Android logs them as leaked (#205)
+        if (menuManager != null) menuManager.dismissAll();
+        getWindow().getDecorView().removeCallbacks(hideBarsRunnable);
         super.onDestroy();
         DebugServer.get().clearSource(debugSource);
         streamProbes.shutdown();
@@ -2232,10 +2518,46 @@ public class Decoder extends Activity
         }
     }
 
+    /** How long bars that stay shown over the video are left before they are hidden (#202). */
+    private static final long BARS_REHIDE_MS = 3000;
+    private final Runnable hideBarsRunnable = this::hideSystemBars;
+
+    /**
+     * Full screen over the whole display in every viewing mode (single, grid, U), with no
+     * status or navigation bar (#202). A swipe from an edge shows them for a moment only.
+     * Android 15 draws apps edge to edge, so bars left shown cover the picture; some systems
+     * (an OPPO, #187) bring them back after another window had the focus, so this runs again
+     * whenever the activity resumes or gets the focus back: after the menu, a dialog or the
+     * WebUI, which keeps the bars and its insets padding (#169, #180).
+     */
+    private void hideSystemBars() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowInsetsController ctrl = getWindow().getInsetsController();
+            if (ctrl != null) {
+                ctrl.setSystemBarsBehavior(
+                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                ctrl.hide(WindowInsets.Type.systemBars());
+            }
+        } else {
+            //noinspection deprecation
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_FULLSCREEN);
+        }
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) hideSystemBars();
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
         mResumed = true;
+        hideSystemBars();
         startStreams();
         updateDebugUrls();
     }
@@ -2288,6 +2610,9 @@ public class Decoder extends Activity
         switch (keyCode) {
             case KeyEvent.KEYCODE_DPAD_CENTER:
             case KeyEvent.KEYCODE_ENTER:
+                // A held OK toggles once: a long OK on Debug closes the menu while the key is
+                // still down, its repeats must not open it again (#207, Qodo on #208)
+                if (event.getRepeatCount() > 0) return true;
                 if (menuManager.isPopupShowing()) {
                     menuManager.dismissPopup();
                 } else {

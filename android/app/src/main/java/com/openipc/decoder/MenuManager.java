@@ -66,6 +66,8 @@ class MenuManager {
     private TextView mWebUiBtn;
     TextView[] camButtons;
     private Dialog mBrowserDialog;
+    /** The URL editor or the Reset confirmation while it is shown (#205). */
+    private Dialog mDialog;
     private int mActiveQualityColor = Color.WHITE;
 
     interface Listener {
@@ -77,6 +79,8 @@ class MenuManager {
         void onShowUdp();
         /** D: debug text (resolution, codec, fps) in every multi-view cell on or off. */
         void onToggleStats();
+        /** A long press on Debug: stats and log saved as one file, then shared (#207). */
+        void onSaveReport();
         void onExit();
         /** Reset: every stored setting cleared, the app restarted as on first start (#171). */
         void onReset();
@@ -127,6 +131,31 @@ class MenuManager {
     }
 
     boolean isPopupShowing() { return mMenuPopup != null; }
+
+    /**
+     * The menu, the open dialog and the WebUI closed before the activity finishes: a window
+     * still showing then is logged as leaked (#205).
+     */
+    void dismissAll() {
+        PopupWindow popup = mMenuPopup;
+        mMenuPopup = null;
+        Dialog dialog = mDialog;
+        mDialog = null;
+        try {
+            if (popup != null && popup.isShowing()) popup.dismiss();
+            if (dialog != null && dialog.isShowing()) dialog.dismiss();
+        } catch (Exception e) {
+            Log.e(TAG, "Error dismissing the menu", e);
+        }
+        onPauseDismissBrowser();
+    }
+
+    private void track(Dialog dialog) {
+        mDialog = dialog;
+        dialog.setOnDismissListener(d -> {
+            if (mDialog == d) mDialog = null;
+        });
+    }
 
     void showMenu(View anchor, boolean quadEnabled, int mActive, String version,
                   String gitHash, String[] mHosts) {
@@ -258,6 +287,18 @@ class MenuManager {
             if (p != null) p.dismiss();
             if (listener != null) listener.onToggleStats();
         });
+        // Save report (#207), no cell of its own: the grid keeps its shape (#177). A long
+        // touch, a long OK on a remote (View does it for DPAD_CENTER and ENTER), or Menu
+        // while Debug has the focus, for remotes whose OK has no long press
+        statsBtn.setOnLongClickListener(v -> {
+            saveReport();
+            return true;
+        });
+        statsBtn.setOnKeyListener((v, keyCode, event) -> {
+            if (keyCode != KeyEvent.KEYCODE_MENU) return false;
+            if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) saveReport();
+            return true;
+        });
         // UDP: the reserved UDP RTP cell full screen (#68, #87)
         final TextView udpBtn = wordItem(actionRow, "UDP", cell);
         if (udpShown) highlightItem(udpBtn);
@@ -287,6 +328,12 @@ class MenuManager {
         mMenuIsCached = true;
         mFocusItem = focusItem(quadEnabled, mActive);
         focusForKeys(layout, mFocusItem);
+    }
+
+    private void saveReport() {
+        PopupWindow p = mMenuPopup;
+        if (p != null) p.dismiss();
+        if (listener != null) listener.onSaveReport();
     }
 
     private void updateCachedMenu(boolean quadEnabled, int mActive, String[] mHosts) {
@@ -536,6 +583,7 @@ class MenuManager {
 
         AlertDialog dialog = builder.create();
         dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+        track(dialog);
         dialog.show();
         input.requestFocus();
     }
@@ -560,6 +608,7 @@ class MenuManager {
             View cancel = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
             if (cancel != null) cancel.requestFocus();
         });
+        track(dialog);
         dialog.show();
     }
 
