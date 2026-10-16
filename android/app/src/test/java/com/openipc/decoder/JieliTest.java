@@ -157,6 +157,32 @@ public class JieliTest {
     }
 
     @Test
+    public void rtStreamIgnoresLatePiecesOfOlderFrames() {
+        // A current piece, then in the same datagram a late piece of an older frame, then the
+        // rest of the current frame (Qodo on #224)
+        Jieli.RtStream st = new Jieli.RtStream();
+        byte[] old = jpeg(2000);
+        byte[] o = streamPacket(9, 2000, 0, old, 0);
+        assertEquals(2000, st.feed(o, 0, o.length));
+        byte[] j = jpeg(6000);
+        byte[] a = streamPacket(10, 6000, 0, Arrays.copyOfRange(j, 0, 3000), 0);
+        byte[] late = streamPacket(8, 4000, 2000, new byte[2000], 0);
+        byte[] dgram = new byte[a.length + late.length];
+        System.arraycopy(a, 0, dgram, 0, a.length);
+        System.arraycopy(late, 0, dgram, a.length, late.length);
+        assertEquals(0, st.feed(dgram, 0, dgram.length));
+        byte[] b = streamPacket(10, 6000, 3000, Arrays.copyOfRange(j, 3000, 6000), 0);
+        int n = st.feed(b, 0, b.length);
+        assertEquals(6000, n);
+        assertArrayEquals(j, Arrays.copyOf(st.frame(), n));
+        assertEquals(0, st.dropped);
+        assertEquals(1, st.late);
+        // A repeat of the frame just done is late as well
+        assertEquals(0, st.feed(b, 0, b.length));
+        assertEquals(2, st.late);
+    }
+
+    @Test
     public void rtStreamUsesOnlyThePiece() {
         // A piece shorter than its datagram: what follows is not part of this frame; the rest
         // of the frame comes at offset 2964
