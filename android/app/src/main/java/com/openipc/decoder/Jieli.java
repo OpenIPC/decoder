@@ -25,6 +25,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -586,8 +587,8 @@ final class Jieli {
     /**
      * The toy's own video stream on UDP 2224 (#187), as a YL3 sent it: a 20-byte header,
      * then a piece of a JPEG. Header, little-endian: byte 0 the type (2 for JPEG, bit 7 set
-     * on the last piece of a frame), bytes 2–3 the length of this piece, 4–7 a packet
-     * counter, 8–11 the length of the JPEG, 12–15 the offset of this piece in it. The
+     * on the last piece of a frame; not relied on), bytes 2–3 the length of this piece, 4–7
+     * a packet counter, 8–11 the length of the JPEG, 12–15 the offset of this piece in it. The
      * datagram can be longer than the piece: what follows is left over from earlier frames
      * (taking it gave a broken lower half), so only the piece is used. Pure Java, for the
      * unit tests.
@@ -600,6 +601,8 @@ final class Jieli {
 
         private byte[] frame = new byte[64 * 1024];
         private int size = -1;
+        /** Bytes of the frame received so far: duplicates and overlaps count once. */
+        private final BitSet got = new BitSet();
         private int filled;
         int frames;
         int dropped;
@@ -627,7 +630,6 @@ final class Jieli {
                 otherTypes++;
                 return 0;
             }
-            boolean last = (b[off] & LAST_PIECE) != 0;
             int total = le32(b, off + 8);
             int at = le32(b, off + 12);
             int length = (b[off + 2] & 0xFF) | (b[off + 3] & 0xFF) << 8;
@@ -636,28 +638,24 @@ final class Jieli {
                 drop("bad header: length " + total + ", offset " + at, 0);
                 return 0;
             }
-            if (at == 0) {
-                // A new frame; one still missing pieces is lost
-                if (size > 0) drop("incomplete: " + filled + " of " + size + " bytes", filled);
-                size = total;
-                filled = 0;
-                if (frame.length < total) frame = new byte[total];
-            } else if (size != total) {
-                return 0; // a piece of a frame whose start was lost
-            }
             int piece = Math.min(length, total - at);
-            System.arraycopy(b, off + HEADER, frame, at, piece);
-            filled += piece;
-            if (filled < size) {
-                if (last) {
-                    drop("incomplete: " + filled + " of " + size + " bytes at the last piece",
-                            filled);
-                    size = -1;
-                }
-                return 0;
+            // Pieces may come twice or out of order (Qodo on #215): a piece belongs to the frame
+            // being put together if the length matches and it brings bytes not yet received; a
+            // repeat is ignored. Anything else starts the next frame, and only then is an
+            // unfinished one given up, even if its last piece came already.
+            if (size == total && got.get(at, at + piece).cardinality() == piece) {
+                if (same(b, off + HEADER, at, piece)) return 0;
+                startFrame(total);
+            } else if (size != total) {
+                startFrame(total);
             }
+            System.arraycopy(b, off + HEADER, frame, at, piece);
+            filled += piece - got.get(at, at + piece).cardinality();
+            got.set(at, at + piece);
+            if (filled < size) return 0;
             int n = size;
             size = -1;
+            got.clear();
             int end = jpegEnd(frame, n);
             if (end == 0) {
                 drop(n + " bytes, starts " + FlowUfo.hex(frame, 0, Math.min(n, 4)) + ", ends "
@@ -671,6 +669,21 @@ final class Jieli {
 
         byte[] frame() {
             return frame;
+        }
+
+        private void startFrame(int total) {
+            if (size > 0) drop("incomplete: " + filled + " of " + size + " bytes", size);
+            size = total;
+            filled = 0;
+            got.clear();
+            if (frame.length < total) frame = new byte[total];
+        }
+
+        private boolean same(byte[] b, int from, int at, int n) {
+            for (int i = 0; i < n; i++) {
+                if (frame[at + i] != b[from + i]) return false;
+            }
+            return true;
         }
 
         /** Length up to the last FFD9 when {@code b} starts with FFD8, else 0. */

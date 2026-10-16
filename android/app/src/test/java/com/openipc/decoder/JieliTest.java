@@ -152,14 +152,46 @@ public class JieliTest {
         byte[] j = jpeg(6000);
         byte[] first = streamPacket(1, 6000, 0, Arrays.copyOfRange(j, 0, 2000), 0);
         assertEquals(0, st.feed(first, 0, first.length));
-        // The middle piece is lost; the last one ends the frame
+        // The middle piece is lost; the last one alone does not finish the frame
         byte[] last = streamPacket(3, 6000, 4000, Arrays.copyOfRange(j, 4000, 6000), 0);
         assertEquals(0, st.feed(last, 0, last.length));
-        assertEquals(1, st.dropped);
-        assertTrue(st.lastDropReason, st.lastDropReason.startsWith("incomplete"));
-        // The next frame plays
+        assertEquals(0, st.dropped);
+        // The next frame plays, the unfinished one is given up
         byte[] next = streamPacket(4, 3000, 0, jpeg(3000), 0);
         assertEquals(3000, st.feed(next, 0, next.length));
+        assertEquals(1, st.dropped);
+        assertTrue(st.lastDropReason, st.lastDropReason.startsWith("incomplete"));
+    }
+
+    @Test
+    public void rtStreamIgnoresRepeatedPieces() {
+        // A repeated piece must not count twice (Qodo on #215)
+        Jieli.RtStream st = new Jieli.RtStream();
+        byte[] j = jpeg(6000);
+        byte[] a = streamPacket(1, 6000, 0, Arrays.copyOfRange(j, 0, 3000), 0);
+        assertEquals(0, st.feed(a, 0, a.length));
+        assertEquals(0, st.feed(a, 0, a.length));
+        byte[] b = streamPacket(2, 6000, 3000, Arrays.copyOfRange(j, 3000, 6000), 0);
+        int n = st.feed(b, 0, b.length);
+        assertEquals(6000, n);
+        assertArrayEquals(j, Arrays.copyOf(st.frame(), n));
+        assertEquals(0, st.dropped);
+    }
+
+    @Test
+    public void rtStreamTakesPiecesOutOfOrder() {
+        // The last piece before the middle one, the first one last (Qodo on #215)
+        Jieli.RtStream st = new Jieli.RtStream();
+        byte[] j = jpeg(6000);
+        byte[] last = streamPacket(3, 6000, 4000, Arrays.copyOfRange(j, 4000, 6000), 0);
+        byte[] mid = streamPacket(2, 6000, 2000, Arrays.copyOfRange(j, 2000, 4000), 0);
+        byte[] first = streamPacket(1, 6000, 0, Arrays.copyOfRange(j, 0, 2000), 0);
+        assertEquals(0, st.feed(last, 0, last.length));
+        assertEquals(0, st.feed(mid, 0, mid.length));
+        int n = st.feed(first, 0, first.length);
+        assertEquals(6000, n);
+        assertArrayEquals(j, Arrays.copyOf(st.frame(), n));
+        assertEquals(0, st.dropped);
     }
 
     @Test
@@ -168,10 +200,11 @@ public class JieliTest {
         // Start lost: a middle piece alone gives nothing
         byte[] mid = streamPacket(5, 9000, 4000, new byte[4000], 0);
         assertEquals(0, st.feed(mid, 0, mid.length));
-        // Not a JPEG
+        assertEquals(0, st.dropped);
+        // Not a JPEG; it also ends the unfinished frame
         byte[] junk = streamPacket(6, 100, 0, new byte[100], 0);
         assertEquals(0, st.feed(junk, 0, junk.length));
-        assertEquals(1, st.dropped);
+        assertEquals(2, st.dropped);
         assertTrue(st.lastDropReason, st.lastDropReason.contains("no FFD8"));
         assertEquals(100, st.lastDropped.length);
         // A frame cut short by the next one
@@ -180,7 +213,7 @@ public class JieliTest {
         assertEquals(0, st.feed(first, 0, first.length));
         byte[] next = streamPacket(8, 4600, 0, jpeg(4600), 0);
         assertEquals(4600, st.feed(next, 0, next.length));
-        assertEquals(2, st.dropped);
+        assertEquals(3, st.dropped);
         // Another type (audio?) and a bad length are ignored
         byte[] other = streamPacket(9, 4600, 0, jpeg(4600), 0);
         other[0] = 1;
