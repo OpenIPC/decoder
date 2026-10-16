@@ -73,9 +73,10 @@ public class JieliTest {
     /** A datagram of the toy's stream on UDP 2224 as a YL3 sent it (#187). */
     private static byte[] streamPacket(int counter, int total, int offset, byte[] piece, int tail) {
         byte[] b = new byte[Jieli.RtStream.HEADER + piece.length + tail];
-        b[0] = 2;
-        b[2] = (byte) 0x94;
-        b[3] = 0x0B;
+        // Type 2, bit 7 on the last piece; bytes 2-3 the length of this piece
+        b[0] = (byte) (offset + piece.length >= total ? 0x82 : 0x02);
+        b[2] = (byte) piece.length;
+        b[3] = (byte) (piece.length >>> 8);
         le32(b, 4, counter);
         le32(b, 8, total);
         le32(b, 12, offset);
@@ -125,6 +126,40 @@ public class JieliTest {
         int n = st.feed(last, 0, last.length);
         assertEquals(10000, n);
         assertArrayEquals(j, Arrays.copyOf(st.frame(), n));
+    }
+
+    @Test
+    public void rtStreamUsesOnlyThePiece() {
+        // As test build 3 showed it: 2964 of 4600 bytes in a 4640-byte datagram whose rest is
+        // left over from an earlier frame (even with an FFD9); the rest comes at offset 2964
+        Jieli.RtStream st = new Jieli.RtStream();
+        byte[] j = jpeg(4600);
+        byte[] first = streamPacket(1, 4600, 0, Arrays.copyOfRange(j, 0, 2964), 0);
+        byte[] dgram = Arrays.copyOf(first, 4640);
+        byte[] stale = jpeg(4600 - 2964 + 20);
+        System.arraycopy(stale, 0, dgram, first.length, stale.length);
+        assertEquals(0, st.feed(dgram, 0, dgram.length));
+        byte[] second = streamPacket(2, 4600, 2964, Arrays.copyOfRange(j, 2964, 4600), 40);
+        int n = st.feed(second, 0, second.length);
+        assertEquals(4600, n);
+        assertArrayEquals(j, Arrays.copyOf(st.frame(), n));
+        assertEquals(0, st.dropped);
+    }
+
+    @Test
+    public void rtStreamDropsAFrameWithAPieceMissing() {
+        Jieli.RtStream st = new Jieli.RtStream();
+        byte[] j = jpeg(6000);
+        byte[] first = streamPacket(1, 6000, 0, Arrays.copyOfRange(j, 0, 2000), 0);
+        assertEquals(0, st.feed(first, 0, first.length));
+        // The middle piece is lost; the last one ends the frame
+        byte[] last = streamPacket(3, 6000, 4000, Arrays.copyOfRange(j, 4000, 6000), 0);
+        assertEquals(0, st.feed(last, 0, last.length));
+        assertEquals(1, st.dropped);
+        assertTrue(st.lastDropReason, st.lastDropReason.startsWith("incomplete"));
+        // The next frame plays
+        byte[] next = streamPacket(4, 3000, 0, jpeg(3000), 0);
+        assertEquals(3000, st.feed(next, 0, next.length));
     }
 
     @Test
@@ -328,7 +363,7 @@ public class JieliTest {
         assertEquals("192.168.80.1", u.host);
         assertEquals(3333, u.port);
         assertEquals(6666, u.rtpPort);
-        assertEquals(270, u.rotate);
+        assertEquals(90, u.rotate);
         assertEquals(0, Jieli.Url.parse("jieli://?rotate=0").rotate);
         assertEquals(90, Jieli.Url.parse("jieli://?rotate=90").rotate);
         assertEquals(0, u.width);

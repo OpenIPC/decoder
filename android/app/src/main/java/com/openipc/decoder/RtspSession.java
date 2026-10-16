@@ -783,7 +783,8 @@ class RtspSession {
     /** Raw bytes of a jieli:// slot for the debug page (#187), see Jieli.Client.raw(). */
     byte[] jieliRaw(String which) {
         Jieli.Client c = jieli;
-        return c != null ? c.raw(which) : null;
+        byte[] b = c != null ? c.raw(which) : null;
+        return b != null ? b : Jieli.Client.lastRaw(which);
     }
 
     /**

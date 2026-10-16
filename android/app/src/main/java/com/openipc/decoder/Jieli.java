@@ -56,6 +56,9 @@ final class Jieli {
     static final int RTP_PORT = 6666;
     /** The toy's own stream (#187): a YL3 sends its JPEG frames here, not as RTP to 6666. */
     static final int STREAM_PORT = 2224;
+    /** The last frame of any session, and the last dropped one, for the debug page. */
+    static volatile byte[] lastFrameAnySession;
+    static volatile byte[] lastDroppedAnySession;
     /** The port listened on for that stream; STREAM_PORT but for the tests. */
     static volatile int streamPort = STREAM_PORT;
     static final int DEFAULT_WIDTH = 640;
@@ -63,8 +66,8 @@ final class Jieli {
     static final int DEFAULT_FPS = 25;
     static final int FORMAT_JPEG = 0;
     static final int FORMAT_H264 = 1;
-    /** The YL3's frames come turned (portrait 240×320), as the K200's do (#187, #200). */
-    static final int DEFAULT_ROTATE = 270;
+    /** The YL3's frames come turned (portrait 240×320); 270 showed them upside down (#187). */
+    static final int DEFAULT_ROTATE = 90;
     static final int PT_JPEG = 26;
     static final int PT_H264 = 96;
 
@@ -121,7 +124,7 @@ final class Jieli {
      * refused): w, h, fps (the stream asked for; default what the toy announces in
      * VIDEO_PARAM, else 640x480 at 25), rtp (the local UDP port for the video, 6666),
      * format (0 JPEG, the default, or 1 H.264), rotate (degrees counter-clockwise for JPEG,
-     * 0, 90, 180 or 270; default 270: the YL3's camera is mounted sideways like the K200's).
+     * 0, 90, 180 or 270; default 90: the YL3's camera is mounted sideways).
      */
     static final class Url {
         String host = DEFAULT_HOST;
@@ -582,14 +585,17 @@ final class Jieli {
 
     /**
      * The toy's own video stream on UDP 2224 (#187), as a YL3 sent it: a 20-byte header,
-     * then (a piece of) a JPEG. Header as far as seen, little-endian: byte 0 the type (2 for
-     * JPEG), bytes 4–7 a packet counter, 8–11 the length of the JPEG, 12–15 the offset of
-     * this piece in it. A 640×480 frame fitted one datagram (4600 bytes, 20 more in the
-     * datagram); longer ones are put together by offset. Pure Java, for the unit tests.
+     * then a piece of a JPEG. Header, little-endian: byte 0 the type (2 for JPEG, bit 7 set
+     * on the last piece of a frame), bytes 2–3 the length of this piece, 4–7 a packet
+     * counter, 8–11 the length of the JPEG, 12–15 the offset of this piece in it. The
+     * datagram can be longer than the piece: what follows is left over from earlier frames
+     * (taking it gave a broken lower half), so only the piece is used. Pure Java, for the
+     * unit tests.
      */
     static final class RtStream {
         static final int HEADER = 20;
         static final int TYPE_JPEG = 2;
+        static final int LAST_PIECE = 0x80;
         static final int MAX_FRAME = 1 << 20;
 
         private byte[] frame = new byte[64 * 1024];
@@ -605,7 +611,10 @@ final class Jieli {
         private void drop(String reason, int n) {
             dropped++;
             lastDropReason = reason;
-            if (n > 0) lastDropped = Arrays.copyOf(frame, n);
+            if (n > 0) {
+                lastDropped = Arrays.copyOf(frame, n);
+                lastDroppedAnySession = lastDropped;
+            }
         }
 
         /**
@@ -614,12 +623,15 @@ final class Jieli {
          */
         int feed(byte[] b, int off, int len) {
             if (len <= HEADER) return 0;
-            if ((b[off] & 0xFF) != TYPE_JPEG) {
+            if ((b[off] & 0x7F) != TYPE_JPEG) {
                 otherTypes++;
                 return 0;
             }
+            boolean last = (b[off] & LAST_PIECE) != 0;
             int total = le32(b, off + 8);
             int at = le32(b, off + 12);
+            int length = (b[off + 2] & 0xFF) | (b[off + 3] & 0xFF) << 8;
+            if (length == 0 || length > len - HEADER) length = len - HEADER;
             if (total < 4 || total > MAX_FRAME || at < 0 || at >= total) {
                 drop("bad header: length " + total + ", offset " + at, 0);
                 return 0;
@@ -633,10 +645,17 @@ final class Jieli {
             } else if (size != total) {
                 return 0; // a piece of a frame whose start was lost
             }
-            int piece = Math.min(len - HEADER, total - at);
+            int piece = Math.min(length, total - at);
             System.arraycopy(b, off + HEADER, frame, at, piece);
             filled += piece;
-            if (filled < size) return 0;
+            if (filled < size) {
+                if (last) {
+                    drop("incomplete: " + filled + " of " + size + " bytes at the last piece",
+                            filled);
+                    size = -1;
+                }
+                return 0;
+            }
             int n = size;
             size = -1;
             int end = jpegEnd(frame, n);
@@ -1247,6 +1266,7 @@ final class Jieli {
             int jpeg = rtStream.feed(b, 0, len);
             if (jpeg > 0) {
                 lastStreamFrame = Arrays.copyOf(rtStream.frame(), jpeg);
+                lastFrameAnySession = lastStreamFrame;
                 lastSource = from;
                 if (listener.onJpeg(rtStream.frame(), 0, jpeg)) {
                     videoPort = streamPort;
@@ -1298,6 +1318,15 @@ final class Jieli {
         byte[] raw(String which) {
             return "frame".equals(which) ? lastStreamFrame
                     : "dropped".equals(which) ? rtStream.lastDropped : null;
+        }
+
+        /**
+         * As {@link #raw} after the session ended too: opening the browser on the same phone
+         * pauses the app and ends the session (#187), the frames must outlive it.
+         */
+        static byte[] lastRaw(String which) {
+            return "frame".equals(which) ? lastFrameAnySession
+                    : "dropped".equals(which) ? lastDroppedAnySession : null;
         }
 
         /** For /stats.json. */

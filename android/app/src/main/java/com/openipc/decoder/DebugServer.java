@@ -217,8 +217,8 @@ final class DebugServer {
             case "/jieli-dropped.bin":
                 // The toy's frames as they came (#187), to see what the picture is made from
                 Source src = source;
-                byte[] raw = src != null ? src.jieliRaw(path.startsWith("/jieli-frame")
-                        ? "frame" : "dropped") : null;
+                String which = path.startsWith("/jieli-frame") ? "frame" : "dropped";
+                byte[] raw = src != null ? src.jieliRaw(which) : Jieli.Client.lastRaw(which);
                 if (raw != null) {
                     reply(out, 200, path.endsWith(".jpg") ? "image/jpeg"
                             : "application/octet-stream", raw);

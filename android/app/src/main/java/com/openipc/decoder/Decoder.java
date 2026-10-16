@@ -1390,7 +1390,7 @@ public class Decoder extends Activity
         @Override public byte[] snapshotJpeg(boolean labels) { return debugSnapshotJpeg(labels); }
         @Override public byte[] jieliRaw(String which) {
             RtspClient c = rtspClient;
-            return c != null ? c.jieliRaw(which) : null;
+            return c != null ? c.jieliRaw(which) : Jieli.Client.lastRaw(which);
         }
     };
     /** A cell counts as playing in a snapshot when it showed a frame this recently (#98). */
