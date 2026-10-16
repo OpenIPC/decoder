@@ -30,6 +30,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 
 /**
  * Toy drones with an "HF_xxxxxxxx" access point (Jieli AC79 camera, vendor app "DVRunning 2")
@@ -71,6 +72,13 @@ final class Jieli {
     /** Longer topics or JSON than this are not CTP: the reader looks for the next "CTP:". */
     static final int MAX_TOPIC = 256;
     static final int MAX_JSON = 256 * 1024;
+    /** Distinct CTP topics counted one by one for the stats; the rest together. */
+    static final int MAX_TOPICS = 64;
+    /** How long close() lets the session send CLOSE_RT_STREAM before it closes the TCP. */
+    static volatile long closeGraceMs = 1000;
+    /** Diagnostic ports listen this long, or for this many packets, then are freed. */
+    static volatile long diagnosticMs = 30_000;
+    static final int DIAGNOSTIC_PACKETS = 20;
 
     static final String APP_ACCESS = "APP_ACCESS";
     static final String DATE_TIME = "DATE_TIME";
@@ -667,11 +675,15 @@ final class Jieli {
         /** Waiting (no video) or receiving; text for the status. */
         void onState(boolean receiving, String text);
 
-        /** One RTP packet with payload type 26 (JPEG) or 96 (H.264), valid during the call. */
-        void onRtp(byte[] buf, int offset, int length);
+        /**
+         * One RTP packet with payload type 26 (JPEG) or 96 (H.264), valid during the call.
+         * Returns whether it was usable: only usable video keeps the toy "receiving" (Qodo on
+         * #198), so a toy sending broken packets is still asked for the stream again.
+         */
+        boolean onRtp(byte[] buf, int offset, int length);
 
-        /** One whole JPEG in a datagram without RTP, valid during the call. */
-        default void onJpeg(byte[] buf, int offset, int length) {}
+        /** One whole JPEG without RTP, valid during the call; returns whether it was shown. */
+        default boolean onJpeg(byte[] buf, int offset, int length) { return false; }
     }
 
     /** Binds the CTP socket to the toy's Wi-Fi before it connects; returns what was done. */
@@ -717,6 +729,12 @@ final class Jieli {
         private volatile String requested;
         private final ArrayDeque<String> lastNotifies = new ArrayDeque<>();
         private final Map<String, Integer> topics = new LinkedHashMap<>();
+        /** Messages with a topic beyond the first MAX_TOPICS distinct ones. */
+        private int otherTopics;
+        /** OPEN_RT_STREAM was sent: the session got as far as a PLAY would (Qodo on #198). */
+        volatile boolean streamRequested;
+        /** Counted down when run() has cleaned up. */
+        private final CountDownLatch ended = new CountDownLatch(1);
         private final Reader reader = new Reader();
         private int ctpLogged;
 
@@ -762,14 +780,31 @@ final class Jieli {
         @Override
         public void close() {
             closed = true;
+            Socket connected = null;
             synchronized (lock) {
                 for (DatagramSocket s : udpSockets) s.close();
                 if (tcp != null && !tcpConnected) {
                     try {
                         tcp.close();
                     } catch (IOException ignored) {}
+                } else if (tcp != null) {
+                    connected = tcp;
                 }
             }
+            if (connected == null) return;
+            // The session sends CLOSE_RT_STREAM and closes the TCP itself; a write blocked on a
+            // toy that stopped reading would keep it from that, so after a grace period the
+            // socket is closed from here (Qodo on #188)
+            final Socket s = connected;
+            Thread t = new Thread(() -> {
+                try {
+                    if (!ended.await(closeGraceMs, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                        s.close();
+                    }
+                } catch (InterruptedException | IOException ignored) {}
+            }, tag + "-jieli-close");
+            t.setDaemon(true);
+            t.start();
         }
 
         private String withHint(String text) {
@@ -960,6 +995,7 @@ final class Jieli {
                     tcpConnected = false;
                 }
                 Log.i(TAG, tag + ": Jieli: session ended (" + summary() + ")");
+                ended.countDown();
             }
         }
 
@@ -999,20 +1035,36 @@ final class Jieli {
             Thread th = new Thread(() -> {
                 byte[] b = new byte[65536];
                 DatagramPacket p = new DatagramPacket(b, b.length);
+                // A diagnostic port is only borrowed: freed after a while or a few packets, so
+                // another slot can use it (Qodo on #198)
+                long until = kind == PORT_DIAGNOSTIC ? now() + diagnosticMs : Long.MAX_VALUE;
+                int seen = 0;
                 try {
-                    while (!closed && !d.isClosed()) {
+                    if (kind == PORT_DIAGNOSTIC) d.setSoTimeout(TICK_MS * 10);
+                    while (!closed && !d.isClosed() && now() < until) {
                         p.setLength(b.length);
-                        d.receive(p);
+                        try {
+                            d.receive(p);
+                        } catch (SocketTimeoutException e) {
+                            continue;
+                        }
                         if (kind == PORT_RTP) {
                             video(p, listener);
                         } else if (kind == PORT_STREAM) {
                             stream(p, listener);
                         } else {
                             diagnostic(port, p);
+                            if (++seen >= DIAGNOSTIC_PACKETS) break;
                         }
                     }
                 } catch (IOException e) {
                     // Closed
+                }
+                if (kind == PORT_DIAGNOSTIC) {
+                    synchronized (lock) {
+                        udpSockets.remove(d);
+                    }
+                    d.close();
                 }
             }, tag + "-jieli-" + port);
             th.setDaemon(true);
@@ -1032,6 +1084,7 @@ final class Jieli {
         }
 
         private void requestStream(OutputStream out) throws IOException {
+            streamRequested = true;
             int[] p = videoParams();
             int w = url.width > 0 ? url.width : p[0] > 0 ? p[0] : DEFAULT_WIDTH;
             int h = url.height > 0 ? url.height : p[1] > 0 ? p[1] : DEFAULT_HEIGHT;
@@ -1062,7 +1115,12 @@ final class Jieli {
             ctpReceived++;
             synchronized (topics) {
                 Integer c = topics.get(m.topic);
-                topics.put(m.topic, c == null ? 1 : c + 1);
+                // Bounded: a toy inventing topic names cannot grow it (Qodo on #198)
+                if (c != null || topics.size() < MAX_TOPICS) {
+                    topics.put(m.topic, c == null ? 1 : c + 1);
+                } else {
+                    otherTopics++;
+                }
                 if (!KEEP_ALIVE.equals(m.topic)) {
                     lastNotifies.addLast(truncate(m.toString(), 200));
                     while (lastNotifies.size() > 8) lastNotifies.removeFirst();
@@ -1141,16 +1199,18 @@ final class Jieli {
                     h264Logged = true;
                     Log.i(TAG, tag + ": Jieli: RTP payload type 96: played as H.264");
                 }
-                videoPort = url.rtpPort;
-                lastVideoAt = now();
-                listener.onRtp(b, 0, len);
+                if (listener.onRtp(b, 0, len)) {
+                    videoPort = url.rtpPort;
+                    lastVideoAt = now();
+                }
             } else if (!rtp && len >= 4 && (b[0] & 0xFF) == 0xFF && (b[1] & 0xFF) == 0xD8
                     && (b[len - 2] & 0xFF) == 0xFF && (b[len - 1] & 0xFF) == 0xD9) {
                 // A whole JPEG without RTP: turbodrone takes those too
                 rawJpegs++;
-                videoPort = url.rtpPort;
-                lastVideoAt = now();
-                listener.onJpeg(b, 0, len);
+                if (listener.onJpeg(b, 0, len)) {
+                    videoPort = url.rtpPort;
+                    lastVideoAt = now();
+                }
             } else if (rtp) {
                 if (++otherRtp <= 3) {
                     Log.w(TAG, tag + ": Jieli: RTP payload type " + pt + " on UDP "
@@ -1188,9 +1248,10 @@ final class Jieli {
             if (jpeg > 0) {
                 lastStreamFrame = Arrays.copyOf(rtStream.frame(), jpeg);
                 lastSource = from;
-                videoPort = streamPort;
-                lastVideoAt = now();
-                listener.onJpeg(rtStream.frame(), 0, jpeg);
+                if (listener.onJpeg(rtStream.frame(), 0, jpeg)) {
+                    videoPort = streamPort;
+                    lastVideoAt = now();
+                }
             } else if (rtStream.dropped != droppedLogged && rtStream.dropped <= 3) {
                 droppedLogged = rtStream.dropped;
                 Log.w(TAG, tag + ": Jieli: UDP " + streamPort + ": frame " + droppedLogged
@@ -1257,6 +1318,7 @@ final class Jieli {
             if (reader.skipped > 0) ctp.put("skipped_bytes", reader.skipped);
             synchronized (topics) {
                 ctp.put("topics", new LinkedHashMap<>(topics));
+                if (otherTopics > 0) ctp.put("other_topics", otherTopics);
                 ctp.put("last_notifies", new ArrayList<>(lastNotifies));
             }
             m.put("ctp", ctp);

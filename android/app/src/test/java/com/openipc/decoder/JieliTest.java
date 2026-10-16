@@ -9,6 +9,7 @@ package com.openipc.decoder;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -57,6 +58,7 @@ public class JieliTest {
         Jieli.quietMs = 3000;
         Jieli.ctpSilenceMs = 20_000;
         Jieli.diagnosticPorts = new int[] {1234};
+        Jieli.diagnosticMs = 30_000;
         Jieli.streamPort = Jieli.STREAM_PORT;
     }
 
@@ -508,7 +510,15 @@ public class JieliTest {
         volatile Exception failure;
         final Thread thread;
 
+        /** False: the "decoder" takes nothing, as with broken packets. */
+        final boolean usable;
+
         Running(String url) throws IOException {
+            this(url, true);
+        }
+
+        Running(String url, boolean usable) throws IOException {
+            this.usable = usable;
             client = new Jieli.Client("test", Jieli.Url.parse(url), null, null);
             client.localForHint = Collections.emptyList();
             JpegAssembler assembler = new JpegAssembler(new FramePool(4));
@@ -521,17 +531,21 @@ public class JieliTest {
                         }
 
                         @Override
-                        public void onRtp(byte[] buf, int offset, int length) {
+                        public boolean onRtp(byte[] buf, int offset, int length) {
+                            if (!usable) return false;
                             assembler.assemble(buf, offset, length, f -> {
                                 frames.add(Arrays.copyOf(f.data(), f.length()));
                                 frame.countDown();
                             });
+                            return true;
                         }
 
                         @Override
-                        public void onJpeg(byte[] buf, int offset, int length) {
+                        public boolean onJpeg(byte[] buf, int offset, int length) {
+                            if (!usable) return false;
                             jpegs.add(Arrays.copyOfRange(buf, offset, offset + length));
                             frame.countDown();
+                            return true;
                         }
                     });
                 } catch (Exception e) {
@@ -557,6 +571,7 @@ public class JieliTest {
             assertTrue("no CLOSE_RT_STREAM", toy.closeStream.await(3, TimeUnit.SECONDS));
             assertTrue(r.ended.await(3, TimeUnit.SECONDS));
             assertNull(r.failure);
+            assertTrue(r.client.streamRequested);
 
             List<String> t = toy.topics();
             assertEquals(Arrays.asList(Jieli.APP_ACCESS, Jieli.DATE_TIME, Jieli.KEEP_ALIVE,
@@ -662,6 +677,7 @@ public class JieliTest {
         Jieli.noVideoMs = 300;
         Jieli.reopenMs = 700;
         Jieli.diagnosticPorts = new int[] {diag};
+        Jieli.diagnosticMs = 500;
         try (FakeToy toy = new FakeToy(60000, true)) {
             toy.rtpPort = rtp;
             toy.sendVideo = false;
@@ -688,11 +704,43 @@ public class JieliTest {
             @SuppressWarnings("unchecked")
             Map<String, Object> one = (Map<String, Object>) d.get(String.valueOf(diag));
             assertEquals(1, one.get("packets"));
+            // The diagnostic port is freed after diagnosticMs while the session goes on
+            until = now() + 3000;
+            boolean freed = false;
+            while (now() < until && !freed) {
+                try (DatagramSocket again = new DatagramSocket(diag, LOOPBACK)) {
+                    freed = true;
+                } catch (IOException e) {
+                    Thread.sleep(50);
+                }
+            }
+            assertTrue("diagnostic port still taken", freed);
             r.keepGoing.set(false);
             assertTrue(r.ended.await(3, TimeUnit.SECONDS));
             assertNull(r.failure);
             // Nothing from a diagnostic port reaches the video path
             assertTrue(r.frames.isEmpty());
+        }
+    }
+
+    @Test
+    public void unusableVideoIsNotReceiving() throws Exception {
+        int rtp = freeUdpPort();
+        Jieli.reopenMs = 700;
+        try (FakeToy toy = new FakeToy(60000, true)) {
+            toy.rtpPort = rtp;
+            Running r = new Running("jieli://127.0.0.1:" + toy.port() + "?rtp=" + rtp, false);
+            assertTrue(toy.opened.await(5, TimeUnit.SECONDS));
+            // Packets arrive but the decoder takes none: the toy is asked again (Qodo on #198)
+            long until = now() + 3000;
+            while (now() < until
+                    && Collections.frequency(toy.topics(), Jieli.OPEN_RT_STREAM) < 2) {
+                Thread.sleep(20);
+            }
+            assertTrue(Collections.frequency(toy.topics(), Jieli.OPEN_RT_STREAM) >= 2);
+            for (String st : r.states) assertFalse(st, st.startsWith("Receiving"));
+            r.keepGoing.set(false);
+            assertTrue(r.ended.await(3, TimeUnit.SECONDS));
         }
     }
 
@@ -737,7 +785,9 @@ public class JieliTest {
                 public void onState(boolean receiving, String text) {}
 
                 @Override
-                public void onRtp(byte[] buf, int offset, int length) {}
+                public boolean onRtp(byte[] buf, int offset, int length) {
+                    return false;
+                }
             });
             fail("connected");
         } catch (IOException e) {

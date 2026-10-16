@@ -822,7 +822,13 @@ final class FlowUfo {
             try {
                 s.setReceiveBufferSize(1024 * 1024);
             } catch (IOException ignored) {}
-            if (setup != null) network = setup.prepare(s, target);
+            try {
+                if (setup != null) network = setup.prepare(s, target);
+            } catch (RuntimeException e) {
+                // Not registered yet: close() would not see it (Qodo on #188)
+                s.close();
+                throw e;
+            }
             synchronized (sockets) {
                 if (sockets[i] != null) sockets[i].close();
                 sockets[i] = s;
@@ -858,7 +864,13 @@ final class FlowUfo {
             InetAddress address = InetAddress.getByName(url.host);
             hint = subnetHint(address, localForHint != null ? localForHint : localAddresses());
             if (hint != null) Log.w(TAG, tag + ": FLOW-UFO: " + hint);
-            for (int i = 0; i < ports.length; i++) open(i, address);
+            try {
+                for (int i = 0; i < ports.length; i++) open(i, address);
+            } catch (IOException | RuntimeException e) {
+                // The sockets opened before the one that failed (Qodo on #188)
+                close();
+                throw e;
+            }
             Log.i(TAG, tag + ": FLOW-UFO: probing " + url.probed() + " from local port "
                     + localPorts() + " (network: " + network + "), qpara "
                     + hex(url.qpara, 0, 4) + ", dqt " + DQT_NAMES[url.dqt]);

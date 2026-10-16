@@ -812,61 +812,73 @@ class RtspSession {
             final AtomicBoolean first = new AtomicBoolean(true);
             final AtomicBoolean received = new AtomicBoolean(false);
             final Object order = new Object();
-            c.run(() -> active && gen == generation, new Jieli.Listener() {
-                @Override
-                public void onState(boolean receiving, String text) {
-                    if (gen != generation) return;
-                    // In order with usable() on the UDP thread: a packet that came in since
-                    // the CTP thread saw the video stop wins (Qodo on #198)
-                    synchronized (order) {
-                        if (receiving) {
-                            inUse = "Jieli RTP";
-                            received.set(true);
-                        } else {
-                            if (c.videoAgeMs() < Jieli.quietMs) return;
-                            inUse = null;
-                            // Video that stopped says so; the next frame reports "connected"
-                            status(gen, received.get() ? "disconnected" : "buffering");
-                            first.set(true);
+            try {
+                c.run(() -> active && gen == generation, new Jieli.Listener() {
+                    @Override
+                    public void onState(boolean receiving, String text) {
+                        if (gen != generation) return;
+                        // In order with usable() on the UDP thread: a packet that came in since
+                        // the CTP thread saw the video stop wins (Qodo on #198)
+                        synchronized (order) {
+                            if (receiving) {
+                                inUse = "Jieli RTP";
+                                received.set(true);
+                            } else {
+                                if (c.videoAgeMs() < Jieli.quietMs) return;
+                                inUse = null;
+                                // Video that stopped says so; the next frame reports "connected"
+                                status(gen, received.get() ? "disconnected" : "buffering");
+                                first.set(true);
+                            }
+                            callback.onDetail(text);
                         }
-                        callback.onDetail(text);
                     }
-                }
 
-                @Override
-                public void onRtp(byte[] buf, int offset, int length) {
-                    if (gen != generation) return;
-                    int type = buf[offset + 1] & 0x7F;
-                    if (type != pt[0]) {
-                        // The toy sends the other codec than asked for: follow it
-                        pt[0] = type;
-                        Log.i(TAG, tag + ": Jieli: video is "
-                                + (type == Jieli.PT_H264 ? "H.264" : "JPEG") + " (RTP PT " + type
-                                + ")");
-                        callback.onSdp(jieliSdp(type));
+                    @Override
+                    public boolean onRtp(byte[] buf, int offset, int length) {
+                        if (gen != generation) return false;
+                        int type = buf[offset + 1] & 0x7F;
+                        if (type != pt[0]) {
+                            // The toy sends the other codec than asked for: follow it
+                            pt[0] = type;
+                            Log.i(TAG, tag + ": Jieli: video is "
+                                    + (type == Jieli.PT_H264 ? "H.264" : "JPEG")
+                                    + " (RTP PT " + type + ")");
+                            callback.onSdp(jieliSdp(type));
+                        }
+                        streamBytes += length;
+                        if (!callback.onPacket(CHANNEL_VIDEO, buf, offset, length)) return false;
+                        usable();
+                        return true;
                     }
-                    streamBytes += length;
-                    if (callback.onPacket(CHANNEL_VIDEO, buf, offset, length)) usable();
-                }
 
-                @Override
-                public void onJpeg(byte[] buf, int offset, int length) {
-                    if (gen != generation) return;
-                    if (pt[0] != Jieli.PT_JPEG) {
-                        pt[0] = Jieli.PT_JPEG;
-                        callback.onSdp(jieliSdp(Jieli.PT_JPEG));
+                    @Override
+                    public boolean onJpeg(byte[] buf, int offset, int length) {
+                        if (gen != generation) return false;
+                        if (pt[0] != Jieli.PT_JPEG) {
+                            pt[0] = Jieli.PT_JPEG;
+                            callback.onSdp(jieliSdp(Jieli.PT_JPEG));
+                        }
+                        streamBytes += length;
+                        if (!callback.onJpegFrame(buf, offset, length)) return false;
+                        usable();
+                        return true;
                     }
-                    streamBytes += length;
-                    if (callback.onJpegFrame(buf, offset, length)) usable();
-                }
 
-                private void usable() {
-                    lastPacketMs = System.nanoTime() / 1_000_000;
-                    synchronized (order) {
-                        if (first.compareAndSet(true, false)) status(gen, "connected");
+                    private void usable() {
+                        lastPacketMs = System.nanoTime() / 1_000_000;
+                        synchronized (order) {
+                            if (first.compareAndSet(true, false)) status(gen, "connected");
+                        }
                     }
-                }
-            });
+                });
+            } catch (IOException e) {
+                // A toy that dropped after the stream was asked for ends like a PLAY that
+                // worked: the next attempt comes soon, not after a growing back-off (Qodo on #198)
+                if (!c.streamRequested || gen != generation) throw e;
+                Log.w(TAG, tag + ": Jieli: " + e.getMessage() + "; connecting again");
+                callback.onFailure(e.getMessage());
+            }
             return true;
         } finally {
             synchronized (lock) {
