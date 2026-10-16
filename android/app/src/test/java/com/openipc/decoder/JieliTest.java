@@ -129,9 +129,37 @@ public class JieliTest {
     }
 
     @Test
+    public void rtStreamTwoPiecesInOneDatagram() {
+        // As a YL3 sends a 3064-byte frame: 20 + 2964 + 20 + 100 = 3104 bytes in one datagram
+        Jieli.RtStream st = new Jieli.RtStream();
+        byte[] j = jpeg(3064);
+        byte[] a = streamPacket(4, 3064, 0, Arrays.copyOfRange(j, 0, 2964), 0);
+        byte[] b = streamPacket(4, 3064, 2964, Arrays.copyOfRange(j, 2964, 3064), 0);
+        byte[] dgram = new byte[a.length + b.length];
+        System.arraycopy(a, 0, dgram, 0, a.length);
+        System.arraycopy(b, 0, dgram, a.length, b.length);
+        assertEquals(3104, dgram.length);
+        int n = st.feed(dgram, 0, dgram.length);
+        assertEquals(3064, n);
+        assertArrayEquals(j, Arrays.copyOf(st.frame(), n));
+        assertEquals(0, st.dropped);
+        // A datagram that ends one frame and holds a whole next one keeps the later one
+        byte[] k = jpeg(500);
+        byte[] c = streamPacket(5, 500, 0, k, 0);
+        byte[] two = new byte[c.length * 2];
+        System.arraycopy(c, 0, two, 0, c.length);
+        byte[] l = jpeg(400);
+        byte[] d = streamPacket(6, 400, 0, l, 0);
+        System.arraycopy(d, 0, two, c.length, d.length);
+        assertEquals(400, st.feed(two, 0, c.length + d.length));
+        assertArrayEquals(l, Arrays.copyOf(st.frame(), 400));
+        assertEquals(3, st.frames);
+    }
+
+    @Test
     public void rtStreamUsesOnlyThePiece() {
-        // As test build 3 showed it: 2964 of 4600 bytes in a 4640-byte datagram whose rest is
-        // left over from an earlier frame (even with an FFD9); the rest comes at offset 2964
+        // A piece shorter than its datagram: what follows is not part of this frame; the rest
+        // of the frame comes at offset 2964
         Jieli.RtStream st = new Jieli.RtStream();
         byte[] j = jpeg(4600);
         byte[] first = streamPacket(1, 4600, 0, Arrays.copyOfRange(j, 0, 2964), 0);
