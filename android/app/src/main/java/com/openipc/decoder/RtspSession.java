@@ -119,7 +119,6 @@ class RtspSession {
     /** Degrees counter-clockwise the MJPEG frames of this connection are turned (#200). */
     private volatile int rotate;
     private volatile boolean rotateLogged;
-    private volatile boolean rotateIgnoredLogged;
     private Thread networkThread;
     private Thread watchdogThread;
 
@@ -146,7 +145,6 @@ class RtspSession {
             // of the previous one leave /stats.json (Qodo on #188). A heartbeat still running
             // is closed by its connection, without adding to the new totals.
             rotateLogged = false;
-            rotateIgnoredLogged = false;
             synchronized (lock) {
                 heartbeat = null;
                 heartbeatUsed = false;
@@ -678,17 +676,11 @@ class RtspSession {
      */
     private int rotation(int wanted, boolean jpeg) {
         if (wanted == 0) return 0;
-        if (!jpeg) {
-            if (!rotateIgnoredLogged) {
-                rotateIgnoredLogged = true;
-                Log.i(TAG, tag + ": rotate= only applies to MJPEG streams for now (#201)");
-            }
-            return 0;
-        }
         if (!rotateLogged) {
             rotateLogged = true;
-            Log.i(TAG, tag + ": MJPEG frames turned " + wanted + "\u00b0 counter-clockwise"
-                    + " (#200; ?rotate=0 turns it off)");
+            // MJPEG is turned while drawing (#200), H.264/H.265 by the decoder (#201)
+            Log.i(TAG, tag + ": " + (jpeg ? "MJPEG frames" : "video") + " turned " + wanted
+                    + "\u00b0 counter-clockwise (?rotate=0 turns it off)");
         }
         return wanted;
     }

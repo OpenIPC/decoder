@@ -56,6 +56,8 @@ class MediaCodecManager {
 
     // Surface set by the owning activity
     private volatile Surface surface;
+    /** Degrees counter-clockwise the decoder turns the picture (#201); 0 for none. */
+    private volatile int rotation;
 
     /** Frames rendered so far (#82): with the frames received this gives the real decode rate. */
     private volatile int framesOut;
@@ -255,6 +257,11 @@ class MediaCodecManager {
         this.surface = s;
     }
 
+    /** See {@link #rotation}; takes effect with the next decoder. */
+    void setRotation(int degreesCcw) {
+        rotation = ((degreesCcw % 360) + 360) % 360;
+    }
+
     /** Enable or disable decoding; disabling also releases the decoder. */
     /**
      * Enable or disable decoding. Never blocks the caller (the UI thread): disabling only
@@ -374,6 +381,11 @@ class MediaCodecManager {
                 Log.i(TAG, "Start video decoder (" + type + ")");
                 local = MediaCodec.createDecoderByType(type);
                 learnLimits(local, type);
+            }
+            int turn = rotation;
+            if (turn != 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                // The decoder turns its output on the surface: clockwise degrees here (#201)
+                format.setInteger(MediaFormat.KEY_ROTATION, (360 - turn) % 360);
             }
             try {
                 local.configure(format, s, null, 0);

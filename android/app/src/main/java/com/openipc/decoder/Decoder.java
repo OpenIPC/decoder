@@ -209,7 +209,13 @@ public class Decoder extends Activity
 
         // --- Create managers ---
         videoDecoder = new MediaCodecManager(new MediaCodecManager.Listener() {
-            @Override public void onResolutionChanged(int w, int h) { updateResolution(w, h); }
+            @Override public void onResolutionChanged(int w, int h) {
+                // The decoder turns the picture (#201): a quarter turn swaps its sides
+                RtspClient c = rtspClient;
+                int r = c != null ? c.rotate() : 0;
+                if (r == 90 || r == 270) updateResolution(h, w);
+                else updateResolution(w, h);
+            }
             @Override public void onDecoderStarted() { removeClearOverlay(); }
             @Override public void onDecoderFailed() {}
         });
@@ -592,6 +598,8 @@ public class Decoder extends Activity
 
     private void createDecoder() {
         videoDecoder.setSurface(mVideoSurface);
+        RtspClient c = rtspClient;
+        videoDecoder.setRotation(c != null ? c.rotate() : 0);
         videoDecoder.createDecoder(codecH265);
     }
 
@@ -1603,8 +1611,8 @@ public class Decoder extends Activity
             if (jl != null) single.put("jieli", jl);
             Map<String, Object> hb = rtspClient != null ? rtspClient.heartbeatStats() : null;
             if (hb != null) single.put("heartbeat", hb);
-            // MJPEG turned counter-clockwise, "size" is the turned one (#200)
-            int rotate = rtspClient != null && rtspClient.isJpeg() ? rtspClient.rotate() : 0;
+            // Turned counter-clockwise, "size" is the turned one (#200, #201)
+            int rotate = rtspClient != null ? rtspClient.rotate() : 0;
             if (rotate != 0) single.put("rotate", rotate);
             m.put("single", single);
         }
