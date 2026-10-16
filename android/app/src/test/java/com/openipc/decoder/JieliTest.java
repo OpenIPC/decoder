@@ -593,7 +593,9 @@ public class JieliTest {
             Map<String, Object> sources = (Map<String, Object>) st.get("sources");
             assertEquals(1, sources.size());
             assertTrue(r.states.get(0), r.states.get(0).startsWith("Connecting to the toy (CTP"));
-            assertTrue(r.states.contains("Stream requested, waiting for video on UDP " + rtp));
+            assertTrue(r.states.toString(), r.states.contains(
+                    "Stream requested, waiting for video on UDP " + rtp + " and " + Jieli.streamPort));
+            assertEquals(rtp, st.get("video_port"));
         }
     }
 
