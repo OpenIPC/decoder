@@ -780,6 +780,12 @@ class RtspSession {
         return c != null ? c.stats() : null;
     }
 
+    /** Raw bytes of a jieli:// slot for the debug page (#187), see Jieli.Client.raw(). */
+    byte[] jieliRaw(String which) {
+        Jieli.Client c = jieli;
+        return c != null ? c.raw(which) : null;
+    }
+
     /**
      * A jieli:// slot (#187): CTP over TCP asks the toy for the stream, which comes as RTP to
      * a fixed local UDP port: payload type 26 goes to the RTP/JPEG path, 96 to the H.264 one,
@@ -800,6 +806,7 @@ class RtspSession {
         }
         try {
             final int[] pt = {u.format == Jieli.FORMAT_H264 ? Jieli.PT_H264 : Jieli.PT_JPEG};
+            rotate = rotation(u.rotate, true);
             callback.onSdp(jieliSdp(pt[0]));
             // onState comes from the CTP thread, the video from the UDP one
             final AtomicBoolean first = new AtomicBoolean(true);

@@ -91,6 +91,7 @@ class RtspClient implements RtspSession.Callback {
     java.util.Map<String, Object> flowUfoStats() { return session.flowUfoStats(); }
     /** Jieli statistics while a jieli:// slot plays (#187), else null. */
     java.util.Map<String, Object> jieliStats() { return session.jieliStats(); }
+    byte[] jieliRaw(String which) { return session.jieliRaw(which); }
     /** The cooingdv heartbeat once this slot used one (#187), else null. */
     java.util.Map<String, Object> heartbeatStats() { return session.heartbeatStats(); }
 

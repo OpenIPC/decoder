@@ -24,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -61,6 +62,8 @@ final class Jieli {
     static final int DEFAULT_FPS = 25;
     static final int FORMAT_JPEG = 0;
     static final int FORMAT_H264 = 1;
+    /** The YL3's frames come turned (portrait 240×320), as the K200's do (#187, #200). */
+    static final int DEFAULT_ROTATE = 270;
     static final int PT_JPEG = 26;
     static final int PT_H264 = 96;
 
@@ -109,7 +112,8 @@ final class Jieli {
      * when left out. Options, as in udp:// URLs (unknown ones are ignored, bad values
      * refused): w, h, fps (the stream asked for; default what the toy announces in
      * VIDEO_PARAM, else 640x480 at 25), rtp (the local UDP port for the video, 6666),
-     * format (0 JPEG, the default, or 1 H.264).
+     * format (0 JPEG, the default, or 1 H.264), rotate (degrees counter-clockwise for JPEG,
+     * 0, 90, 180 or 270; default 270: the YL3's camera is mounted sideways like the K200's).
      */
     static final class Url {
         String host = DEFAULT_HOST;
@@ -120,6 +124,7 @@ final class Jieli {
         int height;
         int fps;
         int format = FORMAT_JPEG;
+        int rotate = DEFAULT_ROTATE;
 
         static boolean matches(String url) {
             return url != null && url.trim().toLowerCase(Locale.ROOT).startsWith(SCHEME);
@@ -180,6 +185,9 @@ final class Jieli {
                         break;
                     case "format":
                         u.format = number(value, 0, 1, "format (0 JPEG, 1 H.264)");
+                        break;
+                    case "rotate":
+                        u.rotate = RtspSession.Url.parseRotate(value);
                         break;
                     default:
                         break;
@@ -582,6 +590,15 @@ final class Jieli {
         int frames;
         int dropped;
         int otherTypes;
+        /** Why the last frame was dropped, and its bytes as put together (for the debug page). */
+        volatile String lastDropReason;
+        volatile byte[] lastDropped;
+
+        private void drop(String reason, int n) {
+            dropped++;
+            lastDropReason = reason;
+            if (n > 0) lastDropped = Arrays.copyOf(frame, n);
+        }
 
         /**
          * Takes one datagram; returns the length of a JPEG now complete in {@link #frame()}
@@ -596,12 +613,12 @@ final class Jieli {
             int total = le32(b, off + 8);
             int at = le32(b, off + 12);
             if (total < 4 || total > MAX_FRAME || at < 0 || at >= total) {
-                dropped++;
+                drop("bad header: length " + total + ", offset " + at, 0);
                 return 0;
             }
             if (at == 0) {
                 // A new frame; one still missing pieces is lost
-                if (size > 0) dropped++;
+                if (size > 0) drop("incomplete: " + filled + " of " + size + " bytes", filled);
                 size = total;
                 filled = 0;
                 if (frame.length < total) frame = new byte[total];
@@ -616,7 +633,9 @@ final class Jieli {
             size = -1;
             int end = jpegEnd(frame, n);
             if (end == 0) {
-                dropped++;
+                drop(n + " bytes, starts " + FlowUfo.hex(frame, 0, Math.min(n, 4)) + ", ends "
+                        + FlowUfo.hex(frame, Math.max(0, n - 8), Math.min(n, 8))
+                        + ": no FFD8 at the start or no FFD9", n);
                 return 0;
             }
             frames++;
@@ -719,6 +738,8 @@ final class Jieli {
         private volatile int streamForeign;
         private volatile String streamFirst;
         private int droppedLogged;
+        /** The last JPEG put together from UDP 2224, as received (for the debug page). */
+        private volatile byte[] lastStreamFrame;
         private volatile String lastSource;
         private volatile boolean h264Logged;
         private final Map<Integer, Integer> payloadTypes = new LinkedHashMap<>();
@@ -1165,14 +1186,15 @@ final class Jieli {
             }
             int jpeg = rtStream.feed(b, 0, len);
             if (jpeg > 0) {
+                lastStreamFrame = Arrays.copyOf(rtStream.frame(), jpeg);
                 lastSource = from;
                 videoPort = streamPort;
                 lastVideoAt = now();
                 listener.onJpeg(rtStream.frame(), 0, jpeg);
             } else if (rtStream.dropped != droppedLogged && rtStream.dropped <= 3) {
                 droppedLogged = rtStream.dropped;
-                Log.w(TAG, tag + ": Jieli: UDP " + streamPort + ": " + droppedLogged
-                        + " frame(s) not put together (length or JPEG markers do not fit)");
+                Log.w(TAG, tag + ": Jieli: UDP " + streamPort + ": frame " + droppedLogged
+                        + " not put together: " + rtStream.lastDropReason);
             }
         }
 
@@ -1206,6 +1228,15 @@ final class Jieli {
                     ctpSent, ctpReceived, keepAlives, url.rtpPort, packets, rtpPackets,
                     rtpFrames, nonRtp, foreign, streamPort, streamPackets, rtStream.frames,
                     rtStream.dropped);
+        }
+
+        /**
+         * For the debug page (#187): "frame" the last JPEG put together from UDP 2224, "dropped"
+         * the last one dropped, as the bytes came; null when there is none.
+         */
+        byte[] raw(String which) {
+            return "frame".equals(which) ? lastStreamFrame
+                    : "dropped".equals(which) ? rtStream.lastDropped : null;
         }
 
         /** For /stats.json. */
@@ -1257,6 +1288,9 @@ final class Jieli {
             stream.put("frames", rtStream.frames);
             stream.put("dropped", rtStream.dropped);
             if (rtStream.otherTypes > 0) stream.put("other_types", rtStream.otherTypes);
+            if (rtStream.lastDropReason != null) {
+                stream.put("last_drop", rtStream.lastDropReason);
+            }
             if (streamForeign > 0) stream.put("from_others", streamForeign);
             if (streamFirst != null) stream.put("first_packet", streamFirst);
             m.put("stream", stream);

@@ -135,6 +135,8 @@ public class JieliTest {
         byte[] junk = streamPacket(6, 100, 0, new byte[100], 0);
         assertEquals(0, st.feed(junk, 0, junk.length));
         assertEquals(1, st.dropped);
+        assertTrue(st.lastDropReason, st.lastDropReason.contains("no FFD8"));
+        assertEquals(100, st.lastDropped.length);
         // A frame cut short by the next one
         byte[] j = jpeg(8000);
         byte[] first = streamPacket(7, 8000, 0, Arrays.copyOfRange(j, 0, 4000), 0);
@@ -324,6 +326,9 @@ public class JieliTest {
         assertEquals("192.168.80.1", u.host);
         assertEquals(3333, u.port);
         assertEquals(6666, u.rtpPort);
+        assertEquals(270, u.rotate);
+        assertEquals(0, Jieli.Url.parse("jieli://?rotate=0").rotate);
+        assertEquals(90, Jieli.Url.parse("jieli://?rotate=90").rotate);
         assertEquals(0, u.width);
         assertEquals(Jieli.FORMAT_JPEG, u.format);
         u = Jieli.Url.parse(" JIELI://192.168.80.1:3334/?w=1280&h=720&fps=30&rtp=7000&format=1 ");
@@ -337,7 +342,7 @@ public class JieliTest {
         assertTrue(Jieli.Url.matches("jieli://x"));
         assertTrue(!Jieli.Url.matches("flowufo://"));
         for (String bad : new String[] {"jieli://h:0", "jieli://h:x", "jieli://?w=8",
-                "jieli://?fps=0", "jieli://?rtp=70000", "jieli://?format=2", "jieli://a b",
+                "jieli://?fps=0", "jieli://?rtp=70000", "jieli://?format=2", "jieli://?rotate=45", "jieli://a b",
                 "jieli://[::1"}) {
             try {
                 Jieli.Url.parse(bad);

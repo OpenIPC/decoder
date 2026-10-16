@@ -1388,6 +1388,10 @@ public class Decoder extends Activity
     private final DebugServer.Source debugSource = new DebugServer.Source() {
         @Override public Map<String, Object> snapshot() { return debugSnapshot(); }
         @Override public byte[] snapshotJpeg(boolean labels) { return debugSnapshotJpeg(labels); }
+        @Override public byte[] jieliRaw(String which) {
+            RtspClient c = rtspClient;
+            return c != null ? c.jieliRaw(which) : null;
+        }
     };
     /** A cell counts as playing in a snapshot when it showed a frame this recently (#98). */
     private static final long SNAPSHOT_LIVE_MS = 2000;

@@ -14,13 +14,14 @@
 
 While the app runs it serves its debug information over HTTP on port **8085**, for a browser or `curl` on the same network. It is always on and read-only.
 
-| Path                   | Content                                                                                                                     |
-|------------------------|-----------------------------------------------------------------------------------------------------------------------------|
-| `/` (or `/index.html`) | the [page](#page): snapshot with the text of each cell                                                                      |
-| `/stats.json`          | the state as JSON, pretty-printed, see [fields](#statsjson-fields)                                                          |
-| `/snapshot.jpg`        | a picture of the screen, see [Snapshot](#snapshot); `?labels=0`: frames only                                                |
-| `/log`                 | the last 500 lines of the app's log, see [Log](#log)                                                                        |
-| `/report.txt`          | a header, `/stats.json` and `/log` in one file, downloaded as `report-YYYYMMDD-HHMMSS.txt`, see [Save report](#save-report) |
+| Path                                     | Content                                                                                                                                                                          |
+|------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `/` (or `/index.html`)                   | the [page](#page): snapshot with the text of each cell                                                                                                                           |
+| `/stats.json`                            | the state as JSON, pretty-printed, see [fields](#statsjson-fields)                                                                                                               |
+| `/snapshot.jpg`                          | a picture of the screen, see [Snapshot](#snapshot); `?labels=0`: frames only                                                                                                     |
+| `/log`                                   | the last 500 lines of the app's log, see [Log](#log)                                                                                                                             |
+| `/report.txt`                            | a header, `/stats.json` and `/log` in one file, downloaded as `report-YYYYMMDD-HHMMSS.txt`, see [Save report](#save-report)                                                      |
+| `/jieli-frame.jpg`, `/jieli-dropped.bin` | test build only: the last JPEG of a `jieli://` slot in the single view as the toy sent it, and the last frame that could not be put together ([toys.md](toys.md#hf--jieli-toys)) |
 
 - Only clients on the local network are answered; others get `403`. The rule and what is hidden: [security.md](security.md#debug-server).
 - `GET` only (`405` otherwise), one request per connection, `Cache-Control: no-store`.
