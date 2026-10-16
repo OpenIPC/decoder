@@ -143,7 +143,6 @@ android/                       Gradle project
 .github/ISSUE_TEMPLATE/        device and camera report forms
 docs/                          these documents
 screenshots/                   README pictures
-LABORATORY.md                  the test bench
 ```
 
 The legacy 1.0x version lives in the `basic` branch (single file, built as `decoder.apk`).

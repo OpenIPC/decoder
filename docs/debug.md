@@ -174,7 +174,7 @@ The FLOW-UFO test build ([toys.md](toys.md#flow-ufo)) adds a `flowufo` object pe
 
 ## Log
 
-`http://<device>:8085/log`: the last 500 lines of the app's own log (logcat in `threadtime` format; without the `READ_LOGS` permission logcat returns only the app's own lines), redacted as they come in. The same lines over adb: `adb logcat -s OpenIPCDecoder`. Lines worth knowing are listed in [LABORATORY.md](../LABORATORY.md#log-lines-logcat--s-openipcdecoder).
+`http://<device>:8085/log`: the last 500 lines of the app's own log (logcat in `threadtime` format; without the `READ_LOGS` permission logcat returns only the app's own lines), redacted as they come in. The same lines over adb: `adb logcat -s OpenIPCDecoder`.
 
 ## Save report
 

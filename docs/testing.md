@@ -136,4 +136,4 @@ A release build needs a keystore at `android/key.jks` and `KEYSTORE_PASS`, `KEY_
 
 ## Device tests
 
-The bench (devices, cameras, addresses, adb access, scripts, log lines, pitfalls) is described in [LABORATORY.md](../LABORATORY.md). Test rounds run as GitHub issues that follow the structure of [#53](https://github.com/OpenIPC/decoder/issues/53). Reports from users: [devices.md](devices.md#reporting).
+Test rounds run as GitHub issues that follow the structure of [#53](https://github.com/OpenIPC/decoder/issues/53). Reports from users: [devices.md](devices.md#reporting).
