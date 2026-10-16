@@ -56,6 +56,8 @@ class QuadCell implements RtspSession.Callback {
     private volatile String state = "connecting";
     /** What keeps the cell from playing (connection error, decoder limit), or null. */
     private volatile String problem;
+    /** What a flowufo:// cell waits for (#187), shown instead of "Buffering…", or null. */
+    private volatile String detail;
     /** Why the cell was paused to relieve the decoder (#83), or null. */
     private volatile String pausedReason;
     private volatile long decoderStartedMs;
@@ -286,10 +288,17 @@ class QuadCell implements RtspSession.Callback {
         // stalls again (Qodo on #146)
         if ("disconnected".equals(status)) nalAssembler.setSalvage(false);
         state = status;
+        // A flowufo:// session sends its detail after the status it belongs to (Qodo on #188)
+        detail = null;
         // A connection that works again clears the last connection error
         if ("connected".equals(status) && problem != null && !problem.startsWith("Decoder")) {
             problem = null;
         }
+    }
+
+    @Override
+    public void onDetail(String text) {
+        detail = text;
     }
 
     @Override
@@ -351,6 +360,8 @@ class QuadCell implements RtspSession.Callback {
         if (p != null) return p;
         String st = state;
         if (!"connected".equals(st)) {
+            String d = detail;
+            if (d != null) return d;
             if ("disconnected".equals(st)) return "Disconnected";
             return "buffering".equals(st) ? "Buffering…" : "Connecting…";
         }
@@ -416,6 +427,18 @@ class QuadCell implements RtspSession.Callback {
     static boolean isKeyFrameNal(int type, boolean h265) {
         return h265 ? type >= 16 && type <= 21 : type == 5;
     }
+
+    /** FLOW-UFO statistics of a flowufo:// cell (#187), else null. */
+    java.util.Map<String, Object> flowUfoStats() { return session.flowUfoStats(); }
+
+    /** Jieli statistics of a jieli:// cell (#187), else null. */
+    java.util.Map<String, Object> jieliStats() { return session.jieliStats(); }
+
+    /** The cooingdv heartbeat of an RTSP cell once it used one (#187), else null. */
+    java.util.Map<String, Object> heartbeatStats() { return session.heartbeatStats(); }
+
+    /** Degrees counter-clockwise the MJPEG frames are turned (#200), 0 for none. */
+    int rotate() { return jpeg ? session.rotate() : 0; }
 
     /** Transport in use, with the mode after a fallback (#112). */
     String transportLabel() { return Transport.label(session.transportInUse(), transport); }
@@ -710,7 +733,7 @@ class QuadCell implements RtspSession.Callback {
             return;
         }
         Surface s = surface;
-        int[] size = jpegRenderer.render(frame, s,
+        int[] size = jpegRenderer.render(frame, s, session.rotate(),
                 () -> running && jpeg && s == surface);
         if (size == null) return;
         lastJpegDecodeMs = now;

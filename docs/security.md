@@ -46,12 +46,12 @@ Anyone on the same LAN can see the camera pictures and hosts through it. On a ne
 
 Applied to every line before it is kept for `/log` and to every string in `/stats.json`:
 
-| Pattern | Becomes |
-|---|---|
-| `rtsp://user:pass@`, `rtsps://`, `http://`, `https://` userinfo | `rtsp://***@` |
-| `pass=`, `password=`, `pwd=` parameters | `<name>=***` |
-| `user=`, `username=`, `login=`, `usr=` parameters (debug server and `/log`) | `<name>=***` |
-| `Authorization: <scheme> <value>` | `Authorization: <scheme> ***` |
+| Pattern                                                                     | Becomes                       |
+|-----------------------------------------------------------------------------|-------------------------------|
+| `rtsp://user:pass@`, `rtsps://`, `http://`, `https://` userinfo             | `rtsp://***@`                 |
+| `pass=`, `password=`, `pwd=` parameters                                     | `<name>=***`                  |
+| `user=`, `username=`, `login=`, `usr=` parameters (debug server and `/log`) | `<name>=***`                  |
+| `Authorization: <scheme> <value>`                                           | `Authorization: <scheme> ***` |
 
 The app's own log calls redact URLs the same way, without the login rule ([#55](https://github.com/OpenIPC/decoder/issues/55)), and a shared link is logged by its host only: `adb logcat` shows no passwords, but may show a login that the camera expects in the URL path. Check reports before posting anyway.
 
@@ -61,10 +61,10 @@ The built-in browser opens the camera's web interface with JavaScript enabled. H
 
 ## App permissions
 
-| Permission | Why |
-|---|---|
-| `INTERNET` | streams, WebUI, the debug server |
-| `CHANGE_WIFI_MULTICAST_STATE` | the multicast lock for multicast RTP on Wi‑Fi |
+| Permission                                                             | Why                                                                                           |
+|------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------|
+| `INTERNET`                                                             | streams, WebUI, the debug server                                                              |
+| `CHANGE_WIFI_MULTICAST_STATE`                                          | the multicast lock for multicast RTP on Wi‑Fi                                                 |
 | `WRITE_EXTERNAL_STORAGE` (Android ≤ 9), `READ_EXTERNAL_STORAGE` (≤ 12) | screenshots to `Pictures/OpenIPC` and reports to `Download/OpenIPC` on older Android versions |
 
 No location, camera, microphone or account permissions. No analytics and no Google services.

@@ -13,6 +13,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.util.Log;
 import android.view.Surface;
 
@@ -41,13 +42,16 @@ final class JpegRenderer {
     private Bitmap bitmap;
 
     /**
-     * Shows one frame on {@code s}. Returns its {width, height} when it is on screen, null when
-     * not (yet). {@code current} is false once the stream or the surface has been replaced.
+     * Shows one frame on {@code s}, turned {@code rotate} degrees counter-clockwise (0, 90,
+     * 180 or 270, #200). Returns its {width, height} as shown (turned) when it is on screen,
+     * null when not (yet). {@code current} is false once the stream or the surface has been
+     * replaced.
      */
-    int[] render(Frame frame, Surface s, JpegCodec.Current current) {
+    int[] render(Frame frame, Surface s, int rotate, JpegCodec.Current current) {
         if (s == null || !s.isValid() || !current.holds()) return null;
-        // The hardware JPEG decoder first, where there is one (#132)
-        if (!hwFailed && !drawn && JpegCodec.candidate() != null) {
+        // The hardware JPEG decoder first, where there is one (#132); a turned frame is drawn
+        // by the app, which turns it while drawing (#200)
+        if (rotate == 0 && !hwFailed && !drawn && JpegCodec.candidate() != null) {
             int[] size = JpegAssembler.size(frame.data(), frame.length());
             if (size != null) {
                 try {
@@ -83,7 +87,16 @@ final class JpegRenderer {
             Canvas c = s.lockCanvas(null);
             try {
                 c.drawColor(Color.BLACK);
-                c.drawBitmap(b, null, new Rect(0, 0, c.getWidth(), c.getHeight()), paint);
+                if (rotate == 0) {
+                    c.drawBitmap(b, null, new Rect(0, 0, c.getWidth(), c.getHeight()), paint);
+                } else {
+                    float[] t = turn(rotate, c.getWidth(), c.getHeight());
+                    c.save();
+                    c.translate(t[0], t[1]);
+                    c.rotate(t[2]);
+                    c.drawBitmap(b, null, new RectF(t[3], t[4], t[5], t[6]), paint);
+                    c.restore();
+                }
             } finally {
                 s.unlockCanvasAndPost(c);
             }
@@ -92,7 +105,40 @@ final class JpegRenderer {
             return null;
         }
         drawn = true;
-        return new int[] {b.getWidth(), b.getHeight()};
+        return shownSize(b.getWidth(), b.getHeight(), rotate);
+    }
+
+    /** {width, height} of a {@code w}×{@code h} frame turned {@code rotate} degrees (#200). */
+    static int[] shownSize(int w, int h, int rotate) {
+        return rotate == 90 || rotate == 270 ? new int[] {h, w} : new int[] {w, h};
+    }
+
+    /**
+     * How a frame turned {@code rotate} degrees counter-clockwise fills a {@code cw}×{@code ch}
+     * canvas (#200): translate by {t[0], t[1]} (the centre), rotate by t[2] degrees (Canvas
+     * turns clockwise, so negative), then draw the frame into the rectangle {t[3], t[4], t[5],
+     * t[6]} (left, top, right, bottom), which is the canvas with width and height swapped for
+     * a quarter turn.
+     */
+    static float[] turn(int rotate, int cw, int ch) {
+        boolean quarter = rotate == 90 || rotate == 270;
+        float hw = (quarter ? ch : cw) / 2f;
+        float hh = (quarter ? cw : ch) / 2f;
+        return new float[] {cw / 2f, ch / 2f, -rotate, -hw, -hh, hw, hh};
+    }
+
+    /**
+     * Where the point ({@code u}, {@code v}) of the frame, as fractions of its width and height
+     * from the top left, lands on the canvas with {@link #turn}: the same transform as
+     * Canvas.translate() and rotate(), for tests without a bitmap.
+     */
+    static float[] map(float[] t, float u, float v) {
+        float x = t[3] + u * (t[5] - t[3]);
+        float y = t[4] + v * (t[6] - t[4]);
+        double a = Math.toRadians(t[2]);
+        double cos = Math.cos(a);
+        double sin = Math.sin(a);
+        return new float[] {(float) (t[0] + x * cos - y * sin), (float) (t[1] + x * sin + y * cos)};
     }
 
     /**

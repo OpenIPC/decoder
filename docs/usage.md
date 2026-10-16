@@ -35,30 +35,30 @@ The menu is one grid: the eight slots on top, two rows of four below. Every word
   <img src="../screenshots/phone_menu.jpg" alt="The menu on a phone" width="400">
 </p>
 
-| Item | Action |
-|---|---|
-| **1**–**8** | Switch to a camera slot (single view). The number of the active slot shows the connection quality: green under 100 ms of jitter, yellow 100–300 ms, red above. A grey number is an empty slot |
-| **Settings** | URL and transport of the active slot. Single view only, grey elsewhere |
-| **WebUI** | The camera's web interface, see [WebUI](#webui). Single view only, grey elsewhere |
-| **Grid** | The view: [multi-view](#multi-view) (2×2 or 3×3) or the single camera. Does not change the playback mode |
-| **Slides** | The playback mode: every frame, or key frames only, see [Slides](#slides). Does not change the view |
-| **Exit** | Close the app. The small text under it is the version and build hash (`v2.10, <hash>`) |
-| **Reset** | Clear all settings after a confirmation, see [Reset](#reset) |
-| **Debug** | Text in the corner of every multi-view cell (resolution, codec, decoded/received fps, key frames, status), or none. **Long press** (remote: hold **OK**, or **Menu** on Debug): [save a report](debug.md#save-report) to `Download/OpenIPC` and share it |
-| **UDP** | [The U cell](#the-u-cell) full-screen |
+| Item         | Action                                                                                                                                                                                                                                                   |
+|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **1**–**8**  | Switch to a camera slot (single view). The number of the active slot shows the connection quality: green under 100 ms of jitter, yellow 100–300 ms, red above. A grey number is an empty slot                                                            |
+| **Settings** | URL and transport of the active slot. Single view only, grey elsewhere                                                                                                                                                                                   |
+| **WebUI**    | The camera's web interface, see [WebUI](#webui). Single view only, grey elsewhere                                                                                                                                                                        |
+| **Grid**     | The view: [multi-view](#multi-view) (2×2 or 3×3) or the single camera. Does not change the playback mode                                                                                                                                                 |
+| **Slides**   | The playback mode: every frame, or key frames only, see [Slides](#slides). Does not change the view                                                                                                                                                      |
+| **Exit**     | Close the app. The small text under it is the version and build hash (`v2.10, <hash>`)                                                                                                                                                                   |
+| **Reset**    | Clear all settings after a confirmation, see [Reset](#reset)                                                                                                                                                                                             |
+| **Debug**    | Text in the corner of every multi-view cell (resolution, codec, decoded/received fps, key frames, status), or none. **Long press** (remote: hold **OK**, or **Menu** on Debug): [save a report](debug.md#save-report) to `Download/OpenIPC` and share it |
+| **UDP**      | [The U cell](#the-u-cell) full-screen                                                                                                                                                                                                                    |
 
 Items that are on (Grid, Slides, Debug, UDP and the active slot) have an orange fill; the item the remote is on has a light blue frame. On a narrow screen or with a large font the labels are shortened with an ellipsis rather than clipped.
 
 ## Gestures and keys
 
-| Input | Action |
-|---|---|
-| Tap / **OK** / **Enter** (D-pad centre) | Open or close the menu |
-| **Back** / **Esc** | Close the menu or a dialog; without one, Back keeps its system action |
-| Pinch, then drag | Zoom (1× to 5×) and pan, single view |
-| Double tap | Reset the zoom |
-| Long press, single view | Save a screenshot, see [Screenshots](#screenshots) |
-| Long press, multi-view | Play this cell's sound; again to mute |
+| Input                                   | Action                                                                |
+|-----------------------------------------|-----------------------------------------------------------------------|
+| Tap / **OK** / **Enter** (D-pad centre) | Open or close the menu                                                |
+| **Back** / **Esc**                      | Close the menu or a dialog; without one, Back keeps its system action |
+| Pinch, then drag                        | Zoom (1× to 5×) and pan, single view                                  |
+| Double tap                              | Reset the zoom                                                        |
+| Long press, single view                 | Save a screenshot, see [Screenshots](#screenshots)                    |
+| Long press, multi-view                  | Play this cell's sound; again to mute                                 |
 
 ## Remote control
 

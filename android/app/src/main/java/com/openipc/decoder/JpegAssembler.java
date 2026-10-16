@@ -247,7 +247,15 @@ final class JpegAssembler {
 
     /** Quantization tables for Q 1..99 (RFC 2435 Appendix A), luminance then chrominance. */
     static byte[] tables(int q) {
-        q = Math.max(1, Math.min(99, q));
+        return ijgTables(Math.max(1, Math.min(99, q)));
+    }
+
+    /**
+     * The standard tables scaled to an IJG quality 1..100 as libjpeg does it (100: all ones),
+     * zig-zag order, luminance then chrominance (#187).
+     */
+    static byte[] ijgTables(int q) {
+        q = Math.max(1, Math.min(100, q));
         int factor = q < 50 ? 5000 / q : 200 - q * 2;
         byte[] out = new byte[128];
         for (int i = 0; i < 64; i++) {
@@ -274,6 +282,16 @@ final class JpegAssembler {
 
     static byte[] headers(int type, int width, int height, byte[] tables, int precision,
                           int restartInterval) {
+        return headersSampled((type & 63) == 0 ? 0x21 : 0x22, width, height, tables, precision,
+                restartInterval);
+    }
+
+    /**
+     * As headers(), with the luma sampling given ({@code 0x11} for 4:4:4, #187); chroma is
+     * always 1x1.
+     */
+    static byte[] headersSampled(int lumaSampling, int width, int height, byte[] tables,
+                                 int precision, int restartInterval) {
         java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream(700);
         o.write(0xFF);
         o.write(0xD8);
@@ -297,7 +315,7 @@ final class JpegAssembler {
         o.write(3);
         int chromaTable = count > 1 ? 1 : 0;
         o.write(0);
-        o.write((type & 63) == 0 ? 0x21 : 0x22);
+        o.write(lumaSampling);
         o.write(0);
         o.write(1);
         o.write(0x11);

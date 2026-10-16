@@ -40,10 +40,10 @@
 
 可直接安装的版本位于 [**latest** 发布页](https://github.com/OpenIPC/decoder/releases/tag/latest)：
 
-| 文件 | 说明 |
-|---|---|
+| 文件             | 说明                   |
+|------------------|------------------------|
 | `decoder-v2.apk` | **当前版本**，推荐使用 |
-| `decoder.apk` | `basic` 分支的旧版本 |
+| `decoder.apk`    | `basic` 分支的旧版本   |
 
 每次新构建都会替换 `latest` 中的上一个构建。开发是持续进行的，因此不再按版本单独发布；`v2` 和 `basic` 分支的每个构建连同版本号和提交都会发布到 OpenIPC 的 Telegram 频道（[我们的频道](https://openipc.org/our-channels)）。
 
@@ -74,14 +74,14 @@
 [ Exit     | Reset  | Debug  | UDP    ]
 ```
 
-| 输入 | 功能 |
-|---|---|
-| 点击 / **OK** | 打开或关闭菜单 |
-| **1**–**8** | 摄像机槽位；编号的颜色表示连接质量 |
-| **Grid** / **Slides** | 多画面或单路画面 / 解码全部帧或仅关键帧 |
-| **Debug** / **UDP** | 多画面中每个画面的文字 / 向端口 5600 推送 RTP 的摄像机 |
-| 双指捏合、双击 | 缩放和平移、恢复原始大小（单路画面） |
-| 长按 | 截图（单路画面）/ 播放该画面的声音（多画面） |
+| 输入                  | 功能                                                   |
+|-----------------------|--------------------------------------------------------|
+| 点击 / **OK**         | 打开或关闭菜单                                         |
+| **1**–**8**           | 摄像机槽位；编号的颜色表示连接质量                     |
+| **Grid** / **Slides** | 多画面或单路画面 / 解码全部帧或仅关键帧                |
+| **Debug** / **UDP**   | 多画面中每个画面的文字 / 向端口 5600 推送 RTP 的摄像机 |
+| 双指捏合、双击        | 缩放和平移、恢复原始大小（单路画面）                   |
+| 长按                  | 截图（单路画面）/ 播放该画面的声音（多画面）           |
 
 菜单各项、遥控器、从其他应用分享地址以及 **Reset** 的说明见 [Usage](docs/usage.md)（英文）。
 
@@ -103,16 +103,16 @@
 
 文档以英文撰写，以下链接均指向英文文档。
 
-| 文档 | 内容 |
-|---|---|
-| [Usage](docs/usage.md) | 菜单、手势与按键、遥控器、多画面、Slides、U 画面、WebUI、从其他应用分享地址、截图、Reset |
-| [Transports](docs/transports.md) | 地址格式与参数：RTSP over TCP/UDP/Auto/组播、`udp://` 推流接收（Majestic `outgoing`）、HTTP MJPEG；编码、认证、各服务器的支持情况 |
-| [Debug](docs/debug.md) | 端口 8085 上的调试页面、`/stats.json` 字段说明、`/log`、快照、提交错误报告时需附带的内容 |
-| [Architecture](docs/architecture.md) | 数据流程、类、线程、解码调度器、SurfaceView 渲染、仓库结构 |
-| [Testing and releases](docs/testing.md) | 分支、CI、单元测试、版本与发布、分支构建、`mapping.txt`、本地构建 |
-| [Security](docs/security.md) | 凭据存储、调试服务器（仅限局域网）、日志脱敏、网络传输未加密 |
-| [Devices](docs/devices.md) | 已验证和无法使用的设备、硬件解码器说明、设备与摄像机报告 |
-| [Drones and Wi‑Fi toys](docs/toys.md) | 玩具如何传输视频、FLOW-UFO（测试中）、遇到未知玩具时可以尝试什么、需要提交哪些信息 |
+| 文档                                    | 内容                                                                                                                              |
+|-----------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| [Usage](docs/usage.md)                  | 菜单、手势与按键、遥控器、多画面、Slides、U 画面、WebUI、从其他应用分享地址、截图、Reset                                          |
+| [Transports](docs/transports.md)        | 地址格式与参数：RTSP over TCP/UDP/Auto/组播、`udp://` 推流接收（Majestic `outgoing`）、HTTP MJPEG；编码、认证、各服务器的支持情况 |
+| [Debug](docs/debug.md)                  | 端口 8085 上的调试页面、`/stats.json` 字段说明、`/log`、快照、提交错误报告时需附带的内容                                          |
+| [Architecture](docs/architecture.md)    | 数据流程、类、线程、解码调度器、SurfaceView 渲染、仓库结构                                                                        |
+| [Testing and releases](docs/testing.md) | 分支、CI、单元测试、版本与发布、分支构建、`mapping.txt`、本地构建                                                                 |
+| [Security](docs/security.md)            | 凭据存储、调试服务器（仅限局域网）、日志脱敏、网络传输未加密                                                                      |
+| [Devices](docs/devices.md)              | 已验证和无法使用的设备、硬件解码器说明、设备与摄像机报告                                                                          |
+| [Drones and Wi‑Fi toys](docs/toys.md)   | 玩具如何传输视频、FLOW-UFO、KY UFO 和 Jieli 无人机、遇到未知玩具时可以尝试什么、需要提交哪些信息                                  |
 
 更新历史即[已合并的 pull request](https://github.com/OpenIPC/decoder/pulls?q=is%3Apr+is%3Amerged+base%3Av2) 和 [v2 分支的提交](https://github.com/OpenIPC/decoder/commits/v2)。
 

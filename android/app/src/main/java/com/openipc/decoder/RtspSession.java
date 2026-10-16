@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -71,6 +72,12 @@ class RtspSession {
          * Returns true if it was usable; only those feed the watchdog.
          */
         default boolean onJpegFrame(byte[] buf, int offset, int length) { return false; }
+
+        /**
+         * What a flowufo:// slot waits for while it has no picture (#187), e.g. "Waiting for
+         * the toy: probing 192.168.169.1:8800"; shown instead of the plain status.
+         */
+        default void onDetail(String text) {}
     }
 
     private final String tag;
@@ -99,6 +106,20 @@ class RtspSession {
     private RtpListener listener;
     /** A udp:// slot is listening: silence is reported, never "fixed" by a rebind. */
     private volatile boolean listening;
+    /** Client of a flowufo:// slot (#187), else null: it probes on its own when silent. */
+    private volatile FlowUfo.Client ufo;
+    /** Client of a jieli:// slot (#187), else null: it asks for the stream again on its own. */
+    private volatile Jieli.Client jieli;
+    /** Heartbeat of the RTSP connection now (#187), else null; counts of the earlier ones. */
+    private volatile UdpHeartbeat heartbeat;
+    private volatile int heartbeatsBefore;
+    private volatile int heartbeatErrorsBefore;
+    private volatile boolean heartbeatUsed;
+    private volatile boolean heartbeatLogged;
+    /** Degrees counter-clockwise the MJPEG frames of this connection are turned (#200). */
+    private volatile int rotate;
+    private volatile boolean rotateLogged;
+    private volatile boolean rotateIgnoredLogged;
     private Thread networkThread;
     private Thread watchdogThread;
 
@@ -120,6 +141,20 @@ class RtspSession {
     }
 
     void configure(String url, String userAgent, boolean withAudio, Transport.Mode mode) {
+        if (!java.util.Objects.equals(url, this.url)) {
+            // Another camera: its rotation is logged again (#200), and the heartbeat counts
+            // of the previous one leave /stats.json (Qodo on #188). A heartbeat still running
+            // is closed by its connection, without adding to the new totals.
+            rotateLogged = false;
+            rotateIgnoredLogged = false;
+            synchronized (lock) {
+                heartbeat = null;
+                heartbeatUsed = false;
+                heartbeatsBefore = 0;
+                heartbeatErrorsBefore = 0;
+                heartbeatLogged = false;
+            }
+        }
         this.url = url;
         this.userAgent = userAgent != null ? userAgent : "";
         this.withAudio = withAudio;
@@ -201,6 +236,9 @@ class RtspSession {
      */
     private void closeSocketLocked() {
         if (listener != null) listener.close();
+        if (ufo != null) ufo.close();
+        if (jieli != null) jieli.close();
+        if (heartbeat != null) heartbeat.close();
         if (udp != null) {
             udp.close();
             if (udpPlaying) return;
@@ -273,7 +311,7 @@ class RtspSession {
                     }
                 }
             }
-            if (active && !listening
+            if (active && !listening && ufo == null && jieli == null
                     && System.nanoTime() / 1_000_000 - lastPacketMs > watchdogMs) {
                 Log.w(TAG, tag + ": stream is inactive, reconnecting");
                 active = false;
@@ -291,8 +329,12 @@ class RtspSession {
 
     /** One session from connect to disconnect. Returns true if PLAY succeeded. */
     private boolean connect(int gen) throws IOException {
+        // Only an RTSP MJPEG stream is turned (#200); the other transports draw it as it comes
+        rotate = 0;
         if (RtpListener.Url.matches(url)) return listen(gen, RtpListener.Url.parse(url));
         if (HttpMjpeg.matches(url)) return httpMjpeg(gen, HttpMjpeg.Url.parse(url));
+        if (FlowUfo.Url.matches(url)) return flowUfo(gen, FlowUfo.Url.parse(url));
+        if (Jieli.Url.matches(url)) return jieli(gen, Jieli.Url.parse(url));
         Url u = Url.parse(url);
         Socket s = new Socket();
         synchronized (lock) {
@@ -301,9 +343,11 @@ class RtspSession {
         }
         Conn c = null;
         UdpReceiver rx = null;
+        UdpHeartbeat hb = null;
         String session = null;
         try {
             s.connect(new InetSocketAddress(u.host, u.port), CONNECT_TIMEOUT_MS);
+            if (u.heartbeatPort > 0) hb = startHeartbeat(gen, s, u.heartbeatPort);
             s.setTcpNoDelay(true);
             s.setSoTimeout(HANDSHAKE_TIMEOUT_MS);
             BufferedInputStream in = new BufferedInputStream(s.getInputStream(), 65536);
@@ -444,6 +488,7 @@ class RtspSession {
             }
 
             if (gen != generation) return false;
+            rotate = rotation(u.rotate, sdp.videoJpeg);
             callback.onSdp(sdp);
 
             // PLAY on the request URL, as before: accepted by the servers seen so far
@@ -483,6 +528,7 @@ class RtspSession {
                 Keepalive k = keepalive;
                 if (k != null && k.conn == c) keepalive = null;
             }
+            stopHeartbeat(hb);
             if (rx != null) {
                 rx.close();
                 if (session != null && !s.isClosed()) {
@@ -587,6 +633,270 @@ class RtspSession {
             }
         }
         throw new IOException("401 Unauthorized");
+    }
+
+    /**
+     * The cooingdv heartbeat (#187): 01 01 to the camera's UDP port every second, from the
+     * address of the RTSP connection, while the connection lasts. Logged at the first start.
+     */
+    private UdpHeartbeat startHeartbeat(int gen, Socket s, int port) {
+        UdpHeartbeat h = new UdpHeartbeat(tag, s.getLocalAddress(),
+                new InetSocketAddress(s.getInetAddress(), port));
+        synchronized (lock) {
+            if (gen != generation) return null;
+            stopHeartbeat(heartbeat);
+            heartbeat = h;
+            heartbeatUsed = true;
+        }
+        try {
+            h.start(!heartbeatLogged);
+            heartbeatLogged = true;
+        } catch (IOException e) {
+            Log.w(TAG, tag + ": no heartbeat socket: " + e.getMessage());
+        }
+        return h;
+    }
+
+    /**
+     * Ends the heartbeat {@code h} of a connection; when it is the current one its counts
+     * go to the totals of the stats. A newer connection's heartbeat is left alone.
+     */
+    private void stopHeartbeat(UdpHeartbeat h) {
+        if (h == null) return;
+        h.close();
+        synchronized (lock) {
+            if (heartbeat != h) return;
+            heartbeatsBefore += h.sent();
+            heartbeatErrorsBefore += h.errors();
+            heartbeat = null;
+        }
+    }
+
+    /**
+     * The turn for frames of this connection: {@code wanted} for MJPEG, 0 for H.264/H.265,
+     * which have no rotation yet (#201). Logged once each.
+     */
+    private int rotation(int wanted, boolean jpeg) {
+        if (wanted == 0) return 0;
+        if (!jpeg) {
+            if (!rotateIgnoredLogged) {
+                rotateIgnoredLogged = true;
+                Log.i(TAG, tag + ": rotate= only applies to MJPEG streams for now (#201)");
+            }
+            return 0;
+        }
+        if (!rotateLogged) {
+            rotateLogged = true;
+            Log.i(TAG, tag + ": MJPEG frames turned " + wanted + "\u00b0 counter-clockwise"
+                    + " (#200; ?rotate=0 turns it off)");
+        }
+        return wanted;
+    }
+
+    /** Degrees counter-clockwise the MJPEG frames are turned now (#200), 0 for none. */
+    int rotate() { return rotate; }
+
+    /** Heartbeat statistics for /stats.json once an RTSP slot used one (#187), else null. */
+    Map<String, Object> heartbeatStats() {
+        if (!heartbeatUsed) return null;
+        synchronized (lock) {
+            return UdpHeartbeat.stats(heartbeat, heartbeatsBefore, heartbeatErrorsBefore);
+        }
+    }
+
+    /** FLOW-UFO statistics for /stats.json while a flowufo:// slot runs (#187), else null. */
+    Map<String, Object> flowUfoStats() {
+        FlowUfo.Client c = ufo;
+        return c != null ? c.stats() : null;
+    }
+
+    /**
+     * A flowufo:// slot (#187): the toy drone's own protocol over UDP, JPEG frames to
+     * onJpegFrame. The client probes until the drone answers and again after it went quiet,
+     * so the watchdog leaves it alone. Returns true once it ran, like a PLAY that succeeded.
+     */
+    private boolean flowUfo(int gen, FlowUfo.Url u) throws IOException {
+        FlowUfo.Client c = new FlowUfo.Client(tag, u, NetInfo::bindToNetworkOf);
+        synchronized (lock) {
+            if (gen != generation) return false;
+            ufo = c;
+            keepalive = null;
+            lastPacketMs = System.nanoTime() / 1_000_000;
+            streamBytes = 0;
+            bitrateMarkNs = System.nanoTime();
+            active = true;
+        }
+        try {
+            Sdp sdp = new Sdp();
+            sdp.videoJpeg = true;
+            sdp.videoPt = Sdp.PT_JPEG;
+            callback.onSdp(sdp);
+            final boolean[] first = {true};
+            final boolean[] started = {false};
+            c.run(() -> active && gen == generation, new FlowUfo.Listener() {
+                @Override
+                public void onState(boolean receiving, String text) {
+                    if (gen != generation) return;
+                    if (receiving) {
+                        inUse = "FLOW-UFO UDP";
+                    } else {
+                        inUse = null;
+                        // The toy went quiet: say so, the next frame reports "connected" again
+                        status(gen, started[0] ? "disconnected" : "buffering");
+                        started[0] = true;
+                        first[0] = true;
+                    }
+                    callback.onDetail(text);
+                }
+
+                @Override
+                public void onFrame(byte[] buf, int length) {
+                    if (gen != generation) return;
+                    streamBytes += length;
+                    if (callback.onJpegFrame(buf, 0, length)) {
+                        lastPacketMs = System.nanoTime() / 1_000_000;
+                        if (first[0]) {
+                            first[0] = false;
+                            status(gen, "connected");
+                        }
+                    }
+                }
+            });
+            return true;
+        } finally {
+            synchronized (lock) {
+                if (ufo == c) {
+                    ufo = null;
+                    inUse = null;
+                }
+            }
+            c.close();
+        }
+    }
+
+    /** Jieli statistics for /stats.json while a jieli:// slot runs (#187), else null. */
+    Map<String, Object> jieliStats() {
+        Jieli.Client c = jieli;
+        return c != null ? c.stats() : null;
+    }
+
+    /** Raw bytes of a jieli:// slot for the debug page (#187), see Jieli.Client.raw(). */
+    byte[] jieliRaw(String which) {
+        Jieli.Client c = jieli;
+        byte[] b = c != null ? c.raw(which) : null;
+        return b != null ? b : Jieli.Client.lastRaw(which);
+    }
+
+    /**
+     * A jieli:// slot (#187): CTP over TCP asks the toy for the stream, which comes as RTP to
+     * a fixed local UDP port: payload type 26 goes to the RTP/JPEG path, 96 to the H.264 one,
+     * as on a udp:// slot. The client asks again when no video comes, so the watchdog leaves
+     * it alone. Returns true once it ran, like a PLAY that succeeded.
+     */
+    private boolean jieli(int gen, Jieli.Url u) throws IOException {
+        Jieli.Client c = new Jieli.Client(tag, u, NetInfo::bindToNetworkOf,
+                NetInfo::bindToNetworkOf);
+        synchronized (lock) {
+            if (gen != generation) return false;
+            jieli = c;
+            keepalive = null;
+            lastPacketMs = System.nanoTime() / 1_000_000;
+            streamBytes = 0;
+            bitrateMarkNs = System.nanoTime();
+            active = true;
+        }
+        try {
+            final int[] pt = {u.format == Jieli.FORMAT_H264 ? Jieli.PT_H264 : Jieli.PT_JPEG};
+            rotate = rotation(u.rotate, true);
+            callback.onSdp(jieliSdp(pt[0]));
+            // onState comes from the CTP thread, the video from the UDP one
+            final AtomicBoolean first = new AtomicBoolean(true);
+            final AtomicBoolean received = new AtomicBoolean(false);
+            final Object order = new Object();
+            try {
+                c.run(() -> active && gen == generation, new Jieli.Listener() {
+                    @Override
+                    public void onState(boolean receiving, String text) {
+                        if (gen != generation) return;
+                        // In order with usable() on the UDP thread: a packet that came in since
+                        // the CTP thread saw the video stop wins (Qodo on #198)
+                        synchronized (order) {
+                            if (receiving) {
+                                inUse = "Jieli RTP";
+                                received.set(true);
+                            } else {
+                                if (c.videoAgeMs() < Jieli.quietMs) return;
+                                inUse = null;
+                                // Video that stopped says so; the next frame reports "connected"
+                                status(gen, received.get() ? "disconnected" : "buffering");
+                                first.set(true);
+                            }
+                            callback.onDetail(text);
+                        }
+                    }
+
+                    @Override
+                    public boolean onRtp(byte[] buf, int offset, int length) {
+                        if (gen != generation) return false;
+                        int type = buf[offset + 1] & 0x7F;
+                        if (type != pt[0]) {
+                            // The toy sends the other codec than asked for: follow it
+                            pt[0] = type;
+                            Log.i(TAG, tag + ": Jieli: video is "
+                                    + (type == Jieli.PT_H264 ? "H.264" : "JPEG")
+                                    + " (RTP PT " + type + ")");
+                            callback.onSdp(jieliSdp(type));
+                        }
+                        streamBytes += length;
+                        if (!callback.onPacket(CHANNEL_VIDEO, buf, offset, length)) return false;
+                        usable();
+                        return true;
+                    }
+
+                    @Override
+                    public boolean onJpeg(byte[] buf, int offset, int length) {
+                        if (gen != generation) return false;
+                        if (pt[0] != Jieli.PT_JPEG) {
+                            pt[0] = Jieli.PT_JPEG;
+                            callback.onSdp(jieliSdp(Jieli.PT_JPEG));
+                        }
+                        streamBytes += length;
+                        if (!callback.onJpegFrame(buf, offset, length)) return false;
+                        usable();
+                        return true;
+                    }
+
+                    private void usable() {
+                        lastPacketMs = System.nanoTime() / 1_000_000;
+                        synchronized (order) {
+                            if (first.compareAndSet(true, false)) status(gen, "connected");
+                        }
+                    }
+                });
+            } catch (IOException e) {
+                // A toy that dropped after the stream was asked for ends like a PLAY that
+                // worked: the next attempt comes soon, not after a growing back-off (Qodo on #198)
+                if (!c.streamRequested || gen != generation) throw e;
+                Log.w(TAG, tag + ": Jieli: " + e.getMessage() + "; connecting again");
+                callback.onFailure(e.getMessage());
+            }
+            return true;
+        } finally {
+            synchronized (lock) {
+                if (jieli == c) {
+                    jieli = null;
+                    inUse = null;
+                }
+            }
+            c.close();
+        }
+    }
+
+    private static Sdp jieliSdp(int pt) {
+        Sdp sdp = new Sdp();
+        sdp.videoPt = pt;
+        sdp.videoJpeg = pt == Jieli.PT_JPEG;
+        return sdp;
     }
 
     private boolean listen(int gen, RtpListener.Url u) throws IOException {
@@ -1111,6 +1421,18 @@ class RtspSession {
         String userInfo;
         /** URL without credentials, used in requests. */
         String requestUrl;
+        /**
+         * UDP port for the cooingdv heartbeat (#187), or 0 for none: 7099 for
+         * rtsp://{host}:7070/webcam, else ?heartbeat={port}; ?heartbeat=off turns it off. The
+         * option is ours: it is taken out of the URL sent to the camera.
+         */
+        int heartbeatPort;
+        /**
+         * Degrees counter-clockwise to turn MJPEG frames when drawing them (#200): 270 for
+         * rtsp://{host}:7070/webcam, whose toy camera is mounted sideways, else 0;
+         * ?rotate=0|90|180|270 overrides it. Ours as well: not sent to the camera.
+         */
+        int rotate;
 
         static Url parse(String url) throws IOException {
             if (url == null) throw new IOException("Camera slot not configured");
@@ -1157,8 +1479,69 @@ class RtspSession {
                 u.host = hostPort;
             }
             if (u.host.isEmpty()) throw new IOException("Invalid RTSP URL: host is missing");
+            rest = takeOptions(u, rest);
             u.requestUrl = scheme + "://" + authority + rest;
             return u;
+        }
+
+        /**
+         * Sets heartbeatPort and rotate from path and query; returns them without our
+         * options.
+         */
+        private static String takeOptions(Url u, String rest) throws IOException {
+            int q = rest.indexOf('?');
+            String path = q >= 0 ? rest.substring(0, q) : rest;
+            if (u.port == 7070 && (path.equalsIgnoreCase("/webcam")
+                    || path.equalsIgnoreCase("/webcam/"))) {
+                // The cooingdv toys (#187): heartbeat, and the K200's sideways camera (#200)
+                u.heartbeatPort = UdpHeartbeat.DEFAULT_PORT;
+                u.rotate = 270;
+            }
+            if (q < 0) return rest;
+            StringBuilder kept = new StringBuilder();
+            boolean found = false;
+            for (String param : rest.substring(q + 1).split("&", -1)) {
+                int eq = param.indexOf('=');
+                String name = (eq < 0 ? param : param.substring(0, eq)).toLowerCase(Locale.ROOT);
+                if (!name.equals("heartbeat") && !name.equals("rotate")) {
+                    if (kept.length() > 0) kept.append('&');
+                    kept.append(param);
+                    continue;
+                }
+                found = true;
+                String v = eq < 0 ? "" : param.substring(eq + 1).trim().toLowerCase(Locale.ROOT);
+                if (name.equals("rotate")) {
+                    u.rotate = parseRotate(v);
+                } else if (v.equals("off") || v.equals("0")) {
+                    u.heartbeatPort = 0;
+                } else {
+                    try {
+                        u.heartbeatPort = Integer.parseInt(v);
+                    } catch (NumberFormatException e) {
+                        u.heartbeatPort = -1;
+                    }
+                    if (u.heartbeatPort <= 0 || u.heartbeatPort > 65535) {
+                        throw new IOException("Invalid heartbeat port: " + v
+                                + " (a UDP port, e.g. heartbeat=7099, or heartbeat=off)");
+                    }
+                }
+            }
+            // Untouched unless our option was there
+            if (!found) return rest;
+            return kept.length() > 0 ? path + "?" + kept : path;
+        }
+
+        /** ?rotate= in degrees counter-clockwise: 0, 90, 180 or 270 (#200). */
+        static int parseRotate(String v) throws IOException {
+            switch (v) {
+                case "0": return 0;
+                case "90": return 90;
+                case "180": return 180;
+                case "270": return 270;
+                default:
+                    throw new IOException("Invalid rotate: " + v
+                            + " (degrees counter-clockwise: rotate=0, 90, 180 or 270)");
+            }
         }
 
         private static int parsePort(String s, String url) throws IOException {

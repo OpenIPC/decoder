@@ -11,9 +11,9 @@
 
 ## Branches
 
-| Branch | Status |
-|---|---|
-| `v2` | **Main development branch** (default). Modular code in `android/`. Built as `decoder-v2.apk` |
+| Branch  | Status                                                                                                                                                                                                        |
+|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `v2`    | **Main development branch** (default). Modular code in `android/`. Built as `decoder-v2.apk`                                                                                                                  |
 | `basic` | Legacy single-file version (1.0x), kept for reference and older setups. Built as `decoder.apk`. Its version history is in the [`basic` README](https://github.com/OpenIPC/decoder/tree/basic#version-history) |
 
 Base pull requests on `v2`.
@@ -22,18 +22,18 @@ Base pull requests on `v2`.
 
 `.github/workflows/build.yml` runs on every push and pull request, and by hand (`workflow_dispatch`, optionally for a given commit). A newer push to the same branch cancels the older run, so `latest` always gets the build of the newest commit.
 
-| Job | Runs on | What it does |
-|---|---|---|
-| `test` | every push and pull request, forks included (no secrets) | `./gradlew testDebugUnitTest`, then `./gradlew lintDebug` against `app/lint-baseline.xml` (only new findings fail). Reports are uploaded when it fails |
-| `build` | pushes and manual runs, not pull requests | signed `assembleRelease` (R8 minify and resource shrinking), the R8 `mapping.txt` kept as a workflow artifact |
+| Job     | Runs on                                                  | What it does                                                                                                                                           |
+|---------|----------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `test`  | every push and pull request, forks included (no secrets) | `./gradlew testDebugUnitTest`, then `./gradlew lintDebug` against `app/lint-baseline.xml` (only new findings fail). Reports are uploaded when it fails |
+| `build` | pushes and manual runs, not pull requests                | signed `assembleRelease` (R8 minify and resource shrinking), the R8 `mapping.txt` kept as a workflow artifact                                          |
 
 What a `build` run publishes:
 
-| Branch | Output |
-|---|---|
-| `v2` | `decoder-v2.apk` and `decoder-v2-mapping.txt` in the [`latest`](https://github.com/OpenIPC/decoder/releases/tag/latest) release (replaced by every build); a message with the APK, version and commit to the OpenIPC Telegram channel |
-| `basic` | `decoder.apk` and its mapping in `latest`; Telegram |
-| any other | workflow artifacts `decoder-<branch, / → ->` (APK) and `…-mapping` on the run page |
+| Branch    | Output                                                                                                                                                                                                                                |
+|-----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `v2`      | `decoder-v2.apk` and `decoder-v2-mapping.txt` in the [`latest`](https://github.com/OpenIPC/decoder/releases/tag/latest) release (replaced by every build); a message with the APK, version and commit to the OpenIPC Telegram channel |
+| `basic`   | `decoder.apk` and its mapping in `latest`; Telegram                                                                                                                                                                                   |
+| any other | workflow artifacts `decoder-<branch, / → ->` (APK) and `…-mapping` on the run page                                                                                                                                                    |
 
 Every run, `v2` and `basic` included, also keeps its mapping as the artifact `…-mapping`. Artifacts expire after 90 days.
 
@@ -108,11 +108,11 @@ For every class, field and method it gives `original -> obfuscated`, with the li
 
 A mapping fits **only the build it came from**. Use the one whose build matches the hash under **Exit** or `git` in `/stats.json`:
 
-| Build | Mapping |
-|---|---|
-| the current `v2` build | `decoder-v2-mapping.txt` in [`latest`](https://github.com/OpenIPC/decoder/releases/tag/latest) |
+| Build                                    | Mapping                                                                                                                                                                                                                                                                                                                                                                                               |
+|------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| the current `v2` build                   | `decoder-v2-mapping.txt` in [`latest`](https://github.com/OpenIPC/decoder/releases/tag/latest)                                                                                                                                                                                                                                                                                                        |
 | an older `v2` build, or any branch build | the artifact `decoder-v2-mapping` (or `decoder-<branch>-mapping`) of the CI run that built it, kept 90 days. A push run is found by its commit (below). A manual run (*Run workflow* with `commit_hash`) is listed under the branch it was started on, not under the commit it built: `gh run list -R OpenIPC/decoder -w Build -e workflow_dispatch -b <branch>`, then pick the run by its time or ID |
-| builds before 2.08 | none: they were made before the mapping was kept (#181) |
+| builds before 2.08                       | none: they were made before the mapping was kept (#181)                                                                                                                                                                                                                                                                                                                                               |
 
 ```sh
 RUN=$(gh run list -R OpenIPC/decoder -c <full commit hash> -e push -w Build -L 1 --json databaseId -q '.[0].databaseId')

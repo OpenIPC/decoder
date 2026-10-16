@@ -43,6 +43,8 @@ class RtspClient implements RtspSession.Callback {
         void onStatusChanged(String status);
         void onCodecChanged(boolean codecH265, AudioConfig audio);
         void onJitterSample(int avgJitter);
+        /** What a flowufo:// slot waits for (#187), shown instead of the plain status. */
+        default void onDetail(String text) {}
     }
 
     private volatile Listener listenerCb;
@@ -85,6 +87,16 @@ class RtspClient implements RtspSession.Callback {
     /** The stream is MJPEG: the queue carries complete JPEG frames (#119). */
     boolean isJpeg() { return videoJpeg; }
     long getBitrateMarkNs() { return session.getBitrateMarkNs(); }
+    /** FLOW-UFO statistics while a flowufo:// slot plays (#187), else null. */
+    java.util.Map<String, Object> flowUfoStats() { return session.flowUfoStats(); }
+    /** Jieli statistics while a jieli:// slot plays (#187), else null. */
+    java.util.Map<String, Object> jieliStats() { return session.jieliStats(); }
+    byte[] jieliRaw(String which) { return session.jieliRaw(which); }
+    /** The cooingdv heartbeat once this slot used one (#187), else null. */
+    java.util.Map<String, Object> heartbeatStats() { return session.heartbeatStats(); }
+
+    /** Degrees counter-clockwise the MJPEG frames are turned (#200), 0 for none. */
+    int rotate() { return session.rotate(); }
 
     void start() {
         nalAssembler.reset();
@@ -107,6 +119,12 @@ class RtspClient implements RtspSession.Callback {
         if ("disconnected".equals(status)) nalAssembler.setSalvage(false);
         Listener l = listenerCb;
         if (l != null) l.onStatusChanged(status);
+    }
+
+    @Override
+    public void onDetail(String text) {
+        Listener l = listenerCb;
+        if (l != null) l.onDetail(text);
     }
 
     @Override
