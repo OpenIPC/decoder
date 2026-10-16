@@ -585,13 +585,14 @@ final class Jieli {
     // ====================== RT stream (UDP 2224) ======================
 
     /**
-     * The toy's own video stream on UDP 2224 (#187), as a YL3 sent it: a 20-byte header,
-     * then a piece of a JPEG. Header, little-endian: byte 0 the type (2 for JPEG, bit 7 set
-     * on the last piece of a frame; not relied on), bytes 2–3 the length of this piece, 4–7
-     * a packet counter, 8–11 the length of the JPEG, 12–15 the offset of this piece in it. The
-     * datagram can be longer than the piece: what follows is left over from earlier frames
-     * (taking it gave a broken lower half), so only the piece is used. Pure Java, for the
-     * unit tests.
+     * The toy's own video stream on UDP 2224 (#187), as a YL3 sent it: pieces of JPEG frames,
+     * each behind a 20-byte header, and a datagram can hold several pieces one after another
+     * (e.g. 20 + 2964 + 20 + 100 bytes for a 3064-byte frame). Header, little-endian: byte 0
+     * the type (2 for JPEG, bit 7 set on the last piece of a frame; not relied on), bytes 2–3
+     * the length of this piece, 4–7 a counter, 8–11 the length of the JPEG, 12–15 the offset
+     * of this piece in it. Taking a datagram as one piece put the second header into the JPEG
+     * (broken lower half, wrong colours); taking only the first piece lost every frame longer
+     * than one piece (the picture froze). Pure Java, for the unit tests.
      */
     static final class RtStream {
         static final int HEADER = 20;
@@ -600,10 +601,17 @@ final class Jieli {
         static final int MAX_FRAME = 1 << 20;
 
         private byte[] frame = new byte[64 * 1024];
+        private byte[] ready = new byte[64 * 1024];
         private int size = -1;
         /** Bytes of the frame received so far: duplicates and overlaps count once. */
         private final BitSet got = new BitSet();
         private int filled;
+        /** Lowest and highest counter (bytes 4–7) of this frame's pieces; highest of the last done. */
+        private int frameCounter;
+        private int frameMax;
+        private int doneCounter;
+        private boolean anyDone;
+        int late;
         int frames;
         int dropped;
         int otherTypes;
@@ -621,41 +629,78 @@ final class Jieli {
         }
 
         /**
-         * Takes one datagram; returns the length of a JPEG now complete in {@link #frame()}
-         * (from 0, FFD8 to its last FFD9), or 0.
+         * Takes one datagram, all pieces in it; returns the length of a JPEG now complete in
+         * {@link #frame()} (from 0, FFD8 to its last FFD9), or 0. Should two frames end in one
+         * datagram, the later one is kept.
          */
         int feed(byte[] b, int off, int len) {
-            if (len <= HEADER) return 0;
+            int done = 0;
+            int pos = off;
+            int end = off + len;
+            while (end - pos > HEADER) {
+                int length = (b[pos + 2] & 0xFF) | (b[pos + 3] & 0xFF) << 8;
+                // No length, or more than is left: the rest of the datagram is the piece
+                if (length == 0 || length > end - pos - HEADER) length = end - pos - HEADER;
+                int n = piece(b, pos, length);
+                if (n > 0) {
+                    if (ready.length < n) ready = new byte[n];
+                    System.arraycopy(frame, 0, ready, 0, n);
+                    done = n;
+                }
+                pos += HEADER + length;
+            }
+            return done;
+        }
+
+        /** One piece of {@code length} bytes behind the header at {@code off}. */
+        private int piece(byte[] b, int off, int length) {
             if ((b[off] & 0x7F) != TYPE_JPEG) {
                 otherTypes++;
                 return 0;
             }
             int total = le32(b, off + 8);
             int at = le32(b, off + 12);
-            int length = (b[off + 2] & 0xFF) | (b[off + 3] & 0xFF) << 8;
-            if (length == 0 || length > len - HEADER) length = len - HEADER;
+            int counter = le32(b, off + 4);
+            // A piece of an older frame (a late one, possibly behind a current piece in the same
+            // datagram) must not replace the frame being put together (Qodo on #224): one with
+            // an older counter and another frame length is late. Same length: a reordered piece
+            // of this frame. Whether the toy counts frames or packets is not known.
+            if ((size > 0 && total != size && counter - frameCounter < 0)
+                    || (size < 0 && anyDone && counter - doneCounter <= 0)) {
+                late++;
+                return 0;
+            }
             if (total < 4 || total > MAX_FRAME || at < 0 || at >= total) {
                 drop("bad header: length " + total + ", offset " + at, 0);
                 return 0;
             }
-            int piece = Math.min(length, total - at);
+            int part = Math.min(length, total - at);
             // Pieces may come twice or out of order (Qodo on #215): a piece belongs to the frame
             // being put together if the length matches and it brings bytes not yet received; a
             // repeat is ignored. Anything else starts the next frame, and only then is an
             // unfinished one given up, even if its last piece came already.
-            if (size == total && got.get(at, at + piece).cardinality() == piece) {
-                if (same(b, off + HEADER, at, piece)) return 0;
+            if (size == total && got.get(at, at + part).cardinality() == part) {
+                if (same(b, off + HEADER, at, part)) return 0;
                 startFrame(total);
             } else if (size != total) {
                 startFrame(total);
             }
-            System.arraycopy(b, off + HEADER, frame, at, piece);
-            filled += piece - got.get(at, at + piece).cardinality();
-            got.set(at, at + piece);
+            if (filled == 0) {
+                frameCounter = counter;
+                frameMax = counter;
+            } else {
+                if (counter - frameCounter < 0) frameCounter = counter;
+                if (counter - frameMax > 0) frameMax = counter;
+            }
+            System.arraycopy(b, off + HEADER, frame, at, part);
+            filled += part - got.get(at, at + part).cardinality();
+            got.set(at, at + part);
             if (filled < size) return 0;
             int n = size;
             size = -1;
             got.clear();
+            doneCounter = frameMax;
+            anyDone = true;
             int end = jpegEnd(frame, n);
             if (end == 0) {
                 drop(n + " bytes, starts " + FlowUfo.hex(frame, 0, Math.min(n, 4)) + ", ends "
@@ -667,8 +712,9 @@ final class Jieli {
             return end;
         }
 
+        /** The last complete JPEG returned by feed(). */
         byte[] frame() {
-            return frame;
+            return ready;
         }
 
         private void startFrame(int total) {
