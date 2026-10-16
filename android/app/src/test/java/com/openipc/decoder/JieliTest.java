@@ -46,6 +46,7 @@ public class JieliTest {
     public void shortTimers() {
         Jieli.paramWaitMs = 300;
         Jieli.diagnosticPorts = new int[0];
+        Jieli.streamPort = freeUdpPortOrZero();
     }
 
     @After
@@ -55,7 +56,100 @@ public class JieliTest {
         Jieli.reopenMs = 10_000;
         Jieli.quietMs = 3000;
         Jieli.ctpSilenceMs = 20_000;
-        Jieli.diagnosticPorts = new int[] {1234, 2224};
+        Jieli.diagnosticPorts = new int[] {1234};
+        Jieli.streamPort = Jieli.STREAM_PORT;
+    }
+
+    private static int freeUdpPortOrZero() {
+        try (DatagramSocket d = new DatagramSocket(0, LOOPBACK)) {
+            return d.getLocalPort();
+        } catch (IOException e) {
+            return 0;
+        }
+    }
+
+    /** A datagram of the toy's stream on UDP 2224 as a YL3 sent it (#187). */
+    private static byte[] streamPacket(int counter, int total, int offset, byte[] piece, int tail) {
+        byte[] b = new byte[Jieli.RtStream.HEADER + piece.length + tail];
+        b[0] = 2;
+        b[2] = (byte) 0x94;
+        b[3] = 0x0B;
+        le32(b, 4, counter);
+        le32(b, 8, total);
+        le32(b, 12, offset);
+        System.arraycopy(piece, 0, b, Jieli.RtStream.HEADER, piece.length);
+        return b;
+    }
+
+    private static void le32(byte[] b, int at, int v) {
+        for (int i = 0; i < 4; i++) b[at + i] = (byte) (v >>> (8 * i));
+    }
+
+    private static byte[] jpeg(int length) {
+        byte[] j = new byte[length];
+        j[0] = (byte) 0xFF;
+        j[1] = (byte) 0xD8;
+        for (int i = 2; i < length - 2; i++) j[i] = (byte) (i * 7);
+        j[length - 2] = (byte) 0xFF;
+        j[length - 1] = (byte) 0xD9;
+        return j;
+    }
+
+    // ====================== RT stream ======================
+
+    @Test
+    public void rtStreamOneDatagramFrame() {
+        // As seen from a YL3: 4600 bytes of JPEG, 20 more bytes after it in the datagram
+        Jieli.RtStream st = new Jieli.RtStream();
+        byte[] j = jpeg(4600);
+        byte[] p = streamPacket(42, 4600, 0, j, 20);
+        assertEquals(4640, p.length);
+        int n = st.feed(p, 0, p.length);
+        assertEquals(4600, n);
+        assertArrayEquals(j, Arrays.copyOf(st.frame(), n));
+        assertEquals(1, st.frames);
+        assertEquals(0, st.dropped);
+    }
+
+    @Test
+    public void rtStreamFrameInPieces() {
+        Jieli.RtStream st = new Jieli.RtStream();
+        byte[] j = jpeg(10000);
+        assertEquals(0, st.feed(streamPacket(1, 10000, 0, Arrays.copyOfRange(j, 0, 4000), 0),
+                0, Jieli.RtStream.HEADER + 4000));
+        assertEquals(0, st.feed(streamPacket(2, 10000, 4000, Arrays.copyOfRange(j, 4000, 8000), 0),
+                0, Jieli.RtStream.HEADER + 4000));
+        byte[] last = streamPacket(3, 10000, 8000, Arrays.copyOfRange(j, 8000, 10000), 0);
+        int n = st.feed(last, 0, last.length);
+        assertEquals(10000, n);
+        assertArrayEquals(j, Arrays.copyOf(st.frame(), n));
+    }
+
+    @Test
+    public void rtStreamDropsBrokenFrames() {
+        Jieli.RtStream st = new Jieli.RtStream();
+        // Start lost: a middle piece alone gives nothing
+        byte[] mid = streamPacket(5, 9000, 4000, new byte[4000], 0);
+        assertEquals(0, st.feed(mid, 0, mid.length));
+        // Not a JPEG
+        byte[] junk = streamPacket(6, 100, 0, new byte[100], 0);
+        assertEquals(0, st.feed(junk, 0, junk.length));
+        assertEquals(1, st.dropped);
+        // A frame cut short by the next one
+        byte[] j = jpeg(8000);
+        byte[] first = streamPacket(7, 8000, 0, Arrays.copyOfRange(j, 0, 4000), 0);
+        assertEquals(0, st.feed(first, 0, first.length));
+        byte[] next = streamPacket(8, 4600, 0, jpeg(4600), 0);
+        assertEquals(4600, st.feed(next, 0, next.length));
+        assertEquals(2, st.dropped);
+        // Another type (audio?) and a bad length are ignored
+        byte[] other = streamPacket(9, 4600, 0, jpeg(4600), 0);
+        other[0] = 1;
+        assertEquals(0, st.feed(other, 0, other.length));
+        assertEquals(1, st.otherTypes);
+        byte[] bad = streamPacket(10, -5, 0, jpeg(100), 0);
+        assertEquals(0, st.feed(bad, 0, bad.length));
+        assertEquals(1, st.frames);
     }
 
     // ====================== Helpers ======================
@@ -402,6 +496,7 @@ public class JieliTest {
         final Jieli.Client client;
         final AtomicBoolean keepGoing = new AtomicBoolean(true);
         final List<byte[]> frames = new CopyOnWriteArrayList<>();
+        final List<byte[]> jpegs = new CopyOnWriteArrayList<>();
         final List<String> states = new CopyOnWriteArrayList<>();
         final CountDownLatch frame = new CountDownLatch(1);
         final CountDownLatch ended = new CountDownLatch(1);
@@ -426,6 +521,12 @@ public class JieliTest {
                                 frames.add(Arrays.copyOf(f.data(), f.length()));
                                 frame.countDown();
                             });
+                        }
+
+                        @Override
+                        public void onJpeg(byte[] buf, int offset, int length) {
+                            jpegs.add(Arrays.copyOfRange(buf, offset, offset + length));
+                            frame.countDown();
                         }
                     });
                 } catch (Exception e) {
@@ -585,6 +686,32 @@ public class JieliTest {
             assertNull(r.failure);
             // Nothing from a diagnostic port reaches the video path
             assertTrue(r.frames.isEmpty());
+        }
+    }
+
+    @Test
+    public void streamPortVideoIsPlayed() throws Exception {
+        int rtp = freeUdpPort();
+        try (FakeToy toy = new FakeToy(60000, true)) {
+            toy.rtpPort = rtp;
+            toy.sendVideo = false;
+            Running r = new Running("jieli://127.0.0.1:" + toy.port() + "?rtp=" + rtp);
+            assertTrue(toy.opened.await(5, TimeUnit.SECONDS));
+            byte[] j = jpeg(4600);
+            try (DatagramSocket u = new DatagramSocket(0, LOOPBACK)) {
+                byte[] p = streamPacket(1, 4600, 0, j, 20);
+                u.send(new DatagramPacket(p, p.length,
+                        new InetSocketAddress(LOOPBACK, Jieli.streamPort)));
+            }
+            assertTrue(r.frame.await(3, TimeUnit.SECONDS));
+            assertArrayEquals(j, r.jpegs.get(0));
+            assertTrue(r.frames.isEmpty());
+            long until = now() + 3000;
+            while (now() < until && !r.client.stats().containsKey("video_port")) Thread.sleep(20);
+            assertEquals(Jieli.streamPort, r.client.stats().get("video_port"));
+            r.keepGoing.set(false);
+            assertTrue(r.ended.await(3, TimeUnit.SECONDS));
+            assertNull(r.failure);
         }
     }
 

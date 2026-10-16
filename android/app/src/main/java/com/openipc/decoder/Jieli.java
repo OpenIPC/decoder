@@ -39,9 +39,10 @@ import java.util.Map;
  * OPEN_RT_STREAM; CLOSE_RT_STREAM at the end. The video itself was not in the capture: after
  * turbodrone's research on the same SDK (marshallrichards/turbodrone, Apache-2.0, used as a
  * description only) it is RTP/JPEG (payload type 26) or H.264 (96) to the phone's UDP port
- * 6666. The packets go into the app's normal RTP paths. Unverified, so the log shows what
- * really arrives on 6666, and on the audio and stream ports 1234 and 2224 too when 6666 stays
- * silent. Video only: FLIGHT_CONTROL is never sent, nothing goes to the toy's UDP port 3456.
+ * 6666. The packets go into the app's normal RTP paths. A YL3 sent nothing there but its own
+ * stream to UDP 2224 instead (JPEG behind a 20-byte header, see {@link RtStream}): both ports
+ * are played. When neither has video, the log shows what arrives on the audio port 1234.
+ * Video only: FLIGHT_CONTROL is never sent, nothing goes to the toy's UDP port 3456.
  * Pure Java apart from the log.
  */
 final class Jieli {
@@ -51,6 +52,10 @@ final class Jieli {
     static final String DEFAULT_HOST = "192.168.80.1";
     static final int CTP_PORT = 3333;
     static final int RTP_PORT = 6666;
+    /** The toy's own stream (#187): a YL3 sends its JPEG frames here, not as RTP to 6666. */
+    static final int STREAM_PORT = 2224;
+    /** The port listened on for that stream; STREAM_PORT but for the tests. */
+    static volatile int streamPort = STREAM_PORT;
     static final int DEFAULT_WIDTH = 640;
     static final int DEFAULT_HEIGHT = 480;
     static final int DEFAULT_FPS = 25;
@@ -90,10 +95,10 @@ final class Jieli {
     /** The toy says nothing on CTP for this long (at least): the connection is given up. */
     static volatile long ctpSilenceMs = 20_000;
     /**
-     * Ports opened only to log what arrives when 6666 stays silent: 1234 (audio in the
-     * vendor SDK) and 2224 (its RT stream port). Nothing received there is played.
+     * Ports opened only to log what arrives when the video ports stay silent: 1234 (audio in
+     * the vendor SDK). Nothing received there is played.
      */
-    static volatile int[] diagnosticPorts = {1234, 2224};
+    static volatile int[] diagnosticPorts = {1234};
 
     private Jieli() {}
 
@@ -557,6 +562,86 @@ final class Jieli {
         return parts.length() > 0 ? parts.toString() : null;
     }
 
+    // ====================== RT stream (UDP 2224) ======================
+
+    /**
+     * The toy's own video stream on UDP 2224 (#187), as a YL3 sent it: a 20-byte header,
+     * then (a piece of) a JPEG. Header as far as seen, little-endian: byte 0 the type (2 for
+     * JPEG), bytes 4–7 a packet counter, 8–11 the length of the JPEG, 12–15 the offset of
+     * this piece in it. A 640×480 frame fitted one datagram (4600 bytes, 20 more in the
+     * datagram); longer ones are put together by offset. Pure Java, for the unit tests.
+     */
+    static final class RtStream {
+        static final int HEADER = 20;
+        static final int TYPE_JPEG = 2;
+        static final int MAX_FRAME = 1 << 20;
+
+        private byte[] frame = new byte[64 * 1024];
+        private int size = -1;
+        private int filled;
+        int frames;
+        int dropped;
+        int otherTypes;
+
+        /**
+         * Takes one datagram; returns the length of a JPEG now complete in {@link #frame()}
+         * (from 0, FFD8 to its last FFD9), or 0.
+         */
+        int feed(byte[] b, int off, int len) {
+            if (len <= HEADER) return 0;
+            if ((b[off] & 0xFF) != TYPE_JPEG) {
+                otherTypes++;
+                return 0;
+            }
+            int total = le32(b, off + 8);
+            int at = le32(b, off + 12);
+            if (total < 4 || total > MAX_FRAME || at < 0 || at >= total) {
+                dropped++;
+                return 0;
+            }
+            if (at == 0) {
+                // A new frame; one still missing pieces is lost
+                if (size > 0) dropped++;
+                size = total;
+                filled = 0;
+                if (frame.length < total) frame = new byte[total];
+            } else if (size != total) {
+                return 0; // a piece of a frame whose start was lost
+            }
+            int piece = Math.min(len - HEADER, total - at);
+            System.arraycopy(b, off + HEADER, frame, at, piece);
+            filled += piece;
+            if (filled < size) return 0;
+            int n = size;
+            size = -1;
+            int end = jpegEnd(frame, n);
+            if (end == 0) {
+                dropped++;
+                return 0;
+            }
+            frames++;
+            return end;
+        }
+
+        byte[] frame() {
+            return frame;
+        }
+
+        /** Length up to the last FFD9 when {@code b} starts with FFD8, else 0. */
+        static int jpegEnd(byte[] b, int n) {
+            if (n < 4 || (b[0] & 0xFF) != 0xFF || (b[1] & 0xFF) != 0xD8) return 0;
+            for (int end = n; end >= 4; end--) {
+                if ((b[end - 2] & 0xFF) == 0xFF && (b[end - 1] & 0xFF) == 0xD9) return end;
+            }
+            return 0;
+        }
+
+        static int le32(byte[] b, int at) {
+            return (b[at] & 0xFF) | (b[at + 1] & 0xFF) << 8 | (b[at + 2] & 0xFF) << 16
+                    | (b[at + 3] & 0xFF) << 24;
+        }
+    }
+
     // ====================== Client ======================
 
     interface Listener {
@@ -627,6 +712,13 @@ final class Jieli {
         private volatile int rawJpegs;
         private volatile int foreign;
         private volatile String firstPacket;
+        /** UDP port the video came from last: url.rtpPort or streamPort. */
+        private volatile int videoPort;
+        private final RtStream rtStream = new RtStream();
+        private volatile int streamPackets;
+        private volatile int streamForeign;
+        private volatile String streamFirst;
+        private int droppedLogged;
         private volatile String lastSource;
         private volatile boolean h264Logged;
         private final Map<Integer, Integer> payloadTypes = new LinkedHashMap<>();
@@ -675,16 +767,21 @@ final class Jieli {
         }
 
         String requestedText() {
-            return withHint("Stream requested, waiting for video on UDP " + url.rtpPort);
+            return withHint("Stream requested, waiting for video on UDP " + videoPorts());
         }
 
         String noVideoText() {
-            return withHint("No video on UDP " + url.rtpPort + " yet: the toy accepted the"
+            return withHint("No video on UDP " + videoPorts() + " yet: the toy accepted the"
                     + " request; see /log");
         }
 
         String quietText() {
-            return withHint("The toy's video stopped: waiting on UDP " + url.rtpPort);
+            return withHint("The toy's video stopped: waiting on UDP " + videoPorts());
+        }
+
+        private String videoPorts() {
+            return url.rtpPort == streamPort ? String.valueOf(streamPort)
+                    : url.rtpPort + " and " + streamPort;
         }
 
         void run(UdpReceiver.Condition keepGoing, Listener listener) throws IOException {
@@ -698,7 +795,15 @@ final class Jieli {
             try {
                 // The video port first: nothing the toy sends after OPEN_RT_STREAM is lost
                 DatagramSocket video = openUdp(url.rtpPort, a);
-                startThread(video, true, listener);
+                startThread(video, PORT_RTP, listener);
+                if (url.rtpPort != streamPort) {
+                    try {
+                        startThread(openUdp(streamPort, a), PORT_STREAM, listener);
+                    } catch (IOException e) {
+                        Log.w(TAG, tag + ": Jieli: cannot listen on UDP " + streamPort + ": "
+                                + e.getMessage());
+                    }
+                }
                 state = "connecting";
                 listener.onState(false, connectingText());
                 if (tcpSetup != null) networkTcp = tcpSetup.prepare(s, a);
@@ -707,7 +812,7 @@ final class Jieli {
                     if (closed) return;
                 }
                 Log.i(TAG, tag + ": Jieli: connecting to CTP " + url.endpoint() + " (network: "
-                        + networkTcp + "), video on UDP " + url.rtpPort + " (network: "
+                        + networkTcp + "), video on UDP " + videoPorts() + " (network: "
                         + networkUdp + ")");
                 try {
                     s.connect(new InetSocketAddress(a, url.port), CONNECT_TIMEOUT_MS);
@@ -760,10 +865,10 @@ final class Jieli {
                         if (flowing && !receiving) {
                             receiving = true;
                             state = "playing";
-                            Log.i(TAG, tag + ": Jieli: video arrives on UDP " + url.rtpPort
+                            Log.i(TAG, tag + ": Jieli: video arrives on UDP " + videoPort
                                     + " from " + lastSource);
                             listener.onState(true, "Receiving from the toy on UDP "
-                                    + url.rtpPort + "…");
+                                    + videoPort + "…");
                         } else if (!flowing && receiving) {
                             receiving = false;
                             state = "quiet";
@@ -773,14 +878,14 @@ final class Jieli {
                         }
                         if (!diagnostics && last == 0 && t - openAt >= noVideoMs) {
                             diagnostics = true;
-                            Log.w(TAG, tag + ": Jieli: no video on UDP " + url.rtpPort + " "
+                            Log.w(TAG, tag + ": Jieli: no video on UDP " + videoPorts() + " "
                                     + noVideoMs + " ms after OPEN_RT_STREAM (" + summary()
                                     + "); listening on " + ports(diagnosticPorts)
                                     + " too, for the log only");
                             for (int p : diagnosticPorts) {
-                                if (p == url.rtpPort) continue;
+                                if (p == url.rtpPort || p == streamPort) continue;
                                 try {
-                                    startThread(openUdp(p, a), false, listener);
+                                    startThread(openUdp(p, a), PORT_DIAGNOSTIC, listener);
                                 } catch (IOException e) {
                                     Log.w(TAG, tag + ": Jieli: cannot listen on UDP " + p + ": "
                                             + e.getMessage());
@@ -864,7 +969,11 @@ final class Jieli {
             return d;
         }
 
-        private void startThread(DatagramSocket d, boolean video, Listener listener) {
+        private static final int PORT_DIAGNOSTIC = 0;
+        private static final int PORT_RTP = 1;
+        private static final int PORT_STREAM = 2;
+
+        private void startThread(DatagramSocket d, int kind, Listener listener) {
             int port = d.getLocalPort();
             Thread th = new Thread(() -> {
                 byte[] b = new byte[65536];
@@ -873,8 +982,10 @@ final class Jieli {
                     while (!closed && !d.isClosed()) {
                         p.setLength(b.length);
                         d.receive(p);
-                        if (video) {
+                        if (kind == PORT_RTP) {
                             video(p, listener);
+                        } else if (kind == PORT_STREAM) {
+                            stream(p, listener);
                         } else {
                             diagnostic(port, p);
                         }
@@ -1009,12 +1120,14 @@ final class Jieli {
                     h264Logged = true;
                     Log.i(TAG, tag + ": Jieli: RTP payload type 96: played as H.264");
                 }
+                videoPort = url.rtpPort;
                 lastVideoAt = now();
                 listener.onRtp(b, 0, len);
             } else if (!rtp && len >= 4 && (b[0] & 0xFF) == 0xFF && (b[1] & 0xFF) == 0xD8
                     && (b[len - 2] & 0xFF) == 0xFF && (b[len - 1] & 0xFF) == 0xD9) {
                 // A whole JPEG without RTP: turbodrone takes those too
                 rawJpegs++;
+                videoPort = url.rtpPort;
                 lastVideoAt = now();
                 listener.onJpeg(b, 0, len);
             } else if (rtp) {
@@ -1024,6 +1137,42 @@ final class Jieli {
                 }
             } else {
                 nonRtp++;
+            }
+        }
+
+        /** One datagram of the toy's own stream on UDP 2224 (see {@link RtStream}). */
+        private void stream(DatagramPacket p, Listener listener) {
+            byte[] b = p.getData();
+            int len = p.getLength();
+            int n = ++streamPackets;
+            String from = p.getAddress().getHostAddress() + ":" + p.getPort();
+            boolean toy = p.getAddress().equals(address);
+            if (n <= 5 || n % 1000 == 0) {
+                // The whole header and the end: the format is only partly known (#187)
+                String head = FlowUfo.hex(b, 0, Math.min(len, RtStream.HEADER + 4));
+                String tail = FlowUfo.hex(b, Math.max(0, len - 8), Math.min(len, 8));
+                Log.i(TAG, tag + ": Jieli: UDP " + streamPort + " packet " + n + " from " + from
+                        + (toy ? "" : " (not the toy: ignored)") + ", " + len + " bytes: " + head
+                        + " … " + tail + (len > RtStream.HEADER + 12 ? " (type " + (b[0] & 0xFF)
+                        + ", counter " + RtStream.le32(b, 4) + ", length " + RtStream.le32(b, 8)
+                        + ", offset " + RtStream.le32(b, 12) + ")" : ""));
+            }
+            if (streamFirst == null) streamFirst = from + ", " + len + " bytes: "
+                    + FlowUfo.hex(b, 0, Math.min(len, 32));
+            if (!toy) {
+                streamForeign++;
+                return;
+            }
+            int jpeg = rtStream.feed(b, 0, len);
+            if (jpeg > 0) {
+                lastSource = from;
+                videoPort = streamPort;
+                lastVideoAt = now();
+                listener.onJpeg(rtStream.frame(), 0, jpeg);
+            } else if (rtStream.dropped != droppedLogged && rtStream.dropped <= 3) {
+                droppedLogged = rtStream.dropped;
+                Log.w(TAG, tag + ": Jieli: UDP " + streamPort + ": " + droppedLogged
+                        + " frame(s) not put together (length or JPEG markers do not fit)");
             }
         }
 
@@ -1053,8 +1202,10 @@ final class Jieli {
         private String summary() {
             return String.format(Locale.ROOT, "CTP %d sent, %d received, %d keepalives;"
                             + " UDP %d: %d packets, %d RTP video, %d frames, %d not RTP,"
-                            + " %d from others", ctpSent, ctpReceived, keepAlives, url.rtpPort,
-                    packets, rtpPackets, rtpFrames, nonRtp, foreign);
+                            + " %d from others; UDP %d: %d packets, %d frames, %d dropped",
+                    ctpSent, ctpReceived, keepAlives, url.rtpPort, packets, rtpPackets,
+                    rtpFrames, nonRtp, foreign, streamPort, streamPackets, rtStream.frames,
+                    rtStream.dropped);
         }
 
         /** For /stats.json. */
@@ -1100,6 +1251,16 @@ final class Jieli {
             }
             if (firstPacket != null) rtp.put("first_packet", firstPacket);
             m.put("rtp", rtp);
+            Map<String, Object> stream = new LinkedHashMap<>();
+            stream.put("port", streamPort);
+            stream.put("packets", streamPackets);
+            stream.put("frames", rtStream.frames);
+            stream.put("dropped", rtStream.dropped);
+            if (rtStream.otherTypes > 0) stream.put("other_types", rtStream.otherTypes);
+            if (streamForeign > 0) stream.put("from_others", streamForeign);
+            if (streamFirst != null) stream.put("first_packet", streamFirst);
+            m.put("stream", stream);
+            if (videoPort > 0) m.put("video_port", videoPort);
             synchronized (sources) {
                 m.put("sources", new LinkedHashMap<>(sources));
             }
