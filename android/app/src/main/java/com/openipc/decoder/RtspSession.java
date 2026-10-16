@@ -1408,7 +1408,7 @@ class RtspSession {
          */
         int heartbeatPort;
         /**
-         * Degrees counter-clockwise to turn MJPEG frames when drawing them (#200): 90 for
+         * Degrees counter-clockwise to turn MJPEG frames when drawing them (#200): 270 for
          * rtsp://{host}:7070/webcam, whose toy camera is mounted sideways, else 0;
          * ?rotate=0|90|180|270 overrides it. Ours as well: not sent to the camera.
          */
@@ -1475,7 +1475,7 @@ class RtspSession {
                     || path.equalsIgnoreCase("/webcam/"))) {
                 // The cooingdv toys (#187): heartbeat, and the K200's sideways camera (#200)
                 u.heartbeatPort = UdpHeartbeat.DEFAULT_PORT;
-                u.rotate = 90;
+                u.rotate = 270;
             }
             if (q < 0) return rest;
             StringBuilder kept = new StringBuilder();

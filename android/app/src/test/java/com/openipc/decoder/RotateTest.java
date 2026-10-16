@@ -20,8 +20,8 @@ public class RotateTest {
 
     @Test
     public void ninetyForTheCooingdvWebcamPathOnly() throws IOException {
-        assertEquals(90, RtspSession.Url.parse("rtsp://192.168.1.1:7070/webcam").rotate);
-        assertEquals(90, RtspSession.Url.parse("rtsp://10.0.0.9:7070/WEBCAM/").rotate);
+        assertEquals(270, RtspSession.Url.parse("rtsp://192.168.1.1:7070/webcam").rotate);
+        assertEquals(270, RtspSession.Url.parse("rtsp://10.0.0.9:7070/WEBCAM/").rotate);
         assertEquals(0, RtspSession.Url.parse("rtsp://192.168.1.1:554/webcam").rotate);
         assertEquals(0, RtspSession.Url.parse("rtsp://192.168.1.1:7070/live").rotate);
         assertEquals(0, RtspSession.Url.parse("rtsp://192.168.1.10:554/stream=0").rotate);

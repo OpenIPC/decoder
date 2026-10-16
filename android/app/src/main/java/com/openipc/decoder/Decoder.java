@@ -2045,6 +2045,14 @@ public class Decoder extends Activity
                 try {
                     Frame buffer = nalQueue.poll(5, TimeUnit.MILLISECONDS);
                     if (buffer != null && rtspClient.isJpeg()) {
+                        // Every JPEG frame is whole: when drawing falls behind (a turned frame
+                        // is drawn in software, #187), show the newest and drop the older ones
+                        // instead of letting the delay grow
+                        Frame newer;
+                        while ((newer = nalQueue.poll()) != null) {
+                            framePool.recycle(buffer);
+                            buffer = newer;
+                        }
                         // S: MJPEG has no key frames, one frame per second instead (#153); the
                         // second counts from a frame really shown (Qodo on #155)
                         long now = System.nanoTime() / 1_000_000;
