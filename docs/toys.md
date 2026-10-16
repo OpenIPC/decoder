@@ -40,24 +40,24 @@ Whether a toy can be played here depends on its protocol. Toys that do offer RTS
 
 The Wi‑Fi name and the address the phone gets usually tell the family. The toy is almost always the `.1` address of that network, **not** the phone's own address.
 
-| Wi‑Fi name | Phone gets | Family | Slot URL | Status |
-|---|---|---|---|---|
-| `FLOW-UFO-xxxxxx`, `FLOW_xxxxxx` | `192.168.169.x` | FLOW-UFO (BL60x camera; turbodrone calls it `wifi_uav`) | `flowufo://192.168.169.1` (UDP 8800 and 8801) | in testing ([#187](https://github.com/OpenIPC/decoder/issues/187)) |
-| `FLY-UFO-xxxxxx` and other cooingdv toys (KY UFO, RC UFO apps) | `192.168.1.x` | KY UFO RTSP | `rtsp://192.168.1.1:7070/webcam` (with the heartbeat to UDP 7099) | in testing ([#187](https://github.com/OpenIPC/decoder/issues/187)) |
-| `HF_xxxxxxxx` | `192.168.80.x` | Jieli / HF (Jieli AC79 camera, vendor app *DVRunning 2*) | `jieli://192.168.80.1` (CTP on TCP 3333, video to the phone's UDP 2224 or 6666) | test build 3: video on UDP 2224 from a YL3, playing it is new ([#187](https://github.com/OpenIPC/decoder/issues/187)) |
+| Wi‑Fi name                                                     | Phone gets      | Family                                                   | Slot URL                                                                        | Status                                                                                                                |
+|----------------------------------------------------------------|-----------------|----------------------------------------------------------|---------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------|
+| `FLOW-UFO-xxxxxx`, `FLOW_xxxxxx`                               | `192.168.169.x` | FLOW-UFO (BL60x camera; turbodrone calls it `wifi_uav`)  | `flowufo://192.168.169.1` (UDP 8800 and 8801)                                   | in testing ([#187](https://github.com/OpenIPC/decoder/issues/187))                                                    |
+| `FLY-UFO-xxxxxx` and other cooingdv toys (KY UFO, RC UFO apps) | `192.168.1.x`   | KY UFO RTSP                                              | `rtsp://192.168.1.1:7070/webcam` (with the heartbeat to UDP 7099)               | in testing ([#187](https://github.com/OpenIPC/decoder/issues/187))                                                    |
+| `HF_xxxxxxxx`                                                  | `192.168.80.x`  | Jieli / HF (Jieli AC79 camera, vendor app *DVRunning 2*) | `jieli://192.168.80.1` (CTP on TCP 3333, video to the phone's UDP 2224 or 6666) | test build 3: video on UDP 2224 from a YL3, playing it is new ([#187](https://github.com/OpenIPC/decoder/issues/187)) |
 
 When a `flowufo://` or `jieli://` slot points at the phone itself, or at the network of another family, its status says so (for example *192.168.1.100 is this phone; the toy is usually 192.168.1.1*, *This network looks like a KY UFO RTSP toy: try rtsp://192.168.1.1:7070/webcam* or, on a `192.168.80.x` network, *try jieli://192.168.80.1*).
 
 ## FLOW-UFO
 
-| | |
-|---|---|
-| Wi‑Fi name | `FLOW-UFO-xxxxxx`, `FLOW_xxxxxx` |
-| Camera | BL60x Wi‑Fi camera module (BL608 or BL618 engine) |
-| Toy address | `192.168.169.1`, UDP port 8800 (BL608) or 8801 (BL618); the toy answers from port 1234 |
-| Slot URL | `flowufo://192.168.169.1:8800` (or `flowufo://` alone) |
-| Status | **in testing**, not in the releases: issue [#187](https://github.com/OpenIPC/decoder/issues/187), PR [#188](https://github.com/OpenIPC/decoder/pull/188) |
-| Test build | [toys-187-test2](https://github.com/OpenIPC/decoder/releases/tag/toys-187-test2) (2.11 with the FLOW-UFO, Jieli and KY UFO changes; installs over the release and keeps the settings) |
+|             |                                                                                                                                                                                       |
+|-------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Wi‑Fi name  | `FLOW-UFO-xxxxxx`, `FLOW_xxxxxx`                                                                                                                                                      |
+| Camera      | BL60x Wi‑Fi camera module (BL608 or BL618 engine)                                                                                                                                     |
+| Toy address | `192.168.169.1`, UDP port 8800 (BL608) or 8801 (BL618); the toy answers from port 1234                                                                                                |
+| Slot URL    | `flowufo://192.168.169.1:8800` (or `flowufo://` alone)                                                                                                                                |
+| Status      | **in testing**, not in the releases: issue [#187](https://github.com/OpenIPC/decoder/issues/187), PR [#188](https://github.com/OpenIPC/decoder/pull/188)                              |
+| Test build  | [toys-187-test2](https://github.com/OpenIPC/decoder/releases/tag/toys-187-test2) (2.11 with the FLOW-UFO, Jieli and KY UFO changes; installs over the release and keeps the settings) |
 
 What the toy does, as far as is known:
 
@@ -69,10 +69,10 @@ What the toy does, as far as is known:
 
 URL options, for comparing with what the toy expects (as with `udp://`, separated by `?` and `&`):
 
-| Option | Values | Default | What it does |
-|---|---|---|---|
-| `qpara` (or `q`) | 8 hex digits | `324B142D` | the four quality parameters in each acknowledgement; `324B142D` is what turbodrone sends to working drones, `19322348` an older reading of the vendor app |
-| `dqt` | `zigzag`, `raster`, `q50` | `zigzag` | the quantization tables in the JPEG header the app puts in front of each frame: `zigzag` = standard tables scaled to the quality byte of the fragment, in zig-zag order as the JPEG standard has it; `raster` = unscaled standard tables in raster order, quality ignored (what turbodrone writes, and it shows real drones' frames); `q50` = unscaled, zig-zag. If the picture is there but blocky, too dark/bright or noisy, try the others |
+| Option           | Values                    | Default    | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+|------------------|---------------------------|------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `qpara` (or `q`) | 8 hex digits              | `324B142D` | the four quality parameters in each acknowledgement; `324B142D` is what turbodrone sends to working drones, `19322348` an older reading of the vendor app                                                                                                                                                                                                                                                                                     |
+| `dqt`            | `zigzag`, `raster`, `q50` | `zigzag`   | the quantization tables in the JPEG header the app puts in front of each frame: `zigzag` = standard tables scaled to the quality byte of the fragment, in zig-zag order as the JPEG standard has it; `raster` = unscaled standard tables in raster order, quality ignored (what turbodrone writes, and it shows real drones' frames); `q50` = unscaled, zig-zag. If the picture is there but blocky, too dark/bright or noisy, try the others |
 
 Examples: `flowufo://192.168.169.1:8800`, `flowufo://192.168.169.1:8800?dqt=raster`, `flowufo://192.168.169.1:8800?q=19322348`, `flowufo://192.168.169.1:8801?dqt=q50`.
 
@@ -96,13 +96,13 @@ Some of these toys use the FLOW-UFO protocol instead (the KY UFO app has both); 
 
 ## HF / Jieli toys
 
-| | |
-|---|---|
-| Wi‑Fi name | `HF_xxxxxxxx` |
-| Camera | Jieli AC79 (`AC79X_wifi_car_camera`); vendor app *DVRunning 2* (also *HF UFO*) |
-| Toy address | `192.168.80.1`: control (CTP) on TCP port 3333; the video goes to UDP port 2224 (or 6666) **of the phone** |
-| Slot URL | `jieli://192.168.80.1` (or `jieli://` alone) |
-| Status | **test build 3**, not in the releases: the control part follows a capture of the vendor app, the video part is **unverified**; issue [#187](https://github.com/OpenIPC/decoder/issues/187) |
+|             |                                                                                                                                                                                            |
+|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Wi‑Fi name  | `HF_xxxxxxxx`                                                                                                                                                                              |
+| Camera      | Jieli AC79 (`AC79X_wifi_car_camera`); vendor app *DVRunning 2* (also *HF UFO*)                                                                                                             |
+| Toy address | `192.168.80.1`: control (CTP) on TCP port 3333; the video goes to UDP port 2224 (or 6666) **of the phone**                                                                                 |
+| Slot URL    | `jieli://192.168.80.1` (or `jieli://` alone)                                                                                                                                               |
+| Status      | **test build 3**, not in the releases: the control part follows a capture of the vendor app, the video part is **unverified**; issue [#187](https://github.com/OpenIPC/decoder/issues/187) |
 
 What the app does, as a capture of the vendor app shows it ([#196](https://github.com/OpenIPC/decoder/issues/196)):
 
@@ -116,11 +116,11 @@ What the app does, as a capture of the vendor app shows it ([#196](https://githu
 
 URL options (as with `udp://`, separated by `?` and `&`):
 
-| Option | Values | Default | What it does |
-|---|---|---|---|
-| `w`, `h`, `fps` | numbers | from `VIDEO_PARAM`, else 640, 480, 25 | the stream asked for in `OPEN_RT_STREAM` |
-| `rtp` | a UDP port | `6666` | the local port the video is expected on |
-| `format` | `0`, `1` | `0` | `0` asks for JPEG (as the vendor app does), `1` for H.264 |
+| Option          | Values     | Default                               | What it does                                              |
+|-----------------|------------|---------------------------------------|-----------------------------------------------------------|
+| `w`, `h`, `fps` | numbers    | from `VIDEO_PARAM`, else 640, 480, 25 | the stream asked for in `OPEN_RT_STREAM`                  |
+| `rtp`           | a UDP port | `6666`                                | the local port the video is expected on                   |
+| `format`        | `0`, `1`   | `0`                                   | `0` asks for JPEG (as the vendor app does), `1` for H.264 |
 
 Examples: `jieli://192.168.80.1`, `jieli://192.168.80.1?w=1280&h=720`, `jieli://192.168.80.1?format=1`.
 
@@ -136,13 +136,13 @@ What the app does for FLOW-UFO and KY UFO toys was checked against [turbodrone](
 
 First find the toy's address: on Android it is usually the gateway of the Wi‑Fi (*Wi‑Fi → the network → Details*; often `192.168.0.1`, `192.168.1.1`, `192.168.4.1`, `192.168.169.1`, `172.16.10.1` or `192.168.25.1`). Then try, in a slot:
 
-| Try | Why |
-|---|---|
-| `rtsp://<toy>:554/` | some toys run a plain RTSP server; try the paths `/live`, `/stream`, `/11`, `/h264` too |
-| `rtsp://<toy>:8554/` | another common RTSP port |
-| `http://<toy>:8080/?action=stream` | MJPEG streamers (mjpg-streamer style) |
-| `http://<toy>/` and `http://<toy>:81/stream` | MJPEG on the web port; open them in a browser first to see what answers |
-| `udp://@:<port>` | only if the toy pushes RTP by itself to a port of the phone, which is rare |
+| Try                                          | Why                                                                                     |
+|----------------------------------------------|-----------------------------------------------------------------------------------------|
+| `rtsp://<toy>:554/`                          | some toys run a plain RTSP server; try the paths `/live`, `/stream`, `/11`, `/h264` too |
+| `rtsp://<toy>:8554/`                         | another common RTSP port                                                                |
+| `http://<toy>:8080/?action=stream`           | MJPEG streamers (mjpg-streamer style)                                                   |
+| `http://<toy>/` and `http://<toy>:81/stream` | MJPEG on the web port; open them in a browser first to see what answers                 |
+| `udp://@:<port>`                             | only if the toy pushes RTP by itself to a port of the phone, which is rare              |
 
 If nothing plays, the toy most likely uses a protocol of its own, which needs a [report](#what-to-send-in-a-report) and a transport written for it.
 
@@ -163,9 +163,9 @@ Do not send the vendor app itself or parts of it. The capture contains only the 
 
 The drones a tester checked in [#187](https://github.com/OpenIPC/decoder/issues/187):
 
-| Toy | Wi‑Fi | Family | URL | Status |
-|---|---|---|---|---|
-| D16 | `FLOW_…` | FLOW-UFO, WIFI UAV app | `flowufo://192.168.169.1:8800` | video works |
-| K200 | `FLY-UFO-…` | KY UFO, RTSP | `rtsp://192.168.1.1:7070/webcam` | video works; the picture comes sideways ([#200](https://github.com/OpenIPC/decoder/issues/200)) |
-| Drone YL3 | `HF_…` | Jieli AC79, DVRunning 2 app | `jieli://192.168.80.1` (test build) | in testing |
+| Toy       | Wi‑Fi       | Family                      | URL                                 | Status                                                                                          |
+|-----------|-------------|-----------------------------|-------------------------------------|-------------------------------------------------------------------------------------------------|
+| D16       | `FLOW_…`    | FLOW-UFO, WIFI UAV app      | `flowufo://192.168.169.1:8800`      | video works                                                                                     |
+| K200      | `FLY-UFO-…` | KY UFO, RTSP                | `rtsp://192.168.1.1:7070/webcam`    | video works; the picture comes sideways ([#200](https://github.com/OpenIPC/decoder/issues/200)) |
+| Drone YL3 | `HF_…`      | Jieli AC79, DVRunning 2 app | `jieli://192.168.80.1` (test build) | in testing                                                                                      |
 

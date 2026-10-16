@@ -14,12 +14,12 @@
 
 A slot holds one URL. Its scheme picks the path the video takes; for `rtsp://` the slot's transport mode (chosen under the URL in **Settings**, or with the `transport` extra of a [shared link](usage.md#opening-a-camera-from-another-app)) picks how RTP travels.
 
-| URL | Path | Single view | Multi-view | Audio |
-|---|---|---|---|---|
-| `rtsp://` | RTSP session, RTP over TCP, UDP or multicast | yes | yes | yes |
-| `udp://`, `rtp://` | plain RTP pushed by the camera, no RTSP | yes | yes | no |
-| `http://` | MJPEG, `multipart/x-mixed-replace` | yes | yes | no |
-| `flowufo://` | toy drone protocol, **test build only** ([#187](https://github.com/OpenIPC/decoder/issues/187)) | yes | yes | no |
+| URL                | Path                                                                                            | Single view | Multi-view | Audio |
+|--------------------|-------------------------------------------------------------------------------------------------|-------------|------------|-------|
+| `rtsp://`          | RTSP session, RTP over TCP, UDP or multicast                                                    | yes         | yes        | yes   |
+| `udp://`, `rtp://` | plain RTP pushed by the camera, no RTSP                                                         | yes         | yes        | no    |
+| `http://`          | MJPEG, `multipart/x-mixed-replace`                                                              | yes         | yes        | no    |
+| `flowufo://`       | toy drone protocol, **test build only** ([#187](https://github.com/OpenIPC/decoder/issues/187)) | yes         | yes        | no    |
 
 The transport in use is shown when a stream starts in the single view (`Connected • UDP • H.265 …`), on the [debug page](debug.md) and in `/stats.json` (`transport`; the slot's setting is `transport_mode`). After a fallback it reads, for example, `TCP (auto)`.
 
@@ -42,12 +42,12 @@ rtsp://[user:password@]host[:port]/path
 
 ## RTSP transport modes
 
-| Mode | How the video arrives | Fallback |
-|---|---|---|
-| **TCP** | RTP interleaved in the RTSP connection | none needed; works through NAT and firewalls |
-| **UDP** | RTP over UDP, a port pair per track | never falls back. Lost packets are skipped, not resent |
-| **Auto** (default for a new slot) | UDP, else TCP | to TCP when the camera refuses UDP in `SETUP`, when no video arrives within 3 s, or when packets arrive but key frames keep losing a piece |
-| **Multicast** | RTSP multicast (Android 8.0+) | to TCP in the same connection when the server refuses it or answers with unicast |
+| Mode                              | How the video arrives                  | Fallback                                                                                                                                   |
+|-----------------------------------|----------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
+| **TCP**                           | RTP interleaved in the RTSP connection | none needed; works through NAT and firewalls                                                                                               |
+| **UDP**                           | RTP over UDP, a port pair per track    | never falls back. Lost packets are skipped, not resent                                                                                     |
+| **Auto** (default for a new slot) | UDP, else TCP                          | to TCP when the camera refuses UDP in `SETUP`, when no video arrives within 3 s, or when packets arrive but key frames keep losing a piece |
+| **Multicast**                     | RTSP multicast (Android 8.0+)          | to TCP in the same connection when the server refuses it or answers with unicast                                                           |
 
 - After a fallback the URL is remembered as failed for that mode for 10 minutes while the app runs: reconnects, a resume or a rebuilt grid go straight to TCP; after that UDP (or multicast) is tried again.
 - If the server answers a UDP request with interleaved TCP, the app takes what the server chose.
@@ -62,17 +62,17 @@ A slot can receive RTP that the camera pushes by itself, without RTSP. Put a `ud
 udp://[source@][address]:port[?codec=h264|h265][&pt=N]
 ```
 
-| URL | Meaning |
-|---|---|
-| `udp://@:5600` | Listen on port 5600 |
-| `udp://@239.1.2.3:5600` | Join the multicast group 239.1.2.3 on port 5600 |
+| URL                                 | Meaning                                            |
+|-------------------------------------|----------------------------------------------------|
+| `udp://@:5600`                      | Listen on port 5600                                |
+| `udp://@239.1.2.3:5600`             | Join the multicast group 239.1.2.3 on port 5600    |
 | `udp://192.168.1.10@239.1.2.3:5600` | The same, but accept packets from this sender only |
-| `udp://@:5600?codec=h265&pt=97` | Force the codec or the video payload type |
+| `udp://@:5600?codec=h265&pt=97`     | Force the codec or the video payload type          |
 
-| Option | Values | Default |
-|---|---|---|
+| Option  | Values                          | Default                                       |
+|---------|---------------------------------|-----------------------------------------------|
 | `codec` | `h264` / `avc`, `h265` / `hevc` | from the payload type: 96 → H.264, 97 → H.265 |
-| `pt` | 0–127 | 96 or 97 |
+| `pt`    | 0–127                           | 96 or 97                                      |
 
 - Addresses must be numeric (IPv4 or IPv6 in brackets); no name lookup. A port is required.
 - A codec change on the camera is followed while playing. Video only.
@@ -108,12 +108,12 @@ RTSP slots on `rtsp://<host>:7070/webcam` (KY UFO and other cooingdv toys) also 
 
 ## Codecs
 
-| Kind | Codecs | Decoding |
-|---|---|---|
-| Video | H.264, H.265 | MediaCodec (hardware); a software decoder for key-frame cells beyond the hardware instance limit |
-| Video | MJPEG (RTP/JPEG over RTSP, HTTP MJPEG) | the device's JPEG decoder (`video/jpeg`) where it can be created, otherwise BitmapFactory |
-| Audio | AAC (RFC 3640 `mpeg4-generic`, ADTS, MP4A-LATM with out-of-band config), Opus | MediaCodec |
-| Audio | G.711 μ-law / A-law, L16 PCM (mono or stereo) | converted in the app |
+| Kind  | Codecs                                                                        | Decoding                                                                                         |
+|-------|-------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------|
+| Video | H.264, H.265                                                                  | MediaCodec (hardware); a software decoder for key-frame cells beyond the hardware instance limit |
+| Video | MJPEG (RTP/JPEG over RTSP, HTTP MJPEG)                                        | the device's JPEG decoder (`video/jpeg`) where it can be created, otherwise BitmapFactory        |
+| Audio | AAC (RFC 3640 `mpeg4-generic`, ADTS, MP4A-LATM with out-of-band config), Opus | MediaCodec                                                                                       |
+| Audio | G.711 μ-law / A-law, L16 PCM (mono or stereo)                                 | converted in the app                                                                             |
 
 Not supported: G.726, MP4A-LATM with in-band configuration (`cpresent=1`) ([#14](https://github.com/OpenIPC/decoder/issues/14)). An unsupported audio track is not set up; the video plays without sound.
 
@@ -127,13 +127,13 @@ Not supported: G.726, MP4A-LATM with in-band configuration (`cpresent=1`) ([#14]
 
 Measured on the lab cameras.
 
-| Feature | OpenIPC Majestic | XM (`H264DVR 1.0`) |
-|---|---|---|
-| RTP over TCP (interleaved) | yes | yes |
-| RTP over UDP | yes | yes (reply without `/UDP`) |
-| RTSP multicast | no: `400` to a multicast request, silent unicast when the request also has `client_port` | no: `451`, silent unicast likewise |
-| Plain RTP push (`outgoing`), unicast or multicast | yes | not known |
-| HTTP MJPEG | yes (`/mjpeg`) | not tested |
-| Audio | Opus, AAC, L16 (G.711 not testable on the lab build) | none (video H.264 only) |
+| Feature                                           | OpenIPC Majestic                                                                         | XM (`H264DVR 1.0`)                 |
+|---------------------------------------------------|------------------------------------------------------------------------------------------|------------------------------------|
+| RTP over TCP (interleaved)                        | yes                                                                                      | yes                                |
+| RTP over UDP                                      | yes                                                                                      | yes (reply without `/UDP`)         |
+| RTSP multicast                                    | no: `400` to a multicast request, silent unicast when the request also has `client_port` | no: `451`, silent unicast likewise |
+| Plain RTP push (`outgoing`), unicast or multicast | yes                                                                                      | not known                          |
+| HTTP MJPEG                                        | yes (`/mjpeg`)                                                                           | not tested                         |
+| Audio                                             | Opus, AAC, L16 (G.711 not testable on the lab build)                                     | none (video H.264 only)            |
 
 With a Multicast slot both play over TCP in the same connection. Multicast from OpenIPC is available only as plain RTP via `outgoing`. A server that does RTSP multicast (for example mediamtx) is needed to use the Multicast mode ([#69](https://github.com/OpenIPC/decoder/issues/69)).
