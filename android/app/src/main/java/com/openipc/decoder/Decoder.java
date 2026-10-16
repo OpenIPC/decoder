@@ -138,9 +138,8 @@ public class Decoder extends Activity
     private final String[] mHosts = new String[CAM_COUNT];
     /** RTP transport per slot (#67): TCP, UDP or Auto (UDP with fallback to TCP). */
     private final Transport.Mode[] mTransports = new Transport.Mode[CAM_COUNT];
-    /** Per slot (#201): degrees counter-clockwise, -1 for Auto (from the URL), and mirror. */
+    /** Per slot (#201): degrees counter-clockwise, -1 for Auto (from the URL). */
     private final int[] mRotates = new int[CAM_COUNT];
-    private final boolean[] mMirrors = new boolean[CAM_COUNT];
     private int mActive;
     private volatile String mHost;
     private String mVersion;
@@ -590,7 +589,7 @@ public class Decoder extends Activity
 
     @Override
     public void onShowSettings() {
-        menuManager.showUrlEditor(mActive, mHosts, mTransports, mRotates, mMirrors);
+        menuManager.showUrlEditor(mActive, mHosts, mTransports, mRotates);
     }
 
     @Override
@@ -601,20 +600,17 @@ public class Decoder extends Activity
 
     // ====================== Video lifecycle ======================
 
-    /** The single view's client for the active slot, with the slot's turn and mirror (#201). */
-    private void configureClient() {
-        rtspClient.configure(mHost, mUserAgent, mTransports[mActive]);
-        rtspClient.setSlotTurn(mRotates[mActive], mMirrors[mActive]);
-        runOnUiThread(() -> mirrorView(mSurface, mMirrors[mActive]));
+    /** As QuadCell.decoderTurn() for the single view (#201). */
+    private int singleDecoderTurn() {
+        RtspClient c = rtspClient;
+        if (c == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return 0;
+        return c.isJpeg() && jpegRenderer.isSoftware() ? 0 : c.rotate();
     }
 
-    /**
-     * Mirrors a video view left to right (#201). The surface of a SurfaceView follows the
-     * view's scale from Android 7 on; before that there is no mirror.
-     */
-    static void mirrorView(View v, boolean mirror) {
-        if (v == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return;
-        v.setScaleX(mirror ? -1f : 1f);
+    /** The single view's client for the active slot, with the slot's turn (#201). */
+    private void configureClient() {
+        rtspClient.configure(mHost, mUserAgent, mTransports[mActive]);
+        rtspClient.setSlotTurn(mRotates[mActive]);
     }
 
     private void createDecoder() {
@@ -661,7 +657,6 @@ public class Decoder extends Activity
             // Auto for a slot that has never stored one (#112)
             mTransports[i] = Transport.Mode.stored(pref.getString("transport_" + i, null));
             mRotates[i] = pref.getInt("rotate_" + i, -1);
-            mMirrors[i] = pref.getBoolean("mirror_" + i, false);
             // Plain URLs from older versions are re-saved encrypted right away
             if (credentials.needsMigration(stored)) {
                 if (migrate == null) migrate = pref.edit();
@@ -725,7 +720,6 @@ public class Decoder extends Activity
                     credentials.sealForSlot(mHosts[i], mUnreadable[i], DEFAULT_URL));
             edit.putString("transport_" + i, mTransports[i].name());
             edit.putInt("rotate_" + i, mRotates[i]);
-            edit.putBoolean("mirror_" + i, mMirrors[i]);
         }
         edit.apply();
 
@@ -1035,9 +1029,7 @@ public class Decoder extends Activity
             Transport.Mode mode = i == U_CELL ? Transport.Mode.UDP : mTransports[i];
             quadCells[i] = new QuadCell(i, url, mode, quadViews[i], framePool, mUserAgent,
                     index -> runOnUiThread(() -> removeQuadOverlay(index)));
-            boolean slot = i < CAM_COUNT;
-            quadCells[i].setSlotTurn(slot ? mRotates[i] : -1, slot && mMirrors[i]);
-            mirrorView(quadViews[i], slot && mMirrors[i]);
+            quadCells[i].setSlotTurn(i < CAM_COUNT ? mRotates[i] : -1);
             quadCells[i].start();
         }
         quadAudio = getSharedPreferences("settings", MODE_PRIVATE).getInt("quad_audio", -1);
@@ -1505,6 +1497,7 @@ public class Decoder extends Activity
                             ? statusText.getText().toString() : c.live ? "Playing" : "No new frames";
                     // Copied with the grid cells, off the UI thread (#76)
                     if (c.live) c.view = mSurface;
+                    c.turn = singleDecoderTurn();
                 }
                 c.onScreen = onScreen(i);
                 cells.add(c);
@@ -1531,6 +1524,7 @@ public class Decoder extends Activity
             c.label = stats != null ? stats.getText().toString() : "";
             c.live = cell.showsVideo(SNAPSHOT_LIVE_MS);
             c.view = quadViews[i];
+            c.turn = cell.decoderTurn();
             if (i == U_CELL && !c.live) {
                 c.label = "U \u00b7 waiting for RTP on port " + UDP_RTP_PORT;
             }
@@ -1642,7 +1636,6 @@ public class Decoder extends Activity
             // Turned counter-clockwise, "size" is the turned one (#200, #201)
             int rotate = rtspClient != null ? rtspClient.rotate() : 0;
             if (rotate != 0) single.put("rotate", rotate);
-            if (rtspClient != null && rtspClient.mirror()) single.put("mirror", true);
             m.put("single", single);
         }
         QuadCell[] cells = quadCells;
@@ -1688,7 +1681,6 @@ public class Decoder extends Activity
                     Map<String, Object> hb = cell.heartbeatStats();
                     if (hb != null) c.put("heartbeat", hb);
                     if (cell.rotate() != 0) c.put("rotate", cell.rotate());
-                    if (cell.mirror()) c.put("mirror", true);
                 }
                 list.add(c);
             }
@@ -1860,9 +1852,14 @@ public class Decoder extends Activity
         double fit = Math.min(1, Math.sqrt((double) SCREENSHOT_MAX_PIXELS
                 / ((double) mVideoWidth * mVideoHeight)));
         Bitmap bitmap;
+        // A surface the decoder turns holds the frame as decoded: copied unturned (#201)
+        final int turn = singleDecoderTurn();
+        boolean quarter = turn == 90 || turn == 270;
+        int shotW = Math.max(1, (int) (mVideoWidth * fit));
+        int shotH = Math.max(1, (int) (mVideoHeight * fit));
         try {
-            bitmap = Bitmap.createBitmap(Math.max(1, (int) (mVideoWidth * fit)),
-                    Math.max(1, (int) (mVideoHeight * fit)), Bitmap.Config.ARGB_8888);
+            bitmap = Bitmap.createBitmap(quarter ? shotH : shotW, quarter ? shotW : shotH,
+                    Bitmap.Config.ARGB_8888);
         } catch (OutOfMemoryError e) {
             Log.w(TAG, "No memory for a screenshot of " + mVideoWidth + "x" + mVideoHeight);
             Toast.makeText(this, "Failed to save screenshot", Toast.LENGTH_SHORT).show();
@@ -1873,7 +1870,8 @@ public class Decoder extends Activity
         boolean started = Snapshots.copy(mSurface, bitmap, result -> {
             if (result == PixelCopy.SUCCESS) {
                 // Encoding a full-resolution PNG takes long: on a thread of its own (#35)
-                new Thread(() -> saveScreenshot(bitmap), "screenshot").start();
+                new Thread(() -> saveScreenshot(Snapshots.turned(bitmap, turn)), "screenshot")
+                        .start();
             } else {
                 Log.d(TAG, "Screenshot copy failed: " + result);
                 bitmap.recycle();

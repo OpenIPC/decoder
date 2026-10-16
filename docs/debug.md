@@ -171,7 +171,7 @@ Single view and U view: every cell of the grid as the debug page shows it (3×3 
 | `codec`, `size`             | when found                                          |
 | `fps`, `kbps`, `key_frames` | measured during the check                           |
 
-Toy drone slots ([toys.md](toys.md#flow-ufo)) add a `flowufo` object per cell and in `single` (`jieli` for `jieli://` slots, [toys.md](toys.md#hf--jieli-toys)), and a `heartbeat` object for RTSP slots that send the KY UFO heartbeat, and `rotate` (degrees counter-clockwise) and `mirror` where the picture is turned or mirrored ([toys.md](toys.md#ky-ufo-rtsp-toys)).
+Toy drone slots ([toys.md](toys.md#flow-ufo)) add a `flowufo` object per cell and in `single` (`jieli` for `jieli://` slots, [toys.md](toys.md#hf--jieli-toys)), and a `heartbeat` object for RTSP slots that send the KY UFO heartbeat, and `rotate` (degrees counter-clockwise) where the picture is turned ([toys.md](toys.md#ky-ufo-rtsp-toys)).
 
 ## Log
 

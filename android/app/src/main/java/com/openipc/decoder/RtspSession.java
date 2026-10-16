@@ -120,7 +120,6 @@ class RtspSession {
     private volatile int rotate;
     /** The slot's setting (#201), over the URL's ?rotate= and the toys' defaults; -1: none. */
     private volatile int slotRotate = -1;
-    private volatile boolean slotMirror;
     private volatile boolean rotateLogged;
     private Thread networkThread;
     private Thread watchdogThread;
@@ -695,13 +694,9 @@ class RtspSession {
     }
 
     /** The slot's own turn (#201): -1 leaves it to the URL or the toy's default. */
-    void setSlotTurn(int rotate, boolean mirror) {
+    void setSlotTurn(int rotate) {
         slotRotate = rotate == 0 || rotate == 90 || rotate == 180 || rotate == 270 ? rotate : -1;
-        slotMirror = mirror;
     }
-
-    /** Whether the slot's picture is mirrored left to right (#201). */
-    boolean mirror() { return slotMirror; }
 
     /** Heartbeat statistics for /stats.json once an RTSP slot used one (#187), else null. */
     Map<String, Object> heartbeatStats() {
