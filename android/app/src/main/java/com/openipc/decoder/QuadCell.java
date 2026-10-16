@@ -439,6 +439,8 @@ class QuadCell implements RtspSession.Callback {
 
     /** Degrees counter-clockwise the MJPEG frames are turned (#200), 0 for none. */
     int rotate() { return session.rotate(); }
+    void setSlotTurn(int rotate, boolean mirror) { session.setSlotTurn(rotate, mirror); }
+    boolean mirror() { return session.mirror(); }
 
     /** Transport in use, with the mode after a fallback (#112). */
     String transportLabel() { return Transport.label(session.transportInUse(), transport); }

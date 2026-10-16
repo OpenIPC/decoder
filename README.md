@@ -63,7 +63,7 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
    ```
    rtsp://username:password@ip_address:554/stream=0
    ```
-   Under the URL you can choose the transport; Auto (UDP, falling back to TCP) is the default for a new slot. Other URL types: [Transports](docs/transports.md).
+   Under the URL you can choose the transport; Auto (UDP, falling back to TCP) is the default for a new slot. Below it, **Turn** and **Mirror** set the picture for a camera mounted sideways or upside down. Other URL types: [Transports](docs/transports.md).
 4. Press **Save**. The app connects straight away and reconnects automatically if the stream drops.
 
 ## Controls

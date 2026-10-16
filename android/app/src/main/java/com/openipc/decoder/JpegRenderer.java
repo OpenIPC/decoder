@@ -14,6 +14,7 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.os.Build;
 import android.util.Log;
 import android.view.Surface;
 
@@ -49,14 +50,16 @@ final class JpegRenderer {
      */
     int[] render(Frame frame, Surface s, int rotate, JpegCodec.Current current) {
         if (s == null || !s.isValid() || !current.holds()) return null;
-        // The hardware JPEG decoder first, where there is one (#132); a turned frame is drawn
-        // by the app, which turns it while drawing (#200)
-        if (rotate == 0 && !hwFailed && !drawn && JpegCodec.candidate() != null) {
+        // The hardware JPEG decoder first, where there is one (#132); it turns the frame itself
+        // from Android 6 on (#201), before that a turned frame is drawn by the app (#200)
+        boolean hwTurns = rotate == 0 || Build.VERSION.SDK_INT >= Build.VERSION_CODES.M;
+        if (hwTurns && !hwFailed && !drawn && JpegCodec.candidate() != null) {
             int[] size = JpegAssembler.size(frame.data(), frame.length());
             if (size != null) {
                 try {
                     software = false;
-                    return codec.decode(frame, s, size[0], size[1], current) ? size : null;
+                    return codec.decode(frame, s, size[0], size[1], rotate, current)
+                            ? shownSize(size[0], size[1], rotate) : null;
                 } catch (Exception e) {
                     codec.release();
                     // The surface was replaced meanwhile: not the decoder's fault, try again

@@ -138,6 +138,9 @@ public class Decoder extends Activity
     private final String[] mHosts = new String[CAM_COUNT];
     /** RTP transport per slot (#67): TCP, UDP or Auto (UDP with fallback to TCP). */
     private final Transport.Mode[] mTransports = new Transport.Mode[CAM_COUNT];
+    /** Per slot (#201): degrees counter-clockwise, -1 for Auto (from the URL), and mirror. */
+    private final int[] mRotates = new int[CAM_COUNT];
+    private final boolean[] mMirrors = new boolean[CAM_COUNT];
     private int mActive;
     private volatile String mHost;
     private String mVersion;
@@ -402,7 +405,7 @@ public class Decoder extends Activity
             if (configured) {
                 // A probe of this camera ends first: some take one client only (#100)
                 streamProbes.willShow(mHost);
-                rtspClient.configure(mHost, mUserAgent, mTransports[mActive]);
+                configureClient();
                 startListener();
                 rtspClient.start();
             }
@@ -586,7 +589,9 @@ public class Decoder extends Activity
     }
 
     @Override
-    public void onShowSettings() { menuManager.showUrlEditor(mActive, mHosts, mTransports); }
+    public void onShowSettings() {
+        menuManager.showUrlEditor(mActive, mHosts, mTransports, mRotates, mMirrors);
+    }
 
     @Override
     public void onWebUI() { menuManager.startBrowser(mHost); }
@@ -595,6 +600,22 @@ public class Decoder extends Activity
     public void onSaveSettings() { saveSettings(); }
 
     // ====================== Video lifecycle ======================
+
+    /** The single view's client for the active slot, with the slot's turn and mirror (#201). */
+    private void configureClient() {
+        rtspClient.configure(mHost, mUserAgent, mTransports[mActive]);
+        rtspClient.setSlotTurn(mRotates[mActive], mMirrors[mActive]);
+        runOnUiThread(() -> mirrorView(mSurface, mMirrors[mActive]));
+    }
+
+    /**
+     * Mirrors a video view left to right (#201). The surface of a SurfaceView follows the
+     * view's scale from Android 7 on; before that there is no mirror.
+     */
+    static void mirrorView(View v, boolean mirror) {
+        if (v == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return;
+        v.setScaleX(mirror ? -1f : 1f);
+    }
 
     private void createDecoder() {
         videoDecoder.setSurface(mVideoSurface);
@@ -639,6 +660,8 @@ public class Decoder extends Activity
             mUnreadable[i] = url == null && stored != null ? stored : null;
             // Auto for a slot that has never stored one (#112)
             mTransports[i] = Transport.Mode.stored(pref.getString("transport_" + i, null));
+            mRotates[i] = pref.getInt("rotate_" + i, -1);
+            mMirrors[i] = pref.getBoolean("mirror_" + i, false);
             // Plain URLs from older versions are re-saved encrypted right away
             if (credentials.needsMigration(stored)) {
                 if (migrate == null) migrate = pref.edit();
@@ -701,6 +724,8 @@ public class Decoder extends Activity
             edit.putString("host_" + i,
                     credentials.sealForSlot(mHosts[i], mUnreadable[i], DEFAULT_URL));
             edit.putString("transport_" + i, mTransports[i].name());
+            edit.putInt("rotate_" + i, mRotates[i]);
+            edit.putBoolean("mirror_" + i, mMirrors[i]);
         }
         edit.apply();
 
@@ -723,7 +748,7 @@ public class Decoder extends Activity
 
         // A probe of this camera ends first: some take one client only (#100)
         streamProbes.willShow(mHost);
-        rtspClient.configure(mHost, mUserAgent, mTransports[mActive]);
+        configureClient();
         startListener();
         rtspClient.start();
     }
@@ -1010,6 +1035,9 @@ public class Decoder extends Activity
             Transport.Mode mode = i == U_CELL ? Transport.Mode.UDP : mTransports[i];
             quadCells[i] = new QuadCell(i, url, mode, quadViews[i], framePool, mUserAgent,
                     index -> runOnUiThread(() -> removeQuadOverlay(index)));
+            boolean slot = i < CAM_COUNT;
+            quadCells[i].setSlotTurn(slot ? mRotates[i] : -1, slot && mMirrors[i]);
+            mirrorView(quadViews[i], slot && mMirrors[i]);
             quadCells[i].start();
         }
         quadAudio = getSharedPreferences("settings", MODE_PRIVATE).getInt("quad_audio", -1);
@@ -1614,6 +1642,7 @@ public class Decoder extends Activity
             // Turned counter-clockwise, "size" is the turned one (#200, #201)
             int rotate = rtspClient != null ? rtspClient.rotate() : 0;
             if (rotate != 0) single.put("rotate", rotate);
+            if (rtspClient != null && rtspClient.mirror()) single.put("mirror", true);
             m.put("single", single);
         }
         QuadCell[] cells = quadCells;
@@ -1659,6 +1688,7 @@ public class Decoder extends Activity
                     Map<String, Object> hb = cell.heartbeatStats();
                     if (hb != null) c.put("heartbeat", hb);
                     if (cell.rotate() != 0) c.put("rotate", cell.rotate());
+                    if (cell.mirror()) c.put("mirror", true);
                 }
                 list.add(c);
             }
@@ -2608,7 +2638,7 @@ public class Decoder extends Activity
             if (configured) {
                 // A probe of this camera ends first: some take one client only (#100)
                 streamProbes.willShow(mHost);
-                rtspClient.configure(mHost, mUserAgent, mTransports[mActive]);
+                configureClient();
                 startListener();
                 rtspClient.start();
             }
