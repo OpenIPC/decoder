@@ -63,6 +63,9 @@ final class DebugServer {
          * labels: only the frames, for the page that draws the text over them.
          */
         byte[] snapshotJpeg(boolean labels);
+
+        /** Raw bytes of the single view's jieli:// slot (#187), or null. */
+        default byte[] jieliRaw(String which) { return null; }
     }
 
     private static DebugServer instance;
@@ -209,6 +212,20 @@ final class DebugServer {
                 break;
             case "/log":
                 reply(out, 200, "text/plain; charset=utf-8", log.text());
+                break;
+            case "/jieli-frame.jpg":
+            case "/jieli-dropped.bin":
+                // The toy's frames as they came (#187), to see what the picture is made from
+                Source src = source;
+                String which = path.startsWith("/jieli-frame") ? "frame" : "dropped";
+                byte[] raw = src != null ? src.jieliRaw(which) : Jieli.Client.lastRaw(which);
+                if (raw != null) {
+                    reply(out, 200, path.endsWith(".jpg") ? "image/jpeg"
+                            : "application/octet-stream", raw);
+                } else {
+                    reply(out, 404, "text/plain", "Nothing yet (a jieli:// slot in the single"
+                            + " view)\n");
+                }
                 break;
             case "/report.txt":
                 // Downloaded by the browser, not shown (#207)

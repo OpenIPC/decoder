@@ -242,6 +242,7 @@ public class Decoder extends Activity
                 menuManager.updateQuality(avg);
                 menuManager.applyQualityToActive(quadEnabled, mActive);
             }
+            @Override public void onDetail(String text) { showStatusDetail(text); }
         });
         rtspClient.setAudioManager(audioManager);
         menuManager = new MenuManager(this, mDensity);
@@ -753,6 +754,18 @@ public class Decoder extends Activity
         String transport = inUse != null
                 ? Transport.label(inUse, mTransports[mActive]) + " • " : "";
         statusText.setText("Connected • " + transport + videoCodec + aCodec + bps);
+    }
+
+    /**
+     * What a flowufo:// slot waits for (#187), in place of the plain status; posted after the
+     * status it belongs to, so it wins. Not shown once the stream plays.
+     */
+    private void showStatusDetail(String text) {
+        runOnUiThread(() -> {
+            if (statusText == null || "connected".equals(singleState)) return;
+            statusText.setText(text);
+            statusText.setVisibility(View.VISIBLE);
+        });
     }
 
     private void updateStatus(String status) {
@@ -1375,6 +1388,10 @@ public class Decoder extends Activity
     private final DebugServer.Source debugSource = new DebugServer.Source() {
         @Override public Map<String, Object> snapshot() { return debugSnapshot(); }
         @Override public byte[] snapshotJpeg(boolean labels) { return debugSnapshotJpeg(labels); }
+        @Override public byte[] jieliRaw(String which) {
+            RtspClient c = rtspClient;
+            return c != null ? c.jieliRaw(which) : Jieli.Client.lastRaw(which);
+        }
     };
     /** A cell counts as playing in a snapshot when it showed a frame this recently (#98). */
     private static final long SNAPSHOT_LIVE_MS = 2000;
@@ -1579,6 +1596,16 @@ public class Decoder extends Activity
             // Frames shown in the last second and the playback mode of S (#153)
             single.put("out_fps", singleOutFps);
             single.put("decode", slides ? "key frames" : "full");
+            // The toy drone's protocol counters (#187)
+            Map<String, Object> ufo = rtspClient != null ? rtspClient.flowUfoStats() : null;
+            if (ufo != null) single.put("flowufo", ufo);
+            Map<String, Object> jl = rtspClient != null ? rtspClient.jieliStats() : null;
+            if (jl != null) single.put("jieli", jl);
+            Map<String, Object> hb = rtspClient != null ? rtspClient.heartbeatStats() : null;
+            if (hb != null) single.put("heartbeat", hb);
+            // MJPEG turned counter-clockwise, "size" is the turned one (#200)
+            int rotate = rtspClient != null && rtspClient.isJpeg() ? rtspClient.rotate() : 0;
+            if (rotate != 0) single.put("rotate", rotate);
             m.put("single", single);
         }
         QuadCell[] cells = quadCells;
@@ -1617,6 +1644,13 @@ public class Decoder extends Activity
                             ? cell.keyLoad() : cell.fullLoad());
                     c.put("paused", cell.isPaused());
                     c.put("audio", i == quadAudio);
+                    Map<String, Object> ufo = cell.flowUfoStats();
+                    if (ufo != null) c.put("flowufo", ufo);
+                    Map<String, Object> jl = cell.jieliStats();
+                    if (jl != null) c.put("jieli", jl);
+                    Map<String, Object> hb = cell.heartbeatStats();
+                    if (hb != null) c.put("heartbeat", hb);
+                    if (cell.rotate() != 0) c.put("rotate", cell.rotate());
                 }
                 list.add(c);
             }
@@ -1684,6 +1718,8 @@ public class Decoder extends Activity
         }
         if (RtpListener.Url.matches(url)) return "UDP listen";
         if (HttpMjpeg.matches(url)) return "HTTP";
+        if (FlowUfo.Url.matches(url)) return "FLOW-UFO UDP";
+        if (Jieli.Url.matches(url)) return "Jieli RTP";
         Transport.Mode m = StreamProbe.probeMode(mTransports[i]);
         return "check over " + (m == Transport.Mode.MULTICAST ? "multicast" : m.name());
     }
@@ -2230,7 +2266,10 @@ public class Decoder extends Activity
      */
     private boolean drawJpeg(Frame frame, int gen) {
         Surface s = mVideoSurface;
-        int[] size = jpegRenderer.render(frame, s, () -> gen == listenerGen && s == mVideoSurface);
+        RtspClient client = rtspClient;
+        int rotate = client != null ? client.rotate() : 0;
+        int[] size = jpegRenderer.render(frame, s, rotate,
+                () -> gen == listenerGen && s == mVideoSurface);
         if (size != null) jpegShown(size[0], size[1]);
         return size != null;
     }
@@ -2293,6 +2332,14 @@ public class Decoder extends Activity
                 try {
                     Frame buffer = nalQueue.poll(5, TimeUnit.MILLISECONDS);
                     if (buffer != null && rtspClient.isJpeg()) {
+                        // Every JPEG frame is whole: when drawing falls behind (a turned frame
+                        // is drawn in software, #187), show the newest and drop the older ones
+                        // instead of letting the delay grow
+                        Frame newer;
+                        while ((newer = nalQueue.poll()) != null) {
+                            framePool.recycle(buffer);
+                            buffer = newer;
+                        }
                         // S: MJPEG has no key frames, one frame per second instead (#153); the
                         // second counts from a frame really shown (Qodo on #155)
                         long now = System.nanoTime() / 1_000_000;

@@ -7,12 +7,20 @@
 
 package com.openipc.decoder;
 
+import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.LinkAddress;
+import android.net.LinkProperties;
+import android.net.Network;
+import android.os.Build;
 import android.util.Log;
 
+import java.net.DatagramSocket;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
+import java.net.Socket;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -125,5 +133,84 @@ final class NetInfo {
         if (a.isLoopbackAddress() || a.isLinkLocalAddress()) return true;
         if (a instanceof Inet4Address) return a.isSiteLocalAddress();
         return a instanceof Inet6Address && (a.getAddress()[0] & 0xfe) == 0xfc;
+    }
+
+    /**
+     * Binds {@code socket} to the network whose own subnet holds {@code target} (#187). A toy's
+     * Wi-Fi has no internet: with mobile data on, Android may send even on-link traffic over the
+     * default network instead. Returns what was done, for the log: "default" when no such
+     * network is found (or before Android 6: Network.bindSocket(DatagramSocket) is API 23,
+     * Qodo on #188), else the interface bound to.
+     */
+    static String bindToNetworkOf(DatagramSocket socket, InetAddress target) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return "default";
+        try {
+            Found f = networkOf(target);
+            if (f == null) return "default";
+            f.network.bindSocket(socket);
+            return "bound to " + f.name;
+        } catch (Exception e) {
+            Log.w(TAG, "No network bound for " + target.getHostAddress() + ": " + e.getMessage());
+            return "default";
+        }
+    }
+
+    /**
+     * The same for a TCP socket that is not connected yet (the CTP connection of a jieli://
+     * slot, #187); binding one needs Android 6.
+     */
+    static String bindToNetworkOf(Socket socket, InetAddress target) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return "default";
+        try {
+            Found f = networkOf(target);
+            if (f == null) return "default";
+            f.network.bindSocket(socket);
+            return "bound to " + f.name;
+        } catch (Exception e) {
+            Log.w(TAG, "No network bound for " + target.getHostAddress() + ": " + e.getMessage());
+            return "default";
+        }
+    }
+
+    private static final class Found {
+        final Network network;
+        final String name;
+
+        Found(Network network, String name) {
+            this.network = network;
+            this.name = name;
+        }
+    }
+
+    /** The network whose own subnet holds {@code target}, or null. */
+    private static Found networkOf(InetAddress target) {
+        Context ctx = App.context;
+        if (ctx == null) return null;
+        ConnectivityManager cm =
+                (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) return null;
+        for (Network n : cm.getAllNetworks()) {
+            LinkProperties lp = cm.getLinkProperties(n);
+            if (lp == null) continue;
+            for (LinkAddress la : lp.getLinkAddresses()) {
+                if (sameSubnet(la.getAddress(), la.getPrefixLength(), target)) {
+                    return new Found(n, lp.getInterfaceName());
+                }
+            }
+        }
+        return null;
+    }
+
+    /** {@code a} and {@code b} share the first {@code prefix} bits (and the address family). */
+    static boolean sameSubnet(InetAddress a, int prefix, InetAddress b) {
+        if (a == null || b == null) return false;
+        byte[] x = a.getAddress();
+        byte[] y = b.getAddress();
+        if (x.length != y.length || prefix < 0 || prefix > x.length * 8) return false;
+        for (int i = 0; i < prefix; i++) {
+            int mask = 0x80 >> (i & 7);
+            if ((x[i >> 3] & mask) != (y[i >> 3] & mask)) return false;
+        }
+        return true;
     }
 }

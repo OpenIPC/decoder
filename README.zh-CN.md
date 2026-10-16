@@ -112,7 +112,7 @@
 | [Testing and releases](docs/testing.md) | 分支、CI、单元测试、版本与发布、分支构建、`mapping.txt`、本地构建                                                                 |
 | [Security](docs/security.md)            | 凭据存储、调试服务器（仅限局域网）、日志脱敏、网络传输未加密                                                                      |
 | [Devices](docs/devices.md)              | 已验证和无法使用的设备、硬件解码器说明、设备与摄像机报告                                                                          |
-| [Drones and Wi‑Fi toys](docs/toys.md)   | 玩具如何传输视频、FLOW-UFO（测试中）、遇到未知玩具时可以尝试什么、需要提交哪些信息                                                |
+| [Drones and Wi‑Fi toys](docs/toys.md)   | 玩具如何传输视频、FLOW-UFO、KY UFO 和 Jieli 无人机、遇到未知玩具时可以尝试什么、需要提交哪些信息                                  |
 
 更新历史即[已合并的 pull request](https://github.com/OpenIPC/decoder/pulls?q=is%3Apr+is%3Amerged+base%3Av2) 和 [v2 分支的提交](https://github.com/OpenIPC/decoder/commits/v2)。
 

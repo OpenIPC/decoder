@@ -112,7 +112,7 @@
 | [Testing and releases](docs/testing.md) | ветки, CI, юнит-тесты, версии и релизы, сборки веток, `mapping.txt`, локальная сборка                                                                     |
 | [Security](docs/security.md)            | хранилище учётных данных, отладочный сервер (только локальная сеть), скрытие паролей в логах, отсутствие шифрования в сети                                |
 | [Devices](docs/devices.md)              | проверенные и неработающие устройства, особенности аппаратных декодеров, отчёты об устройствах и камерах                                                  |
-| [Drones and Wi‑Fi toys](docs/toys.md)   | как передают видео игрушки, FLOW-UFO (в тестировании), что попробовать с неизвестной игрушкой, что прислать                                               |
+| [Drones and Wi‑Fi toys](docs/toys.md)   | как передают видео игрушки, дроны FLOW-UFO, KY UFO и Jieli, что попробовать с неизвестной игрушкой, что прислать                                          |
 
 История изменений — это [принятые pull request'ы](https://github.com/OpenIPC/decoder/pulls?q=is%3Apr+is%3Amerged+base%3Av2) и [коммиты ветки v2](https://github.com/OpenIPC/decoder/commits/v2).
 

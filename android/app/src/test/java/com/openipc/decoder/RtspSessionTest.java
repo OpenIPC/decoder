@@ -429,6 +429,51 @@ public class RtspSessionTest {
     }
 
     @Test
+    public void heartbeatWhilePlayingStopsWithTheSlot() throws Exception {
+        // #187: cooingdv toys get 01 01 on UDP while their RTSP stream plays
+        UdpHeartbeat.intervalMs = 50;
+        try (DatagramSocket toy = new DatagramSocket(0, InetAddress.getLoopbackAddress())) {
+            toy.setSoTimeout(3000);
+            runUntilVideo(server.url(null) + "?heartbeat=" + toy.getLocalPort(), false);
+            byte[] buf = new byte[16];
+            for (int i = 0; i < 2; i++) {
+                DatagramPacket p = new DatagramPacket(buf, buf.length);
+                toy.receive(p);
+                assertEquals(2, p.getLength());
+                assertEquals(1, buf[0]);
+                assertEquals(1, buf[1]);
+            }
+            // The option is ours: the camera never sees it
+            assertEquals("DESCRIBE " + base() + " RTSP/1.0", server.methods().get(0));
+            java.util.Map<String, Object> m = session.heartbeatStats();
+            assertTrue((Integer) m.get("sent") >= 2);
+            assertEquals(true, m.get("running"));
+            session.stop();
+            toy.setSoTimeout(100);
+            try {
+                while (true) toy.receive(new DatagramPacket(buf, buf.length));
+            } catch (java.net.SocketTimeoutException expected) {
+                // drained
+            }
+            toy.setSoTimeout(300);
+            try {
+                toy.receive(new DatagramPacket(buf, buf.length));
+                throw new AssertionError("heartbeat after stop");
+            } catch (java.net.SocketTimeoutException expected) {
+                // ok
+            }
+        } finally {
+            UdpHeartbeat.intervalMs = 1000;
+        }
+    }
+
+    @Test
+    public void noHeartbeatForOrdinaryCameras() throws Exception {
+        runUntilVideo(server.url(null), false);
+        assertEquals(null, session.heartbeatStats());
+    }
+
+    @Test
     public void noAudioTrackMeansNoAudioSetup() throws Exception {
         // #18
         server.sdp = SDP_VIDEO_ONLY;
