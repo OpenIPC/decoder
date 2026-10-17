@@ -7,6 +7,10 @@ newest `v2` and `basic` builds, and in the OpenIPC Telegram channel; there are n
 per version (#194). This file is the change history: one section per `v2` version, newest
 first, then the legacy `basic` line.
 
+Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.0; see
+`docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
+were released.
+
 ## 2.17 — 2026-10-17
 
 - Turn in the camera settings (Auto, 0°, 90°, 180°, 270°), stored per slot; H.264/H.265 are
@@ -108,10 +112,10 @@ Versions 1.x of the `v2` line, up to 1.28 (2026-05-04) and the work merged until
 
 `basic` is the original app, `decoder.apk` in the `latest` release; it gets fixes only.
 
-### 1.07.1 — 2026-10-12
+### 1.7.1 — 2026-10-12
 
-- Robust RTSP handshake, end-of-stream handling, thread lifecycle and SDP parsing (PR #41,
-  #36–#40).
+- Released as 1.07.1 (written 1.7.1 since #230). Robust RTSP handshake, end-of-stream
+  handling, thread lifecycle and SDP parsing (PR #41, #36–#40).
 
 ### 1.07 — 2025-11-11
 
