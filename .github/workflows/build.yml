@@ -154,8 +154,8 @@ jobs:
           path: ${{ steps.vars.outputs.name }}.apk
 
   # The one release, "latest" (#194, #229): updated in place by v2 and basic, each with its
-  # own files; v2 moves the tag to its commit and sets the title "Decoder <version>";
-  # SHA256SUMS covers all files. A new version (not every build) goes to Telegram. The
+  # own files; v2 moves the tag to its commit and sets the title "Decoder <version>".
+  # A new version (not every build) goes to Telegram. The
   # concurrency group is shared with basic's workflow: one publish at a time.
   publish:
     needs: build
