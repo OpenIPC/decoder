@@ -47,6 +47,8 @@
 
 每次新构建都会替换 `latest` 中的上一个构建。开发是持续进行的，因此不再按版本单独发布；`v2` 和 `basic` 分支的每个构建连同版本号和提交都会发布到 OpenIPC 的 Telegram 频道（[我们的频道](https://openipc.org/our-channels)）。
 
+各版本的变更记录见 [CHANGELOG.md](CHANGELOG.md)。
+
 [Google Play](https://play.google.com/apps/internaltest/4701231141824898735) 上提供测试渠道。如需加入，请通过 [OpenIPC Telegram 频道](https://openipc.org/our-channels)发送您的电子邮箱。
 
 ## 系统要求
