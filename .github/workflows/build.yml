@@ -9,13 +9,17 @@ on:
         required: false
         type: string
 
-# One run per branch (and event): a newer push cancels the older run, so on basic / v2 the
-# "latest" release always gets the build of the newest commit, not of the run that finished
-# last (#90). Every manual run has a group of its own: never cancelled, never replaced by
-# another manual run waiting in the same group.
+# One run per branch (and event). On working branches a newer push cancels the older run;
+# on basic / v2 it waits instead (only the newest waits), so "latest" still ends with the
+# build of the newest commit (#90) and a publish is never cut off halfway. Every manual run
+# has a group of its own: never cancelled, never replaced by another manual run.
 concurrency:
   group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}', github.run_id) || format('build-{0}-{1}', github.event_name, github.ref) }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && github.ref != 'refs/heads/v2' && github.ref != 'refs/heads/basic' }}
+
+# Read-only by default; only the publish job writes the release
+permissions:
+  contents: read
 
 jobs:
   # Pull requests: a change to the app or its build comes with a new versionName
@@ -136,42 +140,71 @@ jobs:
           path: ${{ steps.vars.outputs.name }}-mapping.txt
           if-no-files-found: warn
 
-      # Working branches: keep the build as a workflow artifact only
+      # Every build is a workflow artifact; on basic / v2 the publish job takes it from here
       - name: Upload artifact
-        if: github.ref_name != 'basic' && github.ref_name != 'v2'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.vars.outputs.name }}
           path: ${{ steps.vars.outputs.name }}.apk
 
-      # Release branches: publish to the "latest" release and Telegram. No release per version:
-      # development is continuous, Telegram keeps every build (#194)
-      - name: Upload
-        if: github.ref_name == 'basic' || github.ref_name == 'v2'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          # The mapping goes next to the APK it belongs to (#181); a missing file is skipped
-          files: |
-            ${{ steps.vars.outputs.name }}.apk
-            ${{ steps.vars.outputs.name }}-mapping.txt
+  # The one release, "latest" (#194, #229): updated in place by v2 and basic, each with its
+  # own files; v2 moves the tag to its commit and sets the title "Decoder <version>";
+  # SHA256SUMS covers all files. A new version (not every build) goes to Telegram. The
+  # concurrency group is shared with basic's workflow: one publish at a time.
+  publish:
+    needs: build
+    # basic publishes from its own workflow (same script, same concurrency group); a manual
+    # run of an older commit (commit_hash) builds but does not publish
+    if: github.ref_name == 'v2' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.commit_hash == ''))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # update the release and move its tag
+    concurrency:
+      group: release-latest
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Telegram
-        if: github.ref_name == 'basic' || github.ref_name == 'v2'
+      - name: Download the build
+        uses: actions/download-artifact@v4
+        with:
+          name: decoder-v2
+          path: dist
+
+      - name: Download the mapping
+        uses: actions/download-artifact@v4
+        with:
+          name: decoder-v2-mapping
+          path: dist
+        continue-on-error: true   # a build without minify has none (#181)
+
+      - name: Publish
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # basic keeps its Gradle files at the top level; read only the one that exists
-          # (a missing file would fail the step under pipefail, Qodo on #158)
-          GRADLE=android/app/build.gradle
-          [ -f "$GRADLE" ] || GRADLE=app/build.gradle
-          VER=$(sed -n 's/.*versionName "\(.*\)".*/\1/p' "$GRADLE" | head -1)
-          GIT_HASH=$(git rev-parse --short HEAD)
-          GIT_BRANCH="${{ github.ref_name }}"
-          TAG_NAME="${{ github.ref_type == 'tag' && github.ref_name || '' }}"
-          TIME=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-          TG_MSG="Version: ${VER}\nCommit: ${GIT_HASH}\nBranch: ${GIT_BRANCH}\nTag: ${TAG_NAME}\nTime: ${TIME}\n\n"
-          TG_ICON="\xE2\x9C\x85 GitHub Actions"
-          TG_HEADER=$(echo -e ${TG_MSG}${TG_ICON})
-          TG_TOKEN=${{secrets.TELEGRAM_TOKEN_BOT_OPENIPC}}
-          TG_CHANNEL=${{secrets.TELEGRAM_CHANNEL_OPENIPC_DEV}}
-          HTTP=$(curl -s -o /dev/null -w %{http_code} https://api.telegram.org/bot${TG_TOKEN}/sendDocument -F chat_id=${TG_CHANNEL} -F caption="${TG_HEADER}" -F document=@${{ steps.vars.outputs.name }}.apk)
-          echo Telegram response: ${HTTP}
+          VER=$(sed -n 's/^[[:space:]]*versionName[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' android/app/build.gradle)
+          [ -n "$VER" ] || { echo "::error::no versionName in android/app/build.gradle"; exit 1; }
+          echo "VER=$VER" >> "$GITHUB_ENV"
+          files=(dist/decoder-v2.apk)
+          [ -f dist/decoder-v2-mapping.txt ] && files+=(dist/decoder-v2-mapping.txt)
+          .github/publish-latest.sh v2 "$VER" "${files[@]}"
+
+      # Organization secrets; a failed upload is a warning, not a failed release
+      - name: Telegram
+        if: steps.publish.outputs.new == 'true'
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_TOKEN_BOT_OPENIPC }}
+          TG_CHANNEL: ${{ secrets.TELEGRAM_CHANNEL_OPENIPC_DEV }}
+        run: |
+          if [ -z "$TG_TOKEN" ] || [ -z "$TG_CHANNEL" ]; then
+            echo "::warning::Telegram secrets are not available, version not announced"; exit 0
+          fi
+          CAPTION=$(printf 'Decoder %s\nCommit: %s\nBranch: %s\nTime: %s\n\n%s' "$VER" "${GITHUB_SHA::7}" \
+            "${GITHUB_REF_NAME}" "$(date -u '+%Y-%m-%d %H:%M:%S UTC')" \
+            "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/latest")
+          HTTP=$(curl -sS -o tg.json -w '%{http_code}' "https://api.telegram.org/bot${TG_TOKEN}/sendDocument" \
+            -F chat_id="$TG_CHANNEL" -F caption="$CAPTION" -F document=@dist/decoder-v2.apk) || HTTP=000
+          echo "Telegram response: $HTTP"
+          [ "$HTTP" = 200 ] || echo "::warning::Telegram upload failed (HTTP $HTTP)"

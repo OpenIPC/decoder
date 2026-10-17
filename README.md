@@ -5,7 +5,7 @@
 **English** | [Русский](README.ru.md) | [简体中文](README.zh-CN.md)
 
 [![Build](https://github.com/OpenIPC/decoder/actions/workflows/build.yml/badge.svg)](https://github.com/OpenIPC/decoder/actions/workflows/build.yml)
-[![Release](https://img.shields.io/badge/download-latest-blue)](https://github.com/OpenIPC/decoder/releases/tag/latest)
+[![Release](https://img.shields.io/badge/download-latest-blue)](https://github.com/OpenIPC/decoder/releases/latest)
 [![License](https://img.shields.io/badge/license-Prosperity%203.0-blue)](LICENSE.md)
 [![Platform](https://img.shields.io/badge/platform-Android%205.0%2B-brightgreen)](https://developer.android.com/about/versions/lollipop)
 
@@ -38,14 +38,15 @@ A small Android app for watching RTSP streams from IP cameras, with hardware H.2
 
 ## Download
 
-Ready-to-install builds are in the [**latest** release](https://github.com/OpenIPC/decoder/releases/tag/latest):
+Ready-to-install builds are in the one release, [**latest**](https://github.com/OpenIPC/decoder/releases/latest), titled `Decoder <version>`. The file names carry no version, so these links never change:
 
-| File             | What it is                             |
-|------------------|----------------------------------------|
-| `decoder-v2.apk` | **Current version**, recommended       |
-| `decoder.apk`    | Legacy version from the `basic` branch |
+| File             | What it is                             | Permanent link                                                               |
+|------------------|----------------------------------------|------------------------------------------------------------------------------|
+| `decoder-v2.apk` | **Current version**, recommended       | <https://github.com/OpenIPC/decoder/releases/latest/download/decoder-v2.apk> |
+| `decoder.apk`    | Legacy version from the `basic` branch | <https://github.com/OpenIPC/decoder/releases/latest/download/decoder.apk>    |
+| `SHA256SUMS`     | Checksums: `sha256sum -c SHA256SUMS`   | <https://github.com/OpenIPC/decoder/releases/latest/download/SHA256SUMS>     |
 
-Every build is replaced in `latest` by the next one. Development is continuous, so there are no releases per version; every `v2` and `basic` build is also posted with its version and commit to the OpenIPC Telegram channel ([our channels](https://openipc.org/our-channels)).
+Every build is replaced in `latest` by the next one. Development is continuous, so there are no releases per version; every new `v2` and `basic` version is also posted with its commit to the OpenIPC Telegram channel ([our channels](https://openipc.org/our-channels)).
 
 The change history of every version is in [CHANGELOG.md](CHANGELOG.md).
 
@@ -59,7 +60,7 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 
 ## Quick start
 
-1. Install the APK from the [latest release](https://github.com/OpenIPC/decoder/releases/tag/latest) and launch the app.
+1. Install the APK from the [latest release](https://github.com/OpenIPC/decoder/releases/latest) and launch the app.
 2. Tap the screen, or press **OK** on a remote, to open the menu.
 3. Choose a camera number (**1**–**8**), then press **Settings** and enter the camera URL:
    ```

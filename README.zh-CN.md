@@ -5,7 +5,7 @@
 [English](README.md) | [Русский](README.ru.md) | **简体中文**
 
 [![Build](https://github.com/OpenIPC/decoder/actions/workflows/build.yml/badge.svg)](https://github.com/OpenIPC/decoder/actions/workflows/build.yml)
-[![Release](https://img.shields.io/badge/download-latest-blue)](https://github.com/OpenIPC/decoder/releases/tag/latest)
+[![Release](https://img.shields.io/badge/download-latest-blue)](https://github.com/OpenIPC/decoder/releases/latest)
 [![License](https://img.shields.io/badge/license-Prosperity%203.0-blue)](LICENSE.md)
 [![Platform](https://img.shields.io/badge/platform-Android%205.0%2B-brightgreen)](https://developer.android.com/about/versions/lollipop)
 
@@ -38,14 +38,15 @@
 
 ## 下载
 
-可直接安装的版本位于 [**latest** 发布页](https://github.com/OpenIPC/decoder/releases/tag/latest)：
+可直接安装的版本位于唯一的发布 [**latest**](https://github.com/OpenIPC/decoder/releases/latest)，标题为 `Decoder <版本>`。文件名不含版本号，因此以下链接始终不变：
 
-| 文件             | 说明                   |
-|------------------|------------------------|
-| `decoder-v2.apk` | **当前版本**，推荐使用 |
-| `decoder.apk`    | `basic` 分支的旧版本   |
+| 文件             | 说明                              | 永久链接                                                                     |
+|------------------|-----------------------------------|------------------------------------------------------------------------------|
+| `decoder-v2.apk` | **当前版本**，推荐使用            | <https://github.com/OpenIPC/decoder/releases/latest/download/decoder-v2.apk> |
+| `decoder.apk`    | `basic` 分支的旧版本              | <https://github.com/OpenIPC/decoder/releases/latest/download/decoder.apk>    |
+| `SHA256SUMS`     | 校验和：`sha256sum -c SHA256SUMS` | <https://github.com/OpenIPC/decoder/releases/latest/download/SHA256SUMS>     |
 
-每次新构建都会替换 `latest` 中的上一个构建。开发是持续进行的，因此不再按版本单独发布；`v2` 和 `basic` 分支的每个构建连同版本号和提交都会发布到 OpenIPC 的 Telegram 频道（[我们的频道](https://openipc.org/our-channels)）。
+每次新构建都会替换 `latest` 中的上一个构建。开发是持续进行的，因此不再按版本单独发布；`v2` 和 `basic` 分支的每个新版本连同提交都会发布到 OpenIPC 的 Telegram 频道（[我们的频道](https://openipc.org/our-channels)）。
 
 各版本的变更记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -59,7 +60,7 @@
 
 ## 快速上手
 
-1. 从 [latest 发布页](https://github.com/OpenIPC/decoder/releases/tag/latest)安装 APK 并启动应用。
+1. 从 [latest 发布页](https://github.com/OpenIPC/decoder/releases/latest)安装 APK 并启动应用。
 2. 点击屏幕或按遥控器上的 **OK** 键打开菜单。
 3. 选择摄像机编号（**1**–**8**），点击 **Settings** 并输入摄像机地址：
    ```
