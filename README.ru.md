@@ -5,7 +5,7 @@
 [English](README.md) | **Русский** | [简体中文](README.zh-CN.md)
 
 [![Build](https://github.com/OpenIPC/decoder/actions/workflows/build.yml/badge.svg)](https://github.com/OpenIPC/decoder/actions/workflows/build.yml)
-[![Release](https://img.shields.io/badge/download-latest-blue)](https://github.com/OpenIPC/decoder/releases/tag/latest)
+[![Release](https://img.shields.io/badge/download-latest-blue)](https://github.com/OpenIPC/decoder/releases/latest)
 [![License](https://img.shields.io/badge/license-Prosperity%203.0-blue)](LICENSE.md)
 [![Platform](https://img.shields.io/badge/platform-Android%205.0%2B-brightgreen)](https://developer.android.com/about/versions/lollipop)
 
@@ -38,14 +38,15 @@
 
 ## Скачать
 
-Готовые сборки лежат в [релизе **latest**](https://github.com/OpenIPC/decoder/releases/tag/latest):
+Готовые сборки лежат в единственном релизе [**latest**](https://github.com/OpenIPC/decoder/releases/latest) с заголовком `Decoder <версия>`. В именах файлов нет версии, поэтому эти ссылки не меняются:
 
-| Файл             | Что это                           |
-|------------------|-----------------------------------|
-| `decoder-v2.apk` | **Текущая версия**, рекомендуется |
-| `decoder.apk`    | Старая версия из ветки `basic`    |
+| Файл             | Что это                                      | Постоянная ссылка                                                            |
+|------------------|----------------------------------------------|------------------------------------------------------------------------------|
+| `decoder-v2.apk` | **Текущая версия**, рекомендуется            | <https://github.com/OpenIPC/decoder/releases/latest/download/decoder-v2.apk> |
+| `decoder.apk`    | Старая версия из ветки `basic`               | <https://github.com/OpenIPC/decoder/releases/latest/download/decoder.apk>    |
+| `SHA256SUMS`     | Контрольные суммы: `sha256sum -c SHA256SUMS` | <https://github.com/OpenIPC/decoder/releases/latest/download/SHA256SUMS>     |
 
-Каждая новая сборка заменяет предыдущую в `latest`. Разработка идёт непрерывно, поэтому отдельных релизов по версиям нет; каждая сборка веток `v2` и `basic` с номером версии и коммитом публикуется в Telegram-канале OpenIPC ([наши каналы](https://openipc.org/our-channels)).
+Каждая новая сборка заменяет предыдущую в `latest`. Разработка идёт непрерывно, поэтому отдельных релизов по версиям нет; каждая новая версия веток `v2` и `basic` с коммитом публикуется в Telegram-канале OpenIPC ([наши каналы](https://openipc.org/our-channels)).
 
 История изменений по версиям — в [CHANGELOG.md](CHANGELOG.md).
 
@@ -59,7 +60,7 @@
 
 ## Быстрый старт
 
-1. Установите APK из [релиза latest](https://github.com/OpenIPC/decoder/releases/tag/latest) и запустите приложение.
+1. Установите APK из [релиза latest](https://github.com/OpenIPC/decoder/releases/latest) и запустите приложение.
 2. Коснитесь экрана или нажмите **OK** на пульте, чтобы открыть меню.
 3. Выберите номер камеры (**1**–**8**), нажмите **Settings** и введите адрес камеры:
    ```
