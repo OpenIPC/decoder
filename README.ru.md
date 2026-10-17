@@ -40,11 +40,10 @@
 
 Готовые сборки лежат в единственном релизе [**latest**](https://github.com/OpenIPC/decoder/releases/latest) с заголовком `Decoder <версия>`. В именах файлов нет версии, поэтому эти ссылки не меняются:
 
-| Файл             | Что это                                      | Постоянная ссылка                                                            |
-|------------------|----------------------------------------------|------------------------------------------------------------------------------|
-| `decoder-v2.apk` | **Текущая версия**, рекомендуется            | <https://github.com/OpenIPC/decoder/releases/latest/download/decoder-v2.apk> |
-| `decoder.apk`    | Старая версия из ветки `basic`               | <https://github.com/OpenIPC/decoder/releases/latest/download/decoder.apk>    |
-| `SHA256SUMS`     | Контрольные суммы: `sha256sum -c SHA256SUMS` | <https://github.com/OpenIPC/decoder/releases/latest/download/SHA256SUMS>     |
+| Файл             | Что это                           | Постоянная ссылка                                                            |
+|------------------|-----------------------------------|------------------------------------------------------------------------------|
+| `decoder-v2.apk` | **Текущая версия**, рекомендуется | <https://github.com/OpenIPC/decoder/releases/latest/download/decoder-v2.apk> |
+| `decoder.apk`    | Старая версия из ветки `basic`    | <https://github.com/OpenIPC/decoder/releases/latest/download/decoder.apk>    |
 
 Каждая новая сборка заменяет предыдущую в `latest`. Разработка идёт непрерывно, поэтому отдельных релизов по версиям нет; каждая новая версия веток `v2` и `basic` с коммитом публикуется в Telegram-канале OpenIPC ([наши каналы](https://openipc.org/our-channels)).
 

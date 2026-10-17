@@ -40,11 +40,10 @@
 
 可直接安装的版本位于唯一的发布 [**latest**](https://github.com/OpenIPC/decoder/releases/latest)，标题为 `Decoder <版本>`。文件名不含版本号，因此以下链接始终不变：
 
-| 文件             | 说明                              | 永久链接                                                                     |
-|------------------|-----------------------------------|------------------------------------------------------------------------------|
-| `decoder-v2.apk` | **当前版本**，推荐使用            | <https://github.com/OpenIPC/decoder/releases/latest/download/decoder-v2.apk> |
-| `decoder.apk`    | `basic` 分支的旧版本              | <https://github.com/OpenIPC/decoder/releases/latest/download/decoder.apk>    |
-| `SHA256SUMS`     | 校验和：`sha256sum -c SHA256SUMS` | <https://github.com/OpenIPC/decoder/releases/latest/download/SHA256SUMS>     |
+| 文件             | 说明                   | 永久链接                                                                     |
+|------------------|------------------------|------------------------------------------------------------------------------|
+| `decoder-v2.apk` | **当前版本**，推荐使用 | <https://github.com/OpenIPC/decoder/releases/latest/download/decoder-v2.apk> |
+| `decoder.apk`    | `basic` 分支的旧版本   | <https://github.com/OpenIPC/decoder/releases/latest/download/decoder.apk>    |
 
 每次新构建都会替换 `latest` 中的上一个构建。开发是持续进行的，因此不再按版本单独发布；`v2` 和 `basic` 分支的每个新版本连同提交都会发布到 OpenIPC 的 Telegram 频道（[我们的频道](https://openipc.org/our-channels)）。
 
