@@ -9,7 +9,7 @@
 #     "Decoder <version>"; basic keeps the tag and the title;
 #   - the notes hold one line per branch, "Decoder <v2 version> (...)" and
 #     "Legacy `basic` <version> (...)"; each build rewrites its own line;
-#   - SHA256SUMS is computed again over all the release's files.
+#   - a SHA256SUMS left from earlier releases is removed (no checksums, #236).
 #
 # Writes new=true to $GITHUB_OUTPUT when the branch's version differs from
 # the one the release had, so only a new version goes to Telegram.
@@ -80,22 +80,8 @@ echo "previous $branch version: ${prev:-none}, now $ver"
 {
     [ -z "$v2line" ] || printf '%s\n' "$v2line"
     [ -z "$basicline" ] || printf '%s\n' "$basicline"
-    printf '\nCheck: `sha256sum -c SHA256SUMS`. Changes: [CHANGELOG.md](%s/blob/v2/CHANGELOG.md); installation: [README](%s#readme).\n' "$url" "$url"
+    printf '\nChanges: [CHANGELOG.md](%s/blob/v2/CHANGELOG.md); installation: [README](%s#readme).\n' "$url" "$url"
 } > notes.md
-
-# SHA256SUMS before anything changes: the other branch's files as the
-# release has them now, plus this build's files; a v2 build without a
-# mapping drops the previous one.
-sums=$(mktemp -d)
-if [ "$exists" = 1 ]; then
-    gh release download latest --dir "$sums"   # every file the release holds
-fi
-rm -f "$sums/SHA256SUMS"
-[ "$branch" = v2 ] && [ "$mapping" = 0 ] && rm -f "$sums/decoder-v2-mapping.txt"
-cp "$@" "$sums/"
-(cd "$sums" && find . -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort | xargs sha256sum) > "$sums.sums"
-mv "$sums.sums" "$sums/SHA256SUMS"
-(cd "$sums" && sha256sum -c SHA256SUMS)
 
 if [ "$exists" = 0 ]; then
     # a "latest" tag left without its release would keep its old commit under --target
@@ -103,11 +89,11 @@ if [ "$exists" = 0 ]; then
         gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true \
             >/dev/null 2>&1 || true
     fi
-    gh release create latest "$@" "$sums/SHA256SUMS" --latest --target "$GITHUB_SHA" \
+    gh release create latest "$@" --latest --target "$GITHUB_SHA" \
         --title "$title" --notes-file notes.md
 else
-    # this build's files and the new SHA256SUMS in one upload
-    gh release upload latest "$@" "$sums/SHA256SUMS" --clobber
+    gh release upload latest "$@" --clobber
+    gh release delete-asset latest SHA256SUMS --yes 2>/dev/null || true   # from before #236
     if [ "$branch" = v2 ] && [ "$mapping" = 0 ]; then
         gh release delete-asset latest decoder-v2-mapping.txt --yes 2>/dev/null || true
     fi
@@ -116,4 +102,4 @@ else
     fi
     gh release edit latest --title "$title" --notes-file notes.md --latest
 fi
-rm -rf "$sums" notes.md err.txt
+rm -f notes.md err.txt
