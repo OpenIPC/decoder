@@ -365,8 +365,10 @@ class QuadCell implements RtspSession.Callback {
             if ("disconnected".equals(st)) return "Disconnected";
             return "buffering".equals(st) ? "Buffering…" : "Connecting…";
         }
-        int w = width();
-        int h = height();
+        // As shown: the decoder's output size, turned by a quarter turn (Qodo on #225)
+        boolean swap = !jpeg && decoder.swapsSides();
+        int w = swap ? height() : width();
+        int h = swap ? width() : height();
         String size = w > 0 ? w + "×" + h + " " : "";
         String codec = jpeg ? "MJPEG" : codecH265 ? "H.265" : "H.264";
         if (keyFramesOnly) {
@@ -437,8 +439,9 @@ class QuadCell implements RtspSession.Callback {
     /** The cooingdv heartbeat of an RTSP cell once it used one (#187), else null. */
     java.util.Map<String, Object> heartbeatStats() { return session.heartbeatStats(); }
 
-    /** Degrees counter-clockwise the MJPEG frames are turned (#200), 0 for none. */
-    int rotate() { return jpeg ? session.rotate() : 0; }
+    /** Degrees counter-clockwise the frames are turned (#200, #201), 0 for none. */
+    int rotate() { return session.rotate(); }
+    void setSlotTurn(int rotate) { session.setSlotTurn(rotate); }
 
     /** Transport in use, with the mode after a fallback (#112). */
     String transportLabel() { return Transport.label(session.transportInUse(), transport); }
@@ -694,6 +697,7 @@ class QuadCell implements RtspSession.Callback {
             Surface s = surface;
             if (s == null || !s.isValid()) return;
             decoder.setSurface(s);
+            decoder.setRotation(session.rotate());
             decoder.createDecoder(codecH265);
             // Feed the frame that triggered creation (often the SPS) to the new decoder
             decoder.decodeFrame(buffer, codecH265, 0);

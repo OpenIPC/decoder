@@ -11,6 +11,7 @@ import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
 import android.media.MediaFormat;
+import android.os.Build;
 import android.util.Log;
 import android.view.Surface;
 
@@ -42,6 +43,8 @@ final class JpegCodec {
     private Surface surface;
     private int width;
     private int height;
+    /** Degrees counter-clockwise the decoder turns its output (#201). */
+    private int rotation;
     private final MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
 
     /** {name, mime} of a hardware-or-vendor JPEG decoder, or null; looked up once. */
@@ -123,10 +126,11 @@ final class JpegCodec {
         boolean holds();
     }
 
-    synchronized boolean decode(Frame frame, Surface target, int w, int h, Current current)
-            throws Exception {
+    synchronized boolean decode(Frame frame, Surface target, int w, int h, int rotate,
+            Current current) throws Exception {
         if (!current.holds()) return false;
-        if (codec == null || target != surface || w != width || h != height) {
+        if (codec == null || target != surface || w != width || h != height
+                || rotate != rotation) {
             releaseLocked();
             MediaCodec c;
             String[] dec;
@@ -149,6 +153,10 @@ final class JpegCodec {
                     MediaFormat format = MediaFormat.createVideoFormat(dec[1], w, h);
                     format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE,
                             Math.max(frame.length() * 2, 512 * 1024));
+                    // Turned by the decoder on the surface, clockwise degrees here (#201)
+                    if (rotate != 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        format.setInteger(MediaFormat.KEY_ROTATION, (360 - rotate) % 360);
+                    }
                     c.configure(format, target, null, 0);
                     c.start();
                 } catch (Exception e) {
@@ -164,6 +172,7 @@ final class JpegCodec {
             surface = target;
             width = w;
             height = h;
+            rotation = rotate;
             Log.i(TAG, "Start MJPEG decoder " + dec[0] + " " + w + "x" + h);
         }
         int in = codec.dequeueInputBuffer(40_000);

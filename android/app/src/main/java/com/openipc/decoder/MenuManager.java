@@ -28,6 +28,7 @@ import android.webkit.HttpAuthHandler;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.EditText;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.RadioButton;
@@ -540,7 +541,8 @@ class MenuManager {
         return text;
     }
 
-    void showUrlEditor(int mActive, String[] mHosts, Transport.Mode[] mTransports) {
+    void showUrlEditor(int mActive, String[] mHosts, Transport.Mode[] mTransports,
+            int[] mRotates) {
         AlertDialog.Builder builder = new AlertDialog.Builder(activity);
         builder.setTitle("Camera " + (mActive + 1) + " URL");
 
@@ -564,11 +566,29 @@ class MenuManager {
             if (modes[i] == mTransports[mActive]) b.setChecked(true);
         }
 
+        // Turn of the picture (#201): Auto leaves it to the URL's ?rotate= or a toy's default;
+        // the degrees are counter-clockwise, as in ?rotate=
+        RadioGroup turn = new RadioGroup(activity);
+        turn.setOrientation(RadioGroup.HORIZONTAL);
+        int[] turns = {-1, 0, 90, 180, 270};
+        String[] turnLabels = {"Auto", "0°", "90° ↺", "180°", "270° ↺"};
+        for (int i = 0; i < turns.length; i++) {
+            RadioButton b = new RadioButton(activity);
+            b.setId(View.generateViewId());
+            b.setText(turnLabels[i]);
+            b.setTag(turns[i]);
+            turn.addView(b);
+            if (turns[i] == mRotates[mActive]) b.setChecked(true);
+        }
         LinearLayout content = new LinearLayout(activity);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(16), dp(8), dp(16), 0);
         content.addView(input);
         content.addView(transport);
+        // Five choices do not fit a phone's width: the row scrolls (Qodo on #225)
+        HorizontalScrollView turnRow = new HorizontalScrollView(activity);
+        turnRow.addView(turn);
+        content.addView(turnRow);
         builder.setView(content);
 
         final int slot = mActive;
@@ -577,6 +597,8 @@ class MenuManager {
             mHosts[slot] = Decoder.sanitizeUrl(url);
             View checked = transport.findViewById(transport.getCheckedRadioButtonId());
             if (checked != null) mTransports[slot] = (Transport.Mode) checked.getTag();
+            View turned = turn.findViewById(turn.getCheckedRadioButtonId());
+            if (turned != null) mRotates[slot] = (Integer) turned.getTag();
             if (listener != null) listener.onSaveSettings(); // triggers save + reconnect
         });
         builder.setNegativeButton("Cancel", (dialog, which) -> dialog.cancel());

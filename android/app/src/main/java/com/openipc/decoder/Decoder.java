@@ -138,6 +138,8 @@ public class Decoder extends Activity
     private final String[] mHosts = new String[CAM_COUNT];
     /** RTP transport per slot (#67): TCP, UDP or Auto (UDP with fallback to TCP). */
     private final Transport.Mode[] mTransports = new Transport.Mode[CAM_COUNT];
+    /** Per slot (#201): degrees counter-clockwise, -1 for Auto (from the URL). */
+    private final int[] mRotates = new int[CAM_COUNT];
     private int mActive;
     private volatile String mHost;
     private String mVersion;
@@ -209,7 +211,15 @@ public class Decoder extends Activity
 
         // --- Create managers ---
         videoDecoder = new MediaCodecManager(new MediaCodecManager.Listener() {
-            @Override public void onResolutionChanged(int w, int h) { updateResolution(w, h); }
+            @Override public void onResolutionChanged(int w, int h) {
+                // The decoder turns the picture (#201, Android 6+ as in MediaCodecManager): a
+                // quarter turn swaps its sides
+                RtspClient c = rtspClient;
+                int r = c != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                        ? c.rotate() : 0;
+                if (r == 90 || r == 270) updateResolution(h, w);
+                else updateResolution(w, h);
+            }
             @Override public void onDecoderStarted() { removeClearOverlay(); }
             @Override public void onDecoderFailed() {}
         });
@@ -396,7 +406,7 @@ public class Decoder extends Activity
             if (configured) {
                 // A probe of this camera ends first: some take one client only (#100)
                 streamProbes.willShow(mHost);
-                rtspClient.configure(mHost, mUserAgent, mTransports[mActive]);
+                configureClient();
                 startListener();
                 rtspClient.start();
             }
@@ -580,7 +590,9 @@ public class Decoder extends Activity
     }
 
     @Override
-    public void onShowSettings() { menuManager.showUrlEditor(mActive, mHosts, mTransports); }
+    public void onShowSettings() {
+        menuManager.showUrlEditor(mActive, mHosts, mTransports, mRotates);
+    }
 
     @Override
     public void onWebUI() { menuManager.startBrowser(mHost); }
@@ -590,8 +602,16 @@ public class Decoder extends Activity
 
     // ====================== Video lifecycle ======================
 
+    /** The single view's client for the active slot, with the slot's turn (#201). */
+    private void configureClient() {
+        rtspClient.configure(mHost, mUserAgent, mTransports[mActive]);
+        rtspClient.setSlotTurn(mRotates[mActive]);
+    }
+
     private void createDecoder() {
         videoDecoder.setSurface(mVideoSurface);
+        RtspClient c = rtspClient;
+        videoDecoder.setRotation(c != null ? c.rotate() : 0);
         videoDecoder.createDecoder(codecH265);
     }
 
@@ -631,6 +651,7 @@ public class Decoder extends Activity
             mUnreadable[i] = url == null && stored != null ? stored : null;
             // Auto for a slot that has never stored one (#112)
             mTransports[i] = Transport.Mode.stored(pref.getString("transport_" + i, null));
+            mRotates[i] = pref.getInt("rotate_" + i, -1);
             // Plain URLs from older versions are re-saved encrypted right away
             if (credentials.needsMigration(stored)) {
                 if (migrate == null) migrate = pref.edit();
@@ -693,6 +714,7 @@ public class Decoder extends Activity
             edit.putString("host_" + i,
                     credentials.sealForSlot(mHosts[i], mUnreadable[i], DEFAULT_URL));
             edit.putString("transport_" + i, mTransports[i].name());
+            edit.putInt("rotate_" + i, mRotates[i]);
         }
         edit.apply();
 
@@ -715,7 +737,7 @@ public class Decoder extends Activity
 
         // A probe of this camera ends first: some take one client only (#100)
         streamProbes.willShow(mHost);
-        rtspClient.configure(mHost, mUserAgent, mTransports[mActive]);
+        configureClient();
         startListener();
         rtspClient.start();
     }
@@ -1002,6 +1024,7 @@ public class Decoder extends Activity
             Transport.Mode mode = i == U_CELL ? Transport.Mode.UDP : mTransports[i];
             quadCells[i] = new QuadCell(i, url, mode, quadViews[i], framePool, mUserAgent,
                     index -> runOnUiThread(() -> removeQuadOverlay(index)));
+            quadCells[i].setSlotTurn(i < CAM_COUNT ? mRotates[i] : -1);
             quadCells[i].start();
         }
         quadAudio = getSharedPreferences("settings", MODE_PRIVATE).getInt("quad_audio", -1);
@@ -1603,8 +1626,8 @@ public class Decoder extends Activity
             if (jl != null) single.put("jieli", jl);
             Map<String, Object> hb = rtspClient != null ? rtspClient.heartbeatStats() : null;
             if (hb != null) single.put("heartbeat", hb);
-            // MJPEG turned counter-clockwise, "size" is the turned one (#200)
-            int rotate = rtspClient != null && rtspClient.isJpeg() ? rtspClient.rotate() : 0;
+            // Turned counter-clockwise, "size" is the turned one (#200, #201)
+            int rotate = rtspClient != null ? rtspClient.rotate() : 0;
             if (rotate != 0) single.put("rotate", rotate);
             m.put("single", single);
         }
@@ -2600,7 +2623,7 @@ public class Decoder extends Activity
             if (configured) {
                 // A probe of this camera ends first: some take one client only (#100)
                 streamProbes.willShow(mHost);
-                rtspClient.configure(mHost, mUserAgent, mTransports[mActive]);
+                configureClient();
                 startListener();
                 rtspClient.start();
             }
