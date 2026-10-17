@@ -365,8 +365,10 @@ class QuadCell implements RtspSession.Callback {
             if ("disconnected".equals(st)) return "Disconnected";
             return "buffering".equals(st) ? "Buffering…" : "Connecting…";
         }
-        int w = width();
-        int h = height();
+        // As shown: the decoder's output size, turned by a quarter turn (Qodo on #225)
+        boolean swap = !jpeg && decoder.swapsSides();
+        int w = swap ? height() : width();
+        int h = swap ? width() : height();
         String size = w > 0 ? w + "×" + h + " " : "";
         String codec = jpeg ? "MJPEG" : codecH265 ? "H.265" : "H.264";
         if (keyFramesOnly) {
