@@ -445,7 +445,13 @@ public class RtspSessionTest {
             }
             // The option is ours: the camera never sees it
             assertEquals("DESCRIBE " + base() + " RTSP/1.0", server.methods().get(0));
+            // Counted after send(): the toy may get the second one before the count (#187)
             java.util.Map<String, Object> m = session.heartbeatStats();
+            long deadline = System.currentTimeMillis() + 2000;
+            while ((Integer) m.get("sent") < 2 && System.currentTimeMillis() < deadline) {
+                Thread.sleep(10);
+                m = session.heartbeatStats();
+            }
             assertTrue((Integer) m.get("sent") >= 2);
             assertEquals(true, m.get("running"));
             session.stop();
