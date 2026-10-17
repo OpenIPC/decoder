@@ -223,6 +223,8 @@ public class Decoder extends Activity
             @Override public void onDecoderStarted() { removeClearOverlay(); }
             @Override public void onDecoderFailed() {}
         });
+        // Single view: streams above 1080p on decoders that need to know it up front (#166)
+        videoDecoder.allowLargeFrames(true);
         audioManager = new AudioManager();
         rtspClient = new RtspClient(framePool, nalAssembler, nalQueue);
         rtspClient.setListener(new RtspClient.Listener() {

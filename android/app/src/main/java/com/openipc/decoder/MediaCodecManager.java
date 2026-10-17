@@ -56,6 +56,13 @@ class MediaCodecManager {
 
     // Surface set by the owning activity
     private volatile Surface surface;
+    /**
+     * Single view (#166): announce the largest picture the decoder supports (up to 4K) as
+     * KEY_MAX_WIDTH/HEIGHT. Configured at 1280×720 without it, some hardware decoders
+     * (Rockchip OMX) never give a frame for streams above 1080p, e.g. 2304×1296. Off in the
+     * grid: nine decoders with 4K buffers would not fit in memory.
+     */
+    private volatile boolean largeFrames;
     /** Degrees counter-clockwise the decoder turns the picture (#201); 0 for none. */
     private volatile int rotation;
     /** The turn the current decoder applies: {@link #rotation} where Android 6+ can, else 0. */
@@ -264,6 +271,27 @@ class MediaCodecManager {
         this.surface = s;
     }
 
+    /** See {@link #largeFrames}; takes effect with the next decoder. */
+    void allowLargeFrames(boolean on) {
+        largeFrames = on;
+    }
+
+    /** Largest supported size up to 3840×2160 (a few steps down), or null if none above 1080p. */
+    static int[] maxFrameSize(MediaCodec codec, String mime) {
+        try {
+            MediaCodecInfo.VideoCapabilities video =
+                    codec.getCodecInfo().getCapabilitiesForType(mime).getVideoCapabilities();
+            if (video == null) return null;
+            int[][] sizes = {{3840, 2160}, {2560, 1920}, {2560, 1440}, {2304, 1296}};
+            for (int[] size : sizes) {
+                if (video.isSizeSupported(size[0], size[1])) return size;
+            }
+        } catch (Exception ignored) {
+            // Capabilities unknown: keep the decoder's defaults
+        }
+        return null;
+    }
+
     /** See {@link #rotation}; takes effect with the next decoder. */
     void setRotation(int degreesCcw) {
         rotation = ((degreesCcw % 360) + 360) % 360;
@@ -388,6 +416,13 @@ class MediaCodecManager {
                 Log.i(TAG, "Start video decoder (" + type + ")");
                 local = MediaCodec.createDecoderByType(type);
                 learnLimits(local, type);
+                int[] max = largeFrames ? maxFrameSize(local, type) : null;
+                if (max != null) {
+                    format.setInteger(MediaFormat.KEY_MAX_WIDTH, max[0]);
+                    format.setInteger(MediaFormat.KEY_MAX_HEIGHT, max[1]);
+                    Log.i(TAG, "Decoder " + local.getName() + ": pictures up to "
+                            + max[0] + "×" + max[1]);
+                }
             }
             int turn = rotation;
             if (turn != 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
