@@ -85,6 +85,8 @@ jobs:
     needs: test
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    outputs:
+      mapping: ${{ steps.apk.outputs.mapping }}   # 1 when the build has an R8 mapping
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -113,6 +115,7 @@ jobs:
           cache: gradle
 
       - name: Build
+        id: apk
         working-directory: android
         env:
           KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
@@ -128,6 +131,7 @@ jobs:
           MAPPING=app/build/outputs/mapping/release/mapping.txt
           if [ -f "$MAPPING" ]; then
             cp "$MAPPING" ../${{ steps.vars.outputs.name }}-mapping.txt
+            echo "mapping=1" >> "$GITHUB_OUTPUT"
           else
             echo "::warning::No R8 mapping.txt at $MAPPING"
           fi
@@ -172,12 +176,13 @@ jobs:
           name: decoder-v2
           path: dist
 
+      # only when the build has one (a build without minify has none, #181); then it must come
       - name: Download the mapping
+        if: needs.build.outputs.mapping == '1'
         uses: actions/download-artifact@v4
         with:
           name: decoder-v2-mapping
           path: dist
-        continue-on-error: true   # a build without minify has none (#181)
 
       - name: Publish
         id: publish

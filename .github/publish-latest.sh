@@ -83,11 +83,23 @@ echo "previous $branch version: ${prev:-none}, now $ver"
     printf '\nCheck: `sha256sum -c SHA256SUMS`. Changes: [CHANGELOG.md](%s/blob/v2/CHANGELOG.md); installation: [README](%s#readme).\n' "$url" "$url"
 } > notes.md
 
+# SHA256SUMS before anything changes: the other branch's files as the
+# release has them now, plus this build's files; a v2 build without a
+# mapping drops the previous one.
+sums=$(mktemp -d)
+if [ "$exists" = 1 ]; then
+    gh release download latest --dir "$sums" --pattern 'decoder*'
+fi
+[ "$branch" = v2 ] && [ "$mapping" = 0 ] && rm -f "$sums/decoder-v2-mapping.txt"
+cp "$@" "$sums/"
+(cd "$sums" && sha256sum decoder* > SHA256SUMS && sha256sum -c SHA256SUMS)
+
 if [ "$exists" = 0 ]; then
-    gh release create latest "$@" --latest --target "$GITHUB_SHA" --title "$title" --notes-file notes.md
+    gh release create latest "$@" "$sums/SHA256SUMS" --latest --target "$GITHUB_SHA" \
+        --title "$title" --notes-file notes.md
 else
-    gh release upload latest "$@" --clobber
-    # a v2 build without a mapping must not leave the previous one beside it
+    # this build's files and the new SHA256SUMS in one upload
+    gh release upload latest "$@" "$sums/SHA256SUMS" --clobber
     if [ "$branch" = v2 ] && [ "$mapping" = 0 ]; then
         gh release delete-asset latest decoder-v2-mapping.txt --yes 2>/dev/null || true
     fi
@@ -96,10 +108,4 @@ else
     fi
     gh release edit latest --title "$title" --notes-file notes.md --latest
 fi
-
-# SHA256SUMS over everything the release holds now
-sums=$(mktemp -d)
-gh release download latest --dir "$sums" --pattern 'decoder*'
-(cd "$sums" && sha256sum decoder* > SHA256SUMS && sha256sum -c SHA256SUMS)
-gh release upload latest "$sums/SHA256SUMS" --clobber
 rm -rf "$sums" notes.md err.txt
