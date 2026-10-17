@@ -7,7 +7,6 @@
 
 package com.openipc.decoder;
 
-import android.os.Build;
 import android.util.Log;
 import android.view.Surface;
 import android.view.SurfaceHolder;
@@ -438,19 +437,9 @@ class QuadCell implements RtspSession.Callback {
     /** The cooingdv heartbeat of an RTSP cell once it used one (#187), else null. */
     java.util.Map<String, Object> heartbeatStats() { return session.heartbeatStats(); }
 
-    /** Degrees counter-clockwise the MJPEG frames are turned (#200), 0 for none. */
+    /** Degrees counter-clockwise the frames are turned (#200, #201), 0 for none. */
     int rotate() { return session.rotate(); }
     void setSlotTurn(int rotate) { session.setSlotTurn(rotate); }
-
-    /**
-     * Degrees counter-clockwise the decoder turns this cell's frames on the surface (#201), 0
-     * when the frames are drawn already turned (MJPEG in software) or not turned at all. A copy
-     * of the surface gets the frame as decoded, so snapshots turn it themselves.
-     */
-    int decoderTurn() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return 0;
-        return jpeg && jpegRenderer.isSoftware() ? 0 : session.rotate();
-    }
 
     /** Transport in use, with the mode after a fallback (#112). */
     String transportLabel() { return Transport.label(session.transportInUse(), transport); }

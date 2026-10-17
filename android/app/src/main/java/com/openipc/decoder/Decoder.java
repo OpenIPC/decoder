@@ -600,13 +600,6 @@ public class Decoder extends Activity
 
     // ====================== Video lifecycle ======================
 
-    /** As QuadCell.decoderTurn() for the single view (#201). */
-    private int singleDecoderTurn() {
-        RtspClient c = rtspClient;
-        if (c == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return 0;
-        return c.isJpeg() && jpegRenderer.isSoftware() ? 0 : c.rotate();
-    }
-
     /** The single view's client for the active slot, with the slot's turn (#201). */
     private void configureClient() {
         rtspClient.configure(mHost, mUserAgent, mTransports[mActive]);
@@ -1497,7 +1490,6 @@ public class Decoder extends Activity
                             ? statusText.getText().toString() : c.live ? "Playing" : "No new frames";
                     // Copied with the grid cells, off the UI thread (#76)
                     if (c.live) c.view = mSurface;
-                    c.turn = singleDecoderTurn();
                 }
                 c.onScreen = onScreen(i);
                 cells.add(c);
@@ -1524,7 +1516,6 @@ public class Decoder extends Activity
             c.label = stats != null ? stats.getText().toString() : "";
             c.live = cell.showsVideo(SNAPSHOT_LIVE_MS);
             c.view = quadViews[i];
-            c.turn = cell.decoderTurn();
             if (i == U_CELL && !c.live) {
                 c.label = "U \u00b7 waiting for RTP on port " + UDP_RTP_PORT;
             }
@@ -1852,14 +1843,9 @@ public class Decoder extends Activity
         double fit = Math.min(1, Math.sqrt((double) SCREENSHOT_MAX_PIXELS
                 / ((double) mVideoWidth * mVideoHeight)));
         Bitmap bitmap;
-        // A surface the decoder turns holds the frame as decoded: copied unturned (#201)
-        final int turn = singleDecoderTurn();
-        boolean quarter = turn == 90 || turn == 270;
-        int shotW = Math.max(1, (int) (mVideoWidth * fit));
-        int shotH = Math.max(1, (int) (mVideoHeight * fit));
         try {
-            bitmap = Bitmap.createBitmap(quarter ? shotH : shotW, quarter ? shotW : shotH,
-                    Bitmap.Config.ARGB_8888);
+            bitmap = Bitmap.createBitmap(Math.max(1, (int) (mVideoWidth * fit)),
+                    Math.max(1, (int) (mVideoHeight * fit)), Bitmap.Config.ARGB_8888);
         } catch (OutOfMemoryError e) {
             Log.w(TAG, "No memory for a screenshot of " + mVideoWidth + "x" + mVideoHeight);
             Toast.makeText(this, "Failed to save screenshot", Toast.LENGTH_SHORT).show();
@@ -1870,8 +1856,7 @@ public class Decoder extends Activity
         boolean started = Snapshots.copy(mSurface, bitmap, result -> {
             if (result == PixelCopy.SUCCESS) {
                 // Encoding a full-resolution PNG takes long: on a thread of its own (#35)
-                new Thread(() -> saveScreenshot(Snapshots.turned(bitmap, turn)), "screenshot")
-                        .start();
+                new Thread(() -> saveScreenshot(bitmap), "screenshot").start();
             } else {
                 Log.d(TAG, "Screenshot copy failed: " + result);
                 bitmap.recycle();

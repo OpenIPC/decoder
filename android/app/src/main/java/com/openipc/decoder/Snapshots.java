@@ -10,7 +10,6 @@ package com.openipc.decoder;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.os.Build;
@@ -61,8 +60,6 @@ final class Snapshots {
         boolean ok;
         /** What the TV shows, in a grid drawn for the single view (#100): framed. */
         boolean onScreen;
-        /** Degrees counter-clockwise the decoder turns the frames (#201): the copy is turned. */
-        int turn;
     }
 
     private static HandlerThread copyThread;
@@ -108,7 +105,7 @@ final class Snapshots {
         for (int i = 0; i < n; i++) {
             Cell c = cells.get(i);
             if (c != null && c.live && c.view != null) {
-                copies[i] = Copy.start(c.view, rects[i].width(), rects[i].height(), c.turn);
+                copies[i] = Copy.start(c.view, rects[i].width(), rects[i].height());
             }
         }
         long deadline = SystemClock.elapsedRealtime() + COPY_TIMEOUT_MS;
@@ -207,41 +204,18 @@ final class Snapshots {
         }
     }
 
-    /**
-     * {@code b} turned {@code ccw} degrees counter-clockwise (#201); {@code b} itself when not
-     * turned, else a new bitmap and {@code b} is recycled.
-     */
-    static Bitmap turned(Bitmap b, int ccw) {
-        if (ccw == 0) return b;
-        Matrix m = new Matrix();
-        m.postRotate(-ccw);
-        Bitmap t = Bitmap.createBitmap(b, 0, 0, b.getWidth(), b.getHeight(), m, true);
-        if (t != b) b.recycle();
-        return t;
-    }
-
     /** One PixelCopy in flight. */
     private static final class Copy {
         final Bitmap bitmap;
-        final int turn;
         final CountDownLatch done = new CountDownLatch(1);
         final AtomicInteger result = new AtomicInteger(-1);
 
-        private Copy(Bitmap bitmap, int turn) {
-            this.bitmap = bitmap;
-            this.turn = turn;
-        }
+        private Copy(Bitmap bitmap) { this.bitmap = bitmap; }
 
-        /**
-         * Starts copying what the SurfaceView shows, scaled to w×h; null if it cannot. A
-         * surface the decoder turns (#201) holds the frame as decoded: it is copied at the
-         * unturned size and turned afterwards.
-         */
-        static Copy start(SurfaceView view, int w, int h, int turn) {
+        /** Starts copying what the SurfaceView shows, scaled to w×h; null if it cannot. */
+        static Copy start(SurfaceView view, int w, int h) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return null;
-            boolean quarter = turn == 90 || turn == 270;
-            Copy c = new Copy(Bitmap.createBitmap(quarter ? h : w, quarter ? w : h,
-                    Bitmap.Config.ARGB_8888), turn);
+            Copy c = new Copy(Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888));
             if (copy(view, c.bitmap, r -> {
                 c.result.set(r);
                 c.done.countDown();
@@ -265,7 +239,7 @@ final class Snapshots {
                 Thread.currentThread().interrupt();
                 return null;
             }
-            if (result.get() == PixelCopy.SUCCESS) return turned(bitmap, turn);
+            if (result.get() == PixelCopy.SUCCESS) return bitmap;
             Log.d(TAG, "Snapshot copy failed: " + result.get());
             bitmap.recycle();
             return null;
