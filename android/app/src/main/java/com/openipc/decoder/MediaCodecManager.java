@@ -63,6 +63,10 @@ class MediaCodecManager {
      * grid: nine decoders with 4K buffers would not fit in memory.
      */
     private volatile boolean largeFrames;
+    /** Degrees counter-clockwise the decoder turns the picture (#201); 0 for none. */
+    private volatile int rotation;
+    /** The turn the current decoder applies: {@link #rotation} where Android 6+ can, else 0. */
+    private volatile int appliedRotation;
 
     /** Frames rendered so far (#82): with the frames received this gives the real decode rate. */
     private volatile int framesOut;
@@ -102,6 +106,11 @@ class MediaCodecManager {
     int inputDropped() { return inputDropped; }
     int outWidth() { return outWidth; }
     int outHeight() { return outHeight; }
+    /** The picture on the surface has its sides swapped: a quarter turn applied (#201). */
+    boolean swapsSides() {
+        int t = appliedRotation;
+        return t == 90 || t == 270;
+    }
     boolean hasDecoder() { return decoder != null; }
 
     /**
@@ -283,6 +292,11 @@ class MediaCodecManager {
         return null;
     }
 
+    /** See {@link #rotation}; takes effect with the next decoder. */
+    void setRotation(int degreesCcw) {
+        rotation = ((degreesCcw % 360) + 360) % 360;
+    }
+
     /** Enable or disable decoding; disabling also releases the decoder. */
     /**
      * Enable or disable decoding. Never blocks the caller (the UI thread): disabling only
@@ -410,6 +424,14 @@ class MediaCodecManager {
                             + max[0] + "×" + max[1]);
                 }
             }
+            int turn = rotation;
+            if (turn != 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                // The decoder turns its output on the surface: clockwise degrees here (#201)
+                format.setInteger(MediaFormat.KEY_ROTATION, (360 - turn) % 360);
+            } else {
+                turn = 0;
+            }
+            appliedRotation = turn;
             try {
                 local.configure(format, s, null, 0);
                 local.start();
