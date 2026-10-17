@@ -88,13 +88,21 @@ echo "previous $branch version: ${prev:-none}, now $ver"
 # mapping drops the previous one.
 sums=$(mktemp -d)
 if [ "$exists" = 1 ]; then
-    gh release download latest --dir "$sums" --pattern 'decoder*'
+    gh release download latest --dir "$sums"   # every file the release holds
 fi
+rm -f "$sums/SHA256SUMS"
 [ "$branch" = v2 ] && [ "$mapping" = 0 ] && rm -f "$sums/decoder-v2-mapping.txt"
 cp "$@" "$sums/"
-(cd "$sums" && sha256sum decoder* > SHA256SUMS && sha256sum -c SHA256SUMS)
+(cd "$sums" && find . -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort | xargs sha256sum) > "$sums.sums"
+mv "$sums.sums" "$sums/SHA256SUMS"
+(cd "$sums" && sha256sum -c SHA256SUMS)
 
 if [ "$exists" = 0 ]; then
+    # a "latest" tag left without its release would keep its old commit under --target
+    if [ "$branch" = v2 ]; then
+        gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true \
+            >/dev/null 2>&1 || true
+    fi
     gh release create latest "$@" "$sums/SHA256SUMS" --latest --target "$GITHUB_SHA" \
         --title "$title" --notes-file notes.md
 else

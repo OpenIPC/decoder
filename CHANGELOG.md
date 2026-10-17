@@ -4,7 +4,9 @@ The version lives in `versionName` in `android/app/build.gradle` (`v2`) and in
 `app/build.gradle` (`basic`). Builds are published only as the
 [`latest`](https://github.com/OpenIPC/decoder/releases/tag/latest) release, which holds the
 newest `v2` and `basic` builds, and in the OpenIPC Telegram channel; there are no releases
-per version (#194). This file is the change history: one section per `v2` version, newest
+per version (#194). Since #229 the release is titled `Decoder <v2 version>`, its tag is on the
+built `v2` commit, its notes give each branch's version and commit, `SHA256SUMS` covers all its
+files, and the Telegram channel gets each new version rather than every build. This file is the change history: one section per `v2` version, newest
 first, then the legacy `basic` line.
 
 Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.0; see
