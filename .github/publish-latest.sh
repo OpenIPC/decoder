@@ -23,6 +23,20 @@ shift 2
 short=${GITHUB_SHA::7}
 url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
 
+# Only the branch head is published: a run of a commit that has been
+# superseded meanwhile (a manual run, a waiting push) must not roll the
+# release back. The newer commit's own run publishes it.
+head=$(git ls-remote origin "refs/heads/$branch" | cut -f 1)
+if [ "$head" != "$GITHUB_SHA" ]; then
+    echo "::notice::$branch is at ${head:0:7} now, not ${short}: not published"
+    exit 0
+fi
+
+mapping=0
+for f in "$@"; do
+    [ "$(basename "$f")" = decoder-v2-mapping.txt ] && mapping=1
+done
+
 # The release as it is now. "Not found" means there is none yet; any other
 # failure stops here, before anything is changed.
 if title=$(gh release view latest --json name -q .name 2>err.txt); then
@@ -43,7 +57,12 @@ case $branch in
 v2)
     prev=$(printf '%s' "$title" | sed -n 's/^Decoder //p')
     title="Decoder $ver"
-    v2line="Decoder $ver (\`$short\`): \`decoder-v2.apk\`, the current version, recommended; \`decoder-v2-mapping.txt\` is its R8 mapping."
+    v2line="Decoder $ver (\`$short\`): \`decoder-v2.apk\`, the current version, recommended"
+    if [ "$mapping" = 1 ]; then
+        v2line="$v2line; \`decoder-v2-mapping.txt\` is its R8 mapping."
+    else
+        v2line="$v2line."
+    fi
     ;;
 basic)
     prev=$(printf '%s' "$basicline" | sed -n 's/^Legacy `basic` \([^ ]*\) .*/\1/p')
@@ -68,6 +87,10 @@ if [ "$exists" = 0 ]; then
     gh release create latest "$@" --latest --target "$GITHUB_SHA" --title "$title" --notes-file notes.md
 else
     gh release upload latest "$@" --clobber
+    # a v2 build without a mapping must not leave the previous one beside it
+    if [ "$branch" = v2 ] && [ "$mapping" = 0 ]; then
+        gh release delete-asset latest decoder-v2-mapping.txt --yes 2>/dev/null || true
+    fi
     if [ "$branch" = v2 ]; then
         gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true >/dev/null
     fi
