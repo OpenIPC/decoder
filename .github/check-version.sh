@@ -10,7 +10,8 @@
 # when the version changes, so the 2.xx versions before MAJOR.MINOR.PATCH
 # stay valid until the next app change.
 #
-# Usage: .github/check-version.sh [BASE]   (default origin/v2)
+# Usage: .github/check-version.sh [BASE]   (default origin/v2; CI passes
+# HEAD^1, the base side of the pull request's merge commit)
 #
 
 set -eu
@@ -18,10 +19,19 @@ set -eu
 base=${1:-origin/v2}
 gradle=android/app/build.gradle
 
-ver() { sed -n 's/.*versionName "\(.*\)".*/\1/p' | head -n 1; }
+# The one versionName assignment (comments and other text do not count).
+ver() {
+	v=$(sed -n 's/^[[:space:]]*versionName[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p')
+	if [ "$(printf '%s\n' "$v" | grep -c .)" -ne 1 ]; then
+		echo "::error::$1:$gradle: expected one versionName assignment," \
+			"found: $(printf '%s' "$v" | tr '\n' ' ')" >&2
+		exit 1
+	fi
+	printf '%s\n' "$v"
+}
 
-new=$(ver < "$gradle")
-old=$(git show "$base:$gradle" | ver)
+new=$(ver HEAD < "$gradle")
+old=$(git show "$base:$gradle" | ver "$base")
 
 changed=$(git diff --name-only "$base"...HEAD -- android ':(exclude)android/app/src/test')
 
@@ -41,8 +51,13 @@ if ! echo "$new" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$
 	exit 1
 fi
 
-top=$(printf '%s\n%s\n' "$old" "$new" | sort -V | tail -n 1)
-if [ "$top" != "$new" ]; then
+# A 2.xx version from before MAJOR.MINOR.PATCH is X.Y.0: 2.17.0 is 2.17.
+case $old in
+*.*.*) oldn=$old ;;
+*) oldn=$old.0 ;;
+esac
+top=$(printf '%s\n%s\n' "$oldn" "$new" | sort -V | tail -n 1)
+if [ "$new" = "$oldn" ] || [ "$top" != "$new" ]; then
 	echo "::error::versionName $new is not greater than $old"
 	exit 1
 fi

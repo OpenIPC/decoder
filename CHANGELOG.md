@@ -112,10 +112,10 @@ Versions 1.x of the `v2` line, up to 1.28 (2026-05-04) and the work merged until
 
 `basic` is the original app, `decoder.apk` in the `latest` release; it gets fixes only.
 
-### 1.07.1 — 2026-10-12
+### 1.7.1 — 2026-10-12
 
-- Robust RTSP handshake, end-of-stream handling, thread lifecycle and SDP parsing (PR #41,
-  #36–#40).
+- Released as 1.07.1 (written 1.7.1 since #230). Robust RTSP handshake, end-of-stream
+  handling, thread lifecycle and SDP parsing (PR #41, #36–#40).
 
 ### 1.07 — 2025-11-11
 
