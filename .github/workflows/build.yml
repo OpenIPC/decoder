@@ -11,11 +11,13 @@ on:
 
 # One run per branch (and event). On working branches a newer push cancels the older run;
 # on basic / v2 it waits instead (only the newest waits), so "latest" still ends with the
-# build of the newest commit (#90) and a publish is never cut off halfway. Every manual run
-# has a group of its own: never cancelled, never replaced by another manual run.
+# build of the newest commit (#90) and a publish is never cut off halfway. A manual run of the
+# branch head shares that group (so each branch has one publish at a time and the shared
+# release-latest group below never holds more than one waiting job); a manual run of an older
+# commit (commit_hash) has a group of its own and does not publish.
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}', github.run_id) || format('build-{0}-{1}', github.event_name, github.ref) }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && github.ref != 'refs/heads/v2' && github.ref != 'refs/heads/basic' }}
+  group: ${{ github.event_name == 'workflow_dispatch' && inputs.commit_hash != '' && format('manual-{0}', github.run_id) || format('build-{0}-{1}', github.event_name == 'pull_request' && 'pull_request' || 'push', github.ref) }}
+  cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && inputs.commit_hash != '') && github.ref != 'refs/heads/v2' && github.ref != 'refs/heads/basic' }}
 
 # Read-only by default; only the publish job writes the release
 permissions:
