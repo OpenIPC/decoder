@@ -94,7 +94,8 @@ if [ "$exists" = 0 ]; then
 else
     gh release upload latest "$@" --clobber
     # a SHA256SUMS from before #236: removed if the release still has one; a failure stops here
-    if gh release view latest --json assets -q '.assets[].name' | grep -qx SHA256SUMS; then
+    assets=$(gh release view latest --json assets -q '.assets[].name')   # a lookup error stops here
+    if printf '%s\n' "$assets" | grep -qx SHA256SUMS; then
         gh release delete-asset latest SHA256SUMS --yes
     fi
     if [ "$branch" = v2 ] && [ "$mapping" = 0 ]; then
