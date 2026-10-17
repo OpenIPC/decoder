@@ -93,7 +93,10 @@ if [ "$exists" = 0 ]; then
         --title "$title" --notes-file notes.md
 else
     gh release upload latest "$@" --clobber
-    gh release delete-asset latest SHA256SUMS --yes 2>/dev/null || true   # from before #236
+    # a SHA256SUMS from before #236: removed if the release still has one; a failure stops here
+    if gh release view latest --json assets -q '.assets[].name' | grep -qx SHA256SUMS; then
+        gh release delete-asset latest SHA256SUMS --yes
+    fi
     if [ "$branch" = v2 ] && [ "$mapping" = 0 ]; then
         gh release delete-asset latest decoder-v2-mapping.txt --yes 2>/dev/null || true
     fi
