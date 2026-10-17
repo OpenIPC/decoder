@@ -329,13 +329,28 @@ class RtspSession {
 
     /** One session from connect to disconnect. Returns true if PLAY succeeded. */
     private boolean connect(int gen) throws IOException {
-        // Only an RTSP MJPEG stream is turned (#200); the other transports draw it as it comes
-        rotate = 0;
-        if (RtpListener.Url.matches(url)) return listen(gen, RtpListener.Url.parse(url));
-        if (HttpMjpeg.matches(url)) return httpMjpeg(gen, HttpMjpeg.Url.parse(url));
-        if (FlowUfo.Url.matches(url)) return flowUfo(gen, FlowUfo.Url.parse(url));
-        if (Jieli.Url.matches(url)) return jieli(gen, Jieli.Url.parse(url));
+        // RTSP and Jieli streams take the URL's turn (#200, #201), the other transports draw
+        // the picture as it comes. Set before any frame of this connection, not at the SDP: a
+        // decoder made in between would keep a wrong turn (Qodo on #225)
+        if (RtpListener.Url.matches(url)) {
+            rotate = 0;
+            return listen(gen, RtpListener.Url.parse(url));
+        }
+        if (HttpMjpeg.matches(url)) {
+            rotate = 0;
+            return httpMjpeg(gen, HttpMjpeg.Url.parse(url));
+        }
+        if (FlowUfo.Url.matches(url)) {
+            rotate = 0;
+            return flowUfo(gen, FlowUfo.Url.parse(url));
+        }
+        if (Jieli.Url.matches(url)) {
+            Jieli.Url j = Jieli.Url.parse(url);
+            rotate = j.rotate;
+            return jieli(gen, j);
+        }
         Url u = Url.parse(url);
+        rotate = u.rotate;
         Socket s = new Socket();
         synchronized (lock) {
             if (gen != generation) return false;
@@ -673,21 +688,23 @@ class RtspSession {
     }
 
     /**
-     * The turn for frames of this connection: {@code wanted} for MJPEG, 0 for H.264/H.265,
-     * which have no rotation yet (#201). Logged once each.
+     * The URL's turn {@code wanted} for frames of this connection. The turn in effect, with
+     * the slot's setting over it (#201), is logged once (Qodo on #225).
      */
     private int rotation(int wanted, boolean jpeg) {
-        if (wanted == 0) return 0;
-        if (!rotateLogged) {
+        int slot = slotRotate;
+        int turn = slot >= 0 ? slot : wanted;
+        if (turn != 0 && !rotateLogged) {
             rotateLogged = true;
             // MJPEG is turned while drawing (#200), H.264/H.265 by the decoder (#201)
-            Log.i(TAG, tag + ": " + (jpeg ? "MJPEG frames" : "video") + " turned " + wanted
-                    + "\u00b0 counter-clockwise (?rotate=0 turns it off)");
+            Log.i(TAG, tag + ": " + (jpeg ? "MJPEG frames" : "video") + " turned " + turn
+                    + "\u00b0 counter-clockwise" + (slot >= 0 ? " (the slot's Turn setting)"
+                    : " (?rotate=0 or the slot's Turn 0\u00b0 turns it off)"));
         }
         return wanted;
     }
 
-    /** Degrees counter-clockwise the MJPEG frames are turned now (#200), 0 for none. */
+    /** Degrees counter-clockwise the frames are turned now (#200, #201), 0 for none. */
     int rotate() {
         int t = slotRotate;
         return t >= 0 ? t : rotate;
@@ -695,7 +712,10 @@ class RtspSession {
 
     /** The slot's own turn (#201): -1 leaves it to the URL or the toy's default. */
     void setSlotTurn(int rotate) {
-        slotRotate = rotate == 0 || rotate == 90 || rotate == 180 || rotate == 270 ? rotate : -1;
+        int t = rotate == 0 || rotate == 90 || rotate == 180 || rotate == 270 ? rotate : -1;
+        // Another turn is logged again
+        if (t != slotRotate) rotateLogged = false;
+        slotRotate = t;
     }
 
     /** Heartbeat statistics for /stats.json once an RTSP slot used one (#187), else null. */

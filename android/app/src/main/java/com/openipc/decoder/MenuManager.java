@@ -28,6 +28,7 @@ import android.webkit.HttpAuthHandler;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.EditText;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.RadioButton;
@@ -584,7 +585,10 @@ class MenuManager {
         content.setPadding(dp(16), dp(8), dp(16), 0);
         content.addView(input);
         content.addView(transport);
-        content.addView(turn);
+        // Five choices do not fit a phone's width: the row scrolls (Qodo on #225)
+        HorizontalScrollView turnRow = new HorizontalScrollView(activity);
+        turnRow.addView(turn);
+        content.addView(turnRow);
         builder.setView(content);
 
         final int slot = mActive;
