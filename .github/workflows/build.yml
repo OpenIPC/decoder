@@ -3,6 +3,17 @@ on:
   push:
   workflow_dispatch:
 
+# One run per branch: on basic a newer push waits for the running one (only the newest
+# waits), so a publish is never cut off and "latest" ends with the newest build; on other
+# branches a newer push cancels the older run. A manual run shares the branch's group.
+concurrency:
+  group: build-push-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/basic' }}
+
+# Read-only by default; only the publish job writes the release
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -38,33 +49,60 @@ jobs:
           ./gradlew assembleRelease
           mv app/build/outputs/apk/release/app-release.apk ${{ steps.vars.outputs.name }}.apk
 
-      # Working branches: keep the build as a workflow artifact only
+      # Every build is a workflow artifact; on basic the publish job takes it from here
       - name: Upload artifact
-        if: github.ref_name != 'basic' && github.ref_name != 'v2'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.vars.outputs.name }}
           path: ${{ steps.vars.outputs.name }}.apk
 
-      # Release branches: publish to the "latest" release and Telegram
-      - name: Upload
-        if: github.ref_name == 'basic' || github.ref_name == 'v2'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          files: ${{ steps.vars.outputs.name }}.apk
+  # The one release, "latest" (#194, #229), shared with v2: basic replaces only decoder.apk
+  # and its line in the notes, keeps the tag and the title; SHA256SUMS covers all files. A new
+  # version (not every build) goes to Telegram. The concurrency group is shared with v2's
+  # workflow: one publish at a time. The script is the same as on v2.
+  publish:
+    needs: build
+    if: github.ref_name == 'basic'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # update the release
+    concurrency:
+      group: release-latest
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Telegram
-        if: github.ref_name == 'basic' || github.ref_name == 'v2'
+      - name: Download the build
+        uses: actions/download-artifact@v4
+        with:
+          name: decoder
+          path: dist
+
+      - name: Publish
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          GIT_HASH=$(git rev-parse --short HEAD)
-          GIT_BRANCH="${{ github.ref_name }}"
-          TAG_NAME="${{ github.ref_type == 'tag' && github.ref_name || '' }}"
-          TIME=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-          TG_MSG="Commit: ${GIT_HASH}\nBranch: ${GIT_BRANCH}\nTag: ${TAG_NAME}\nTime: ${TIME}\n\n"
-          TG_ICON="\xE2\x9C\x85 GitHub Actions"
-          TG_HEADER=$(echo -e ${TG_MSG}${TG_ICON})
-          TG_TOKEN=${{secrets.TELEGRAM_TOKEN_BOT_OPENIPC}}
-          TG_CHANNEL=${{secrets.TELEGRAM_CHANNEL_OPENIPC_DEV}}
-          HTTP=$(curl -s -o /dev/null -w %{http_code} https://api.telegram.org/bot${TG_TOKEN}/sendDocument -F chat_id=${TG_CHANNEL} -F caption="${TG_HEADER}" -F document=@${{ steps.vars.outputs.name }}.apk)
-          echo Telegram response: ${HTTP}
+          VER=$(sed -n 's/^[[:space:]]*versionName[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' app/build.gradle)
+          [ -n "$VER" ] || { echo "::error::no versionName in app/build.gradle"; exit 1; }
+          echo "VER=$VER" >> "$GITHUB_ENV"
+          .github/publish-latest.sh basic "$VER" dist/decoder.apk
+
+      # Organization secrets; a failed upload is a warning, not a failed release
+      - name: Telegram
+        if: steps.publish.outputs.new == 'true'
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_TOKEN_BOT_OPENIPC }}
+          TG_CHANNEL: ${{ secrets.TELEGRAM_CHANNEL_OPENIPC_DEV }}
+        run: |
+          if [ -z "$TG_TOKEN" ] || [ -z "$TG_CHANNEL" ]; then
+            echo "::warning::Telegram secrets are not available, version not announced"; exit 0
+          fi
+          CAPTION=$(printf 'Decoder (legacy basic) %s\nCommit: %s\nBranch: %s\nTime: %s\n\n%s' "$VER" "${GITHUB_SHA::7}" \
+            "${GITHUB_REF_NAME}" "$(date -u '+%Y-%m-%d %H:%M:%S UTC')" \
+            "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/latest")
+          HTTP=$(curl -sS -o tg.json -w '%{http_code}' "https://api.telegram.org/bot${TG_TOKEN}/sendDocument" \
+            -F chat_id="$TG_CHANNEL" -F caption="$CAPTION" -F document=@dist/decoder.apk) || HTTP=000
+          echo "Telegram response: $HTTP"
+          [ "$HTTP" = 200 ] || echo "::warning::Telegram upload failed (HTTP $HTTP)"
