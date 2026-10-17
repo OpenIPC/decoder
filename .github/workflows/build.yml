@@ -18,6 +18,23 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
+  # Pull requests: a change to the app or its build comes with a new versionName
+  # (MAJOR.MINOR.PATCH) and its CHANGELOG.md section (.github/check-version.sh, #230)
+  version:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: App changes come with a new version
+        env:
+          # through the environment, not pasted into the script
+          BASE: ${{ github.base_ref }}
+        run: .github/check-version.sh "origin/$BASE"
+
   # Unit tests and lint; also runs for pull requests from forks (no secrets needed)
   test:
     runs-on: ubuntu-latest

@@ -7,6 +7,10 @@ newest `v2` and `basic` builds, and in the OpenIPC Telegram channel; there are n
 per version (#194). This file is the change history: one section per `v2` version, newest
 first, then the legacy `basic` line.
 
+Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.0; see
+`docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
+were released.
+
 ## 2.17 — 2026-10-17
 
 - Turn in the camera settings (Auto, 0°, 90°, 180°, 270°), stored per slot; H.264/H.265 are
