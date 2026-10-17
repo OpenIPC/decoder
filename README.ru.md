@@ -47,6 +47,8 @@
 
 Каждая новая сборка заменяет предыдущую в `latest`. Разработка идёт непрерывно, поэтому отдельных релизов по версиям нет; каждая сборка веток `v2` и `basic` с номером версии и коммитом публикуется в Telegram-канале OpenIPC ([наши каналы](https://openipc.org/our-channels)).
 
+История изменений по версиям — в [CHANGELOG.md](CHANGELOG.md).
+
 Есть бета-канал в [Google Play](https://play.google.com/apps/internaltest/4701231141824898735). Чтобы попасть в него, пришлите свой e-mail через [Telegram-каналы OpenIPC](https://openipc.org/our-channels).
 
 ## Требования

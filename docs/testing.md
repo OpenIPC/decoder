@@ -49,6 +49,7 @@ CI is the reference: the project does not depend on local builds.
 
 - `v2` is **2.xx** (from 2.00). Every pull request that changes the app bumps `android/app/build.gradle` as its last commit before the merge: `versionName` +0.01, `versionCode` +1. Docs-only and CI-only pull requests do not.
 - `basic` keeps its 1.07.x line.
+- **`CHANGELOG.md`** is the change history: the version bump commit of a pull request that changes the app adds the version's section (`## <version> — <date>`, newest first) in the same pull request.
 - Development is continuous, so there is **no release per version** (#194). The [`latest`](https://github.com/OpenIPC/decoder/releases/tag/latest) release always holds the newest `v2` and `basic` builds. Every `v2` and `basic` build is also posted to the OpenIPC Telegram channel with its version and commit, and that is where their older builds can be found. Builds of other branches are only workflow artifacts of their runs (90 days).
 - **Test pre-releases**: to let a reporter test a branch, a pre-release named after the issue is made by hand from the branch's CI artifact, e.g. [`toys-187-test2`](https://github.com/OpenIPC/decoder/releases/tag/toys-187-test2) for #187. It is deleted when the test is over, or replaced by the next one.
 
