@@ -57,7 +57,7 @@ jobs:
           path: ${{ steps.vars.outputs.name }}.apk
 
   # The one release, "latest" (#194, #229), shared with v2: basic replaces only decoder.apk
-  # and its line in the notes, keeps the tag and the title; SHA256SUMS covers all files. A new
+  # and its line in the notes, keeps the tag and the title. A new
   # version (not every build) goes to Telegram. The concurrency group is shared with v2's
   # workflow: one publish at a time. The script is the same as on v2.
   publish:
