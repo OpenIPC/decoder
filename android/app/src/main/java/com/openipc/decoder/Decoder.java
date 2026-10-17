@@ -212,9 +212,11 @@ public class Decoder extends Activity
         // --- Create managers ---
         videoDecoder = new MediaCodecManager(new MediaCodecManager.Listener() {
             @Override public void onResolutionChanged(int w, int h) {
-                // The decoder turns the picture (#201): a quarter turn swaps its sides
+                // The decoder turns the picture (#201, Android 6+ as in MediaCodecManager): a
+                // quarter turn swaps its sides
                 RtspClient c = rtspClient;
-                int r = c != null ? c.rotate() : 0;
+                int r = c != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                        ? c.rotate() : 0;
                 if (r == 90 || r == 270) updateResolution(h, w);
                 else updateResolution(w, h);
             }
