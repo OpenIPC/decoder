@@ -45,7 +45,7 @@
 | `decoder-v2.apk` | **Текущая версия**, рекомендуется | <https://github.com/OpenIPC/decoder/releases/latest/download/decoder-v2.apk> |
 | `decoder.apk`    | Старая версия из ветки `basic`    | <https://github.com/OpenIPC/decoder/releases/latest/download/decoder.apk>    |
 
-Каждая новая сборка заменяет предыдущую в `latest`. Разработка идёт непрерывно, поэтому отдельных релизов по версиям нет; каждая новая версия веток `v2` и `basic` с коммитом публикуется в Telegram-канале OpenIPC ([наши каналы](https://openipc.org/our-channels)).
+Каждая новая сборка заменяет предыдущую в `latest`. Разработка идёт непрерывно, поэтому отдельных релизов по версиям нет; каждая новая версия ветки `v2` с коммитом публикуется файлом APK в Telegram-канале OpenIPC ([наши каналы](https://openipc.org/our-channels)).
 
 История изменений по версиям — в [CHANGELOG.md](CHANGELOG.md).
 
