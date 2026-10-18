@@ -45,7 +45,7 @@ Ready-to-install builds are in the one release, [**latest**](https://github.com/
 | `decoder-v2.apk` | **Current version**, recommended       | <https://github.com/OpenIPC/decoder/releases/latest/download/decoder-v2.apk> |
 | `decoder.apk`    | Legacy version from the `basic` branch | <https://github.com/OpenIPC/decoder/releases/latest/download/decoder.apk>    |
 
-Every build is replaced in `latest` by the next one. Development is continuous, so there are no releases per version; every new `v2` and `basic` version is also posted with its commit to the OpenIPC Telegram channel ([our channels](https://openipc.org/our-channels)).
+Every build is replaced in `latest` by the next one. Development is continuous, so there are no releases per version; every new `v2` version is also posted as its APK, with the commit, to the OpenIPC Telegram channel ([our channels](https://openipc.org/our-channels)).
 
 The change history of every version is in [CHANGELOG.md](CHANGELOG.md).
 
