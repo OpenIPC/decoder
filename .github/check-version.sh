@@ -4,11 +4,17 @@
 # but not versionName in android/app/build.gradle.  A new version must be
 # MAJOR.MINOR.PATCH without leading zeros, greater than the base one, and
 # have its section in CHANGELOG.md ("## <version> — YYYY-MM-DD") that the
-# base branch does not have yet.  android/ counts as app or build (its unit
-# tests in android/app/src/test do not); docs, screenshots and the
-# workflows in .github/ need no new version.  The format is checked only
-# when the version changes, so the 2.xx versions before MAJOR.MINOR.PATCH
-# stay valid until the next app change.
+# base branch does not have yet.  android/ (without its unit tests in
+# android/app/src/test and its Markdown files) and the build workflow
+# .github/workflows/build.yml count as app or build: the workflow holds
+# build steps too, and the script cannot tell them from the others.  Docs,
+# screenshots and the rest of .github/ need no new version.
+# NO_RELEASE=true (the pull request's `no-release` label) lets a change to
+# the app or the build through without a new version, for changes that
+# leave the APKs as they are (a test or publication step in the workflow,
+# a comment).  The format is checked only when the version changes, so the
+# 2.xx versions before MAJOR.MINOR.PATCH stay valid until the next app
+# change.
 #
 # Usage: .github/check-version.sh [BASE]   (default origin/v2; CI passes
 # HEAD^1, the base side of the pull request's merge commit)
@@ -33,9 +39,16 @@ ver() {
 new=$(ver HEAD < "$gradle")
 old=$(git show "$base:$gradle" | ver "$base")
 
-changed=$(git diff --name-only "$base"...HEAD -- android ':(exclude)android/app/src/test')
+changed=$(git diff --name-only "$base"...HEAD -- android .github/workflows/build.yml \
+	':(exclude)android/app/src/test' ':(exclude,glob)**/*.md')
 
 if [ "$new" = "$old" ]; then
+	if [ -n "$changed" ] && [ "${NO_RELEASE:-}" = true ]; then
+		echo "::notice::the app or its build changed, versionName stays $old: the no-release" \
+			"label says the APKs do not change"
+		echo "$changed"
+		exit 0
+	fi
 	if [ -n "$changed" ]; then
 		echo "::error::the app or its build changed, versionName is still $old:" \
 			"bump PATCH (fix) or MINOR (feature) and add its CHANGELOG.md section"
