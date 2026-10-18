@@ -2,6 +2,8 @@ name: Build
 on:
   push:
   pull_request:
+    # labeled / unlabeled: the version check reads the no-release label
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   workflow_dispatch:
     inputs:
       commit_hash:
@@ -24,8 +26,9 @@ permissions:
   contents: read
 
 jobs:
-  # Pull requests: a change to the app or its build comes with a new versionName
-  # (MAJOR.MINOR.PATCH) and its CHANGELOG.md section (.github/check-version.sh, #230)
+  # Pull requests: a change to the app or its build (android/, this workflow) comes with a new
+  # versionName (MAJOR.MINOR.PATCH) and its CHANGELOG.md section (.github/check-version.sh, #230);
+  # the no-release label lets a change that keeps the APKs as they are through without one (#239)
   version:
     # basic keeps its own workflow and version file (app/build.gradle)
     if: github.event_name == 'pull_request' && github.base_ref == 'v2'
@@ -40,6 +43,9 @@ jobs:
       # base it was made from, so both versions come from the same base.
       - name: App changes come with a new version
         run: .github/check-version.sh HEAD^1
+        env:
+          # a change that leaves the APKs as they are may skip the new version
+          NO_RELEASE: ${{ contains(github.event.pull_request.labels.*.name, 'no-release') }}
 
   # Unit tests and lint; also runs for pull requests from forks (no secrets needed)
   test:
