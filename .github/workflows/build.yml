@@ -57,8 +57,8 @@ jobs:
           path: ${{ steps.vars.outputs.name }}.apk
 
   # The one release, "latest" (#194, #229), shared with v2: basic replaces only decoder.apk
-  # and its line in the notes, keeps the tag and the title. A new
-  # version (not every build) goes to Telegram. The concurrency group is shared with v2's
+  # and its line in the notes, keeps the tag and the title. Nothing goes to Telegram from
+  # basic: the channel gets the v2 APK only (#240). The concurrency group is shared with v2's
   # workflow: one publish at a time. The script is the same as on v2.
   publish:
     needs: build
@@ -86,23 +86,4 @@ jobs:
         run: |
           VER=$(sed -n 's/^[[:space:]]*versionName[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' app/build.gradle)
           [ -n "$VER" ] || { echo "::error::no versionName in app/build.gradle"; exit 1; }
-          echo "VER=$VER" >> "$GITHUB_ENV"
           .github/publish-latest.sh basic "$VER" dist/decoder.apk
-
-      # Organization secrets; a failed upload is a warning, not a failed release
-      - name: Telegram
-        if: steps.publish.outputs.new == 'true'
-        env:
-          TG_TOKEN: ${{ secrets.TELEGRAM_TOKEN_BOT_OPENIPC }}
-          TG_CHANNEL: ${{ secrets.TELEGRAM_CHANNEL_OPENIPC_DEV }}
-        run: |
-          if [ -z "$TG_TOKEN" ] || [ -z "$TG_CHANNEL" ]; then
-            echo "::warning::Telegram secrets are not available, version not announced"; exit 0
-          fi
-          CAPTION=$(printf 'Decoder (legacy basic) %s\nCommit: %s\nBranch: %s\nTime: %s\n\n%s' "$VER" "${GITHUB_SHA::7}" \
-            "${GITHUB_REF_NAME}" "$(date -u '+%Y-%m-%d %H:%M:%S UTC')" \
-            "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/latest")
-          HTTP=$(curl -sS -o tg.json -w '%{http_code}' "https://api.telegram.org/bot${TG_TOKEN}/sendDocument" \
-            -F chat_id="$TG_CHANNEL" -F caption="$CAPTION" -F document=@dist/decoder.apk) || HTTP=000
-          echo "Telegram response: $HTTP"
-          [ "$HTTP" = 200 ] || echo "::warning::Telegram upload failed (HTTP $HTTP)"
