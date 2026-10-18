@@ -1,0 +1,41 @@
+# version.yml — the version check of pull requests to v2 (#230, #239, #244)
+#
+# A change to the app or its build (android/, build.yml) comes with a new
+# versionName (MAJOR.MINOR.PATCH) and its CHANGELOG.md section, unless the
+# no-release label says the APKs do not change. A workflow of its own:
+# adding or removing a label re-runs this check, not the build. basic keeps
+# its own workflow and version file (app/build.gradle).
+
+name: Version
+
+on:
+  pull_request:
+    branches: [v2]
+    # labeled / unlabeled: the check reads the no-release label
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+# a newer event of the same pull request cancels the older check
+concurrency:
+  group: version-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version:
+    name: Version bump
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The checkout is the pull request's merge commit: its first parent is the
+      # base it was made from, so both versions come from the same base.
+      - name: App changes come with a new version
+        run: .github/check-version.sh HEAD^1
+        env:
+          # a change that leaves the APKs as they are may skip the new version
+          NO_RELEASE: ${{ contains(github.event.pull_request.labels.*.name, 'no-release') }}

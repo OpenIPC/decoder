@@ -16,6 +16,10 @@
 # 2.xx versions before MAJOR.MINOR.PATCH stay valid until the next app
 # change.
 #
+# CI runs it from .github/workflows/version.yml (#244), a workflow of its own
+# that also re-runs on a label change; version.yml and publish-latest.sh are
+# CI, not build.
+#
 # Usage: .github/check-version.sh [BASE]   (default origin/v2; CI passes
 # HEAD^1, the base side of the pull request's merge commit)
 #
