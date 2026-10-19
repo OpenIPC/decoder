@@ -60,6 +60,12 @@ class MediaCodecManager {
     private volatile int rotation;
     /** The turn the current decoder applies: {@link #rotation} where Android 6+ can, else 0. */
     private volatile int appliedRotation;
+    /** Mirror the picture (#226): the decoder renders through {@link GlMirror}. */
+    private volatile boolean mirror;
+    /** The GL path of the current decoder (decoderLock), released after the decoder. */
+    private GlMirror glMirror;
+    /** The current decoder draws mirrored. */
+    private volatile boolean mirrored;
 
     /** Frames rendered so far (#82): with the frames received this gives the real decode rate. */
     private volatile int framesOut;
@@ -269,6 +275,25 @@ class MediaCodecManager {
         rotation = ((degreesCcw % 360) + 360) % 360;
     }
 
+    /** See {@link #mirror}; takes effect with the next decoder. */
+    void setMirror(boolean on) {
+        mirror = on;
+    }
+
+    /** The current decoder's picture is mirrored (#226). */
+    boolean isMirrored() { return mirrored && decoder != null; }
+
+    /** Detach the GL path of the current decoder (decoderLock held), like {@link #takeSlot}. */
+    private GlMirror takeMirror() {
+        GlMirror g = glMirror;
+        glMirror = null;
+        return g;
+    }
+
+    private static void releaseMirror(GlMirror g) {
+        if (g != null) g.release();
+    }
+
     /** Enable or disable decoding; disabling also releases the decoder. */
     /**
      * Enable or disable decoding. Never blocks the caller (the UI thread): disabling only
@@ -283,13 +308,17 @@ class MediaCodecManager {
         if (target == null) return;
         new Thread(() -> {
             String slot;
+            GlMirror gl;
             synchronized (decoderLock) {
                 if (decoder != target) return; // already replaced or released
                 decoder = null;
                 slot = takeSlot();
+                gl = takeMirror();
                 retry.onSuccess();
             }
             releaseNow(target);
+            // After the decoder: its output must be gone before GL leaves the surface
+            releaseMirror(gl);
             releaseSlot(slot);
         }, "decoder-release").start();
     }
@@ -299,8 +328,11 @@ class MediaCodecManager {
         try { codec.release(); } catch (Exception ignored) {}
     }
 
-    private static void releaseAsync(MediaCodec codec) {
-        new Thread(() -> releaseNow(codec), "decoder-release").start();
+    private static void releaseAsync(MediaCodec codec, GlMirror gl) {
+        new Thread(() -> {
+            releaseNow(codec);
+            releaseMirror(gl);
+        }, "decoder-release").start();
     }
 
     /** Release the decoder on purpose (codec switch, camera switch): no back-off. */
@@ -322,6 +354,7 @@ class MediaCodecManager {
             if (codec == null) return;
             decoder = null;
             String slot = takeSlot();
+            GlMirror gl = takeMirror();
             Log.i(TAG, "Close video decoder");
             try {
                 codec.stop();
@@ -329,6 +362,7 @@ class MediaCodecManager {
             } catch (Exception e) {
                 Log.e(TAG, "Decoder close exception", e);
             }
+            releaseMirror(gl);
             releaseSlot(slot);
         }
     }
@@ -379,6 +413,7 @@ class MediaCodecManager {
         final String slot = software ? softwareSlot(type) : type;
 
         MediaCodec local;
+        GlMirror gl = null;
         try {
             if (software) {
                 Log.i(TAG, "Start software video decoder " + softwareName
@@ -390,19 +425,35 @@ class MediaCodecManager {
                 learnLimits(local, type);
             }
             int turn = rotation;
-            if (turn != 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Surface target = s;
+            if (mirror) {
+                // Mirrored (#226): drawn with GL, which turns the picture as well
+                try {
+                    gl = GlMirror.create(s, turn, true);
+                    target = gl.input();
+                    Log.i(TAG, "Mirrored picture" + (turn != 0 ? ", turned " + turn
+                            + "\u00b0 counter-clockwise" : "") + " (drawn with OpenGL ES)");
+                } catch (Exception e) {
+                    Log.w(TAG, "Mirror unavailable, the picture is shown as it comes: "
+                            + e.getMessage());
+                    gl = null;
+                }
+            }
+            if (gl == null && turn != 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 // The decoder turns its output on the surface: clockwise degrees here (#201)
                 format.setInteger(MediaFormat.KEY_ROTATION, (360 - turn) % 360);
-            } else {
+            } else if (gl == null) {
                 turn = 0;
             }
             appliedRotation = turn;
             try {
-                local.configure(format, s, null, 0);
+                local.configure(format, target, null, 0);
                 local.start();
                 if (listener != null) listener.onDecoderStarted();
             } catch (Exception e) {
                 local.release();
+                releaseMirror(gl);
+                gl = null;
                 throw e;
             }
         } catch (Exception e) {
@@ -421,10 +472,12 @@ class MediaCodecManager {
             // Disabled meanwhile (pause/stop) or another thread was faster
             if (decoder != null || !enabled || gen != lifecycle) {
                 InstanceBudget.release(slot);
-                releaseAsync(local);
+                releaseAsync(local, gl);
                 return;
             }
             decoder = local;
+            glMirror = gl;
+            mirrored = gl != null;
             // A software decoder holds a slot of its own budget, not of the hardware one
             heldMime = slot;
             softwareInUse = software;
@@ -499,11 +552,13 @@ class MediaCodecManager {
                 } catch (Exception e) {
                     decoder = null;
                     String slot = takeSlot();
+                    GlMirror gl = takeMirror();
                     retry.onFailure(nowMs());
                     Log.e(TAG, "Codec exception, retry in "
                             + DecoderRetry.delayMs(retry.failures()) + " ms: " + e.getMessage());
                     try { codec.stop(); } catch (Exception ignored) {}
                     try { codec.release(); } catch (Exception ignored) {}
+                    releaseMirror(gl);
                     releaseSlot(slot);
                     if (listener != null) listener.onDecoderFailed();
                 }

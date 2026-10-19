@@ -44,15 +44,17 @@ final class JpegRenderer {
 
     /**
      * Shows one frame on {@code s}, turned {@code rotate} degrees counter-clockwise (0, 90,
-     * 180 or 270, #200). Returns its {width, height} as shown (turned) when it is on screen,
+     * 180 or 270, #200), then flipped left↔right on the screen when {@code mirror} (#226). Returns its {width, height} as shown (turned) when it is on screen,
      * null when not (yet). {@code current} is false once the stream or the surface has been
      * replaced.
      */
-    int[] render(Frame frame, Surface s, int rotate, JpegCodec.Current current) {
+    int[] render(Frame frame, Surface s, int rotate, boolean mirror, JpegCodec.Current current) {
         if (s == null || !s.isValid() || !current.holds()) return null;
         // The hardware JPEG decoder first, where there is one (#132); it turns the frame itself
-        // from Android 6 on (#201), before that a turned frame is drawn by the app (#200)
-        boolean hwTurns = rotate == 0 || Build.VERSION.SDK_INT >= Build.VERSION_CODES.M;
+        // from Android 6 on (#201), before that a turned frame is drawn by the app (#200). It
+        // cannot mirror: a mirrored frame is drawn by the app (#226)
+        boolean hwTurns = !mirror
+                && (rotate == 0 || Build.VERSION.SDK_INT >= Build.VERSION_CODES.M);
         if (hwTurns && !hwFailed && !drawn && JpegCodec.candidate() != null) {
             int[] size = JpegAssembler.size(frame.data(), frame.length());
             if (size != null) {
@@ -90,6 +92,8 @@ final class JpegRenderer {
             Canvas c = s.lockCanvas(null);
             try {
                 c.drawColor(Color.BLACK);
+                // Flipped on the screen, after the turn (#226)
+                if (mirror) c.scale(-1f, 1f, c.getWidth() / 2f, c.getHeight() / 2f);
                 if (rotate == 0) {
                     c.drawBitmap(b, null, new Rect(0, 0, c.getWidth(), c.getHeight()), paint);
                 } else {

@@ -98,6 +98,9 @@ class RtspClient implements RtspSession.Callback {
     /** Degrees counter-clockwise the MJPEG frames are turned (#200), 0 for none. */
     int rotate() { return session.rotate(); }
     void setSlotTurn(int rotate) { session.setSlotTurn(rotate); }
+    /** The slot's Mirror (#226). */
+    boolean mirror() { return session.mirror(); }
+    void setSlotMirror(boolean on) { session.setSlotMirror(on); }
 
     void start() {
         nalAssembler.reset();

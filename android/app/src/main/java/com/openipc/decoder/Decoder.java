@@ -140,6 +140,8 @@ public class Decoder extends Activity
     private final Transport.Mode[] mTransports = new Transport.Mode[CAM_COUNT];
     /** Per slot (#201): degrees counter-clockwise, -1 for Auto (from the URL). */
     private final int[] mRotates = new int[CAM_COUNT];
+    /** Per slot (#226): the picture flipped left↔right. */
+    private final boolean[] mMirrors = new boolean[CAM_COUNT];
     private int mActive;
     private volatile String mHost;
     private String mVersion;
@@ -212,12 +214,9 @@ public class Decoder extends Activity
         // --- Create managers ---
         videoDecoder = new MediaCodecManager(new MediaCodecManager.Listener() {
             @Override public void onResolutionChanged(int w, int h) {
-                // The decoder turns the picture (#201, Android 6+ as in MediaCodecManager): a
-                // quarter turn swaps its sides
-                RtspClient c = rtspClient;
-                int r = c != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
-                        ? c.rotate() : 0;
-                if (r == 90 || r == 270) updateResolution(h, w);
+                // A quarter turn by the decoder (#201, Android 6+) or by the mirror's GL path
+                // (#226, any version) swaps the picture's sides
+                if (videoDecoder.swapsSides()) updateResolution(h, w);
                 else updateResolution(w, h);
             }
             @Override public void onDecoderStarted() { removeClearOverlay(); }
@@ -591,7 +590,7 @@ public class Decoder extends Activity
 
     @Override
     public void onShowSettings() {
-        menuManager.showUrlEditor(mActive, mHosts, mTransports, mRotates);
+        menuManager.showUrlEditor(mActive, mHosts, mTransports, mRotates, mMirrors);
     }
 
     @Override
@@ -606,12 +605,14 @@ public class Decoder extends Activity
     private void configureClient() {
         rtspClient.configure(mHost, mUserAgent, mTransports[mActive]);
         rtspClient.setSlotTurn(mRotates[mActive]);
+        rtspClient.setSlotMirror(mMirrors[mActive]);
     }
 
     private void createDecoder() {
         videoDecoder.setSurface(mVideoSurface);
         RtspClient c = rtspClient;
         videoDecoder.setRotation(c != null ? c.rotate() : 0);
+        videoDecoder.setMirror(c != null && c.mirror());
         videoDecoder.createDecoder(codecH265);
     }
 
@@ -652,6 +653,7 @@ public class Decoder extends Activity
             // Auto for a slot that has never stored one (#112)
             mTransports[i] = Transport.Mode.stored(pref.getString("transport_" + i, null));
             mRotates[i] = pref.getInt("rotate_" + i, -1);
+            mMirrors[i] = pref.getBoolean("mirror_" + i, false);
             // Plain URLs from older versions are re-saved encrypted right away
             if (credentials.needsMigration(stored)) {
                 if (migrate == null) migrate = pref.edit();
@@ -715,6 +717,7 @@ public class Decoder extends Activity
                     credentials.sealForSlot(mHosts[i], mUnreadable[i], DEFAULT_URL));
             edit.putString("transport_" + i, mTransports[i].name());
             edit.putInt("rotate_" + i, mRotates[i]);
+            edit.putBoolean("mirror_" + i, mMirrors[i]);
         }
         edit.apply();
 
@@ -1025,6 +1028,7 @@ public class Decoder extends Activity
             quadCells[i] = new QuadCell(i, url, mode, quadViews[i], framePool, mUserAgent,
                     index -> runOnUiThread(() -> removeQuadOverlay(index)));
             quadCells[i].setSlotTurn(i < CAM_COUNT ? mRotates[i] : -1);
+            quadCells[i].setSlotMirror(i < CAM_COUNT && mMirrors[i]);
             quadCells[i].start();
         }
         quadAudio = getSharedPreferences("settings", MODE_PRIVATE).getInt("quad_audio", -1);
@@ -1629,6 +1633,7 @@ public class Decoder extends Activity
             // Turned counter-clockwise, "size" is the turned one (#200, #201)
             int rotate = rtspClient != null ? rtspClient.rotate() : 0;
             if (rotate != 0) single.put("rotate", rotate);
+            if (rtspClient != null && rtspClient.mirror()) single.put("mirror", true);
             m.put("single", single);
         }
         QuadCell[] cells = quadCells;
@@ -1674,6 +1679,7 @@ public class Decoder extends Activity
                     Map<String, Object> hb = cell.heartbeatStats();
                     if (hb != null) c.put("heartbeat", hb);
                     if (cell.rotate() != 0) c.put("rotate", cell.rotate());
+                    if (cell.mirror()) c.put("mirror", true);
                 }
                 list.add(c);
             }
@@ -2291,7 +2297,7 @@ public class Decoder extends Activity
         Surface s = mVideoSurface;
         RtspClient client = rtspClient;
         int rotate = client != null ? client.rotate() : 0;
-        int[] size = jpegRenderer.render(frame, s, rotate,
+        int[] size = jpegRenderer.render(frame, s, rotate, client != null && client.mirror(),
                 () -> gen == listenerGen && s == mVideoSurface);
         if (size != null) jpegShown(size[0], size[1]);
         return size != null;
