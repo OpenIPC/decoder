@@ -122,7 +122,9 @@ One entry per video decoder and MIME type (encoders are left out).
 | `transport_mode` | the slot's setting: `TCP`, `UDP`, `AUTO`, `MULTICAST`             |
 | `video`          | a frame was shown within the last 2 s                             |
 | `status`         | the status text on screen, or the session state                   |
-| `size`           | `WxH`, once known                                                 |
+| `size`           | `WxH` of the picture shown, only while `video` is true            |
+| `stream_size`    | `WxH` the camera sends, from the SPS (H.264, H.265)               |
+| `decoder`        | the decoder in use, e.g. `OMX.rk.video_decoder.avc`               |
 | `codec`          | `H.264`, `H.265` or `MJPEG`                                       |
 | `audio`          | audio codec: `NONE`, `AAC`, `LATM`, `OPUS`, `PCMU`, `PCMA`, `PCM` |
 | `out_fps`        | frames shown in the last second                                   |

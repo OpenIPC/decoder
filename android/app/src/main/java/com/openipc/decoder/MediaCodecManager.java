@@ -57,12 +57,35 @@ class MediaCodecManager {
     // Surface set by the owning activity
     private volatile Surface surface;
     /**
-     * Single view (#166): announce the largest picture the decoder supports (up to 4K) as
-     * KEY_MAX_WIDTH/HEIGHT. Configured at 1280×720 without it, some hardware decoders
-     * (Rockchip OMX) never give a frame for streams above 1080p, e.g. 2304×1296. Off in the
-     * grid: nine decoders with 4K buffers would not fit in memory.
+     * Single view (#166): the decoder is configured for the stream's size from its SPS, and
+     * KEY_MAX_WIDTH/HEIGHT covers it. Configured at 1280×720, some hardware decoders (Rockchip
+     * OMX) never give a frame for streams above 1080p, e.g. 2304×1296. Off in the grid: nine
+     * decoders with large buffers would not fit in memory.
      */
     private volatile boolean largeFrames;
+    /** Picture size from the last SPS (largeFrames only); 0 while unknown. */
+    private volatile int streamWidth;
+    private volatile int streamHeight;
+    /** An SPS arrived (decoderLock): with largeFrames no decoder is created before one. */
+    private boolean spsSeen;
+    /** The last H.265 VPS (decoderLock): a decoder created at the SPS needs it first. */
+    private byte[] lastVps;
+    /** Largest picture the current decoder was set up for; 0 when not known. */
+    private int confWidth;
+    private int confHeight;
+    /**
+     * The hardware decoder runs at a size it does not declare: without a frame by
+     * {@link #probationUntilMs} the stream goes to a software decoder (#166).
+     */
+    private boolean probation;
+    private long probationUntilMs;
+    private int probationFrames;
+    /** How long a decoder on probation may go without a frame once it has its parameter sets. */
+    static final long PROBATION_MS = 5_000;
+    /** "mime WxH" of a stream the hardware decoder gave no frame for: software from then on. */
+    private volatile String softwareFor;
+    /** Name of the current decoder, for /stats.json. */
+    private volatile String decoderName;
     /** Degrees counter-clockwise the decoder turns the picture (#201); 0 for none. */
     private volatile int rotation;
     /** The turn the current decoder applies: {@link #rotation} where Android 6+ can, else 0. */
@@ -112,6 +135,13 @@ class MediaCodecManager {
         return t == 90 || t == 270;
     }
     boolean hasDecoder() { return decoder != null; }
+    /** Picture size from the stream's SPS ({width, height}), or null while unknown (#166). */
+    int[] streamSize() {
+        int w = streamWidth, h = streamHeight;
+        return w > 0 && h > 0 ? new int[]{w, h} : null;
+    }
+    /** Name of the decoder in use, or null. */
+    String decoderName() { return decoder != null ? decoderName : null; }
 
     /**
      * Decoders alive in this process per MIME type, against the declared limit of the codec
@@ -292,6 +322,22 @@ class MediaCodecManager {
         return null;
     }
 
+    /** The codec declares the size; unknown capabilities count as declared. */
+    static boolean declaresSize(MediaCodec codec, String mime, int width, int height) {
+        try {
+            MediaCodecInfo.VideoCapabilities video =
+                    codec.getCodecInfo().getCapabilitiesForType(mime).getVideoCapabilities();
+            return video == null || video.isSizeSupported(width, height);
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    /** Above 1080p: a size some hardware decoders cannot be left to discover (#166). */
+    static boolean aboveFullHd(int width, int height) {
+        return (long) width * height > 1920L * 1088;
+    }
+
     /** See {@link #rotation}; takes effect with the next decoder. */
     void setRotation(int degreesCcw) {
         rotation = ((degreesCcw % 360) + 360) % 360;
@@ -347,6 +393,8 @@ class MediaCodecManager {
             MediaCodec codec = decoder;
             // The next stream must not look live because of this one's last frame
             lastFrameMs = 0;
+            // Nor be set up for this one's size (#166)
+            forgetStream();
             if (codec == null) return;
             decoder = null;
             String slot = takeSlot();
@@ -359,6 +407,15 @@ class MediaCodecManager {
             }
             releaseSlot(slot);
         }
+    }
+
+    /** Stream size and parameter sets of the last stream (decoderLock held). */
+    private void forgetStream() {
+        spsSeen = false;
+        streamWidth = 0;
+        streamHeight = 0;
+        lastVps = null;
+        probation = false;
     }
 
     private static long nowMs() {
@@ -380,12 +437,26 @@ class MediaCodecManager {
 
         String type = codecH265 ? "video/hevc" : "video/avc";
 
-        MediaFormat format = MediaFormat.createVideoFormat(type, 1280, 720);
+        // Single view: the stream's own size from its SPS (#166)
+        final int width = largeFrames ? streamWidth : 0;
+        final int height = largeFrames ? streamHeight : 0;
+        final boolean sized = width > 0 && height > 0;
+        MediaFormat format = MediaFormat.createVideoFormat(type,
+                sized ? width : 1280, sized ? height : 720);
         // Must hold the largest NAL unit the assembler can deliver
         format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, MAX_NAL_SIZE);
 
         String softwareName = null;
-        if (!InstanceBudget.tryAcquire(type)) {
+        boolean noHardwareFrame = false;
+        if (sized && sizeKey(type, width, height).equals(softwareFor)) {
+            // The hardware decoder gave no frame at this size: a software one, if it has room
+            String sw = softwareDecoder(type);
+            if (sw != null && InstanceBudget.tryAcquire(softwareSlot(type))) {
+                softwareName = sw;
+                noHardwareFrame = true;
+            }
+        }
+        if (softwareName == null && !InstanceBudget.tryAcquire(type)) {
             int limit = InstanceBudget.limit(type);
             softwareName = limit >= 0 && allowSoftware ? softwareDecoder(type) : null;
             // Software decoders have their own limit: beyond it, the hardware one is reported
@@ -407,22 +478,38 @@ class MediaCodecManager {
         final String slot = software ? softwareSlot(type) : type;
 
         MediaCodec local;
+        boolean onProbation = false;
+        int maxW = 0, maxH = 0;
         try {
             if (software) {
-                Log.i(TAG, "Start software video decoder " + softwareName
-                        + " (hardware limit reached, key frames only)");
+                Log.i(TAG, "Start software video decoder " + softwareName + (noHardwareFrame
+                        ? " (no frame from the hardware one at " + width + "×" + height + ")"
+                        : " (hardware limit reached, key frames only)"));
                 local = MediaCodec.createByCodecName(softwareName);
             } else {
                 Log.i(TAG, "Start video decoder (" + type + ")");
                 local = MediaCodec.createDecoderByType(type);
                 learnLimits(local, type);
-                int[] max = largeFrames ? maxFrameSize(local, type) : null;
-                if (max != null) {
-                    format.setInteger(MediaFormat.KEY_MAX_WIDTH, max[0]);
-                    format.setInteger(MediaFormat.KEY_MAX_HEIGHT, max[1]);
-                    Log.i(TAG, "Decoder " + local.getName() + ": pictures up to "
-                            + max[0] + "×" + max[1]);
+            }
+            if (largeFrames) {
+                // Room for the stream and for the largest declared size, so the picture may
+                // still grow without a new decoder
+                int[] max = maxFrameSize(local, type);
+                maxW = Math.max(sized ? width : 0, max != null ? max[0] : 0);
+                maxH = Math.max(sized ? height : 0, max != null ? max[1] : 0);
+                if (maxW > 0 && maxH > 0) {
+                    format.setInteger(MediaFormat.KEY_MAX_WIDTH, maxW);
+                    format.setInteger(MediaFormat.KEY_MAX_HEIGHT, maxH);
                 }
+                boolean declared = !sized || declaresSize(local, type, width, height);
+                // Probation only where a software decoder can take over, and once per size
+                onProbation = !software && sized && !declared && aboveFullHd(width, height)
+                        && !sizeKey(type, width, height).equals(softwareFor)
+                        && softwareDecoder(type) != null;
+                Log.i(TAG, "Decoder " + local.getName() + ": stream "
+                        + (sized ? width + "×" + height : "size unknown")
+                        + (maxW > 0 ? ", pictures up to " + maxW + "×" + maxH : "")
+                        + (declared ? "" : ", a size it does not declare"));
             }
             int turn = rotation;
             if (turn != 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -465,7 +552,17 @@ class MediaCodecManager {
             softwareInUse = software;
             awaitingConfig = true;
             configSeen = 0;
+            decoderName = local.getName();
+            confWidth = maxW;
+            confHeight = maxH;
+            probation = onProbation;
+            probationUntilMs = 0;
+            probationFrames = framesOut;
         }
+    }
+
+    private static String sizeKey(String mime, int width, int height) {
+        return mime + " " + width + "x" + height;
     }
 
     /**
@@ -487,64 +584,141 @@ class MediaCodecManager {
             flag = MediaCodec.BUFFER_FLAG_CODEC_CONFIG;
         }
 
+        boolean isSps = fragment == (codecH265 ? H265_NAL_SPS : H264_NAL_SPS);
+        boolean isVps = codecH265 && fragment == H265_NAL_VPS;
+        // Single view: the stream's size, before any decoder is set up for it (#166)
+        int[] spsSize = largeFrames && isSps
+                ? SpsParser.size(buffer.data(), 4, buffer.length() - 4, codecH265) : null;
+
         boolean needCreate = false;
         synchronized (decoderLock) {
             MediaCodec codec = decoder;
+            if (largeFrames) {
+                if (isSps) {
+                    spsSeen = true;
+                    if (spsSize != null) {
+                        streamWidth = spsSize[0];
+                        streamHeight = spsSize[1];
+                    }
+                } else if (isVps) {
+                    lastVps = java.util.Arrays.copyOf(buffer.data(), buffer.length());
+                }
+            }
             if (!enabled) {
                 // Paused: the decoder is being released, feed nothing
                 return false;
             } else if (codec == null) {
+                // Single view: the decoder waits for the SPS, which gives its size (#166)
+                if (largeFrames && !spsSeen) return false;
                 needCreate = retry.mayCreate(nowMs());
             } else if (awaitingConfig && !isConfigNal) {
                 // Frames before the full parameter set only produce errors in a new decoder
                 return false;
+            } else if (largeFrames && spsSize != null && confWidth > 0
+                    && (spsSize[0] > confWidth || spsSize[1] > confHeight)) {
+                // The picture outgrew the decoder: a new one set up for it takes this SPS
+                Log.i(TAG, "Stream " + spsSize[0] + "×" + spsSize[1] + " is larger than "
+                        + confWidth + "×" + confHeight + ": new decoder");
+                dropDecoder(codec);
+                return retry.mayCreate(nowMs());
+            } else if (probation && probationExpired()) {
+                Log.w(TAG, "No frame from " + decoderName + " at " + streamWidth + "×"
+                        + streamHeight + " in " + PROBATION_MS / 1000 + " s: software decoder");
+                softwareFor = sizeKey(codecH265 ? "video/hevc" : "video/avc",
+                        streamWidth, streamHeight);
+                dropDecoder(codec);
+                // The next decoder starts at the next SPS, which comes with a key frame
+                return false;
             } else {
                 if (isConfigNal) {
-                    configSeen |= 1 << fragment;
                     int needed = codecH265
                             ? (1 << H265_NAL_VPS) | (1 << H265_NAL_SPS) | (1 << H265_NAL_PPS)
                             : (1 << H264_NAL_SPS) | (1 << H264_NAL_PPS);
-                    if ((configSeen & needed) == needed) awaitingConfig = false;
+                    // A decoder created at the SPS has missed the VPS before it (#166)
+                    if (isSps && awaitingConfig && (configSeen & (1 << H265_NAL_VPS)) == 0
+                            && codecH265 && lastVps != null) {
+                        configSeen |= 1 << H265_NAL_VPS;
+                        try {
+                            feed(codec, lastVps, lastVps.length, MediaCodec.BUFFER_FLAG_CODEC_CONFIG);
+                        } catch (Exception e) {
+                            failDecoder(codec, e);
+                            return false;
+                        }
+                    }
+                    configSeen |= 1 << fragment;
+                    if ((configSeen & needed) == needed && awaitingConfig) {
+                        awaitingConfig = false;
+                        // The probation runs from the first key frame on
+                        if (probation) probationUntilMs = nowMs() + PROBATION_MS;
+                    }
                 }
                 try {
-                    // No free input buffer at once: give decoded frames back (the decoder may
-                    // be waiting for output space) and try again, for up to INPUT_WAIT_MS.
-                    // Dropping a NAL unit corrupts the picture until the next key frame (#89)
-                    int inputBufferId = codec.dequeueInputBuffer(INPUT_POLL_US);
-                    long waitUntil = nowMs() + INPUT_WAIT_MS;
-                    // A close or a pause waiting for the lock ends the wait at once (UI thread)
-                    while (inputBufferId < 0 && nowMs() < waitUntil && enabled
-                            && closeWaiting.get() == 0) {
-                        drainOutput(codec);
-                        inputBufferId = codec.dequeueInputBuffer(INPUT_POLL_US);
-                    }
-                    if (inputBufferId >= 0) {
-                        ByteBuffer inputBuffer = codec.getInputBuffer(inputBufferId);
-                        if (inputBuffer != null) {
-                            inputBuffer.clear();
-                            inputBuffer.put(buffer.data(), 0, buffer.length());
-                            codec.queueInputBuffer(inputBufferId, 0,
-                                    buffer.length(), System.nanoTime() / 1000, flag);
-                        }
-                    } else if (enabled && closeWaiting.get() == 0) {
-                        // Only a full wait is a decoder loss; a close or pause cut it short
-                        inputDropped++;
-                    }
-                    drainOutput(codec);
+                    feed(codec, buffer.data(), buffer.length(), flag);
                 } catch (Exception e) {
-                    decoder = null;
-                    String slot = takeSlot();
-                    retry.onFailure(nowMs());
-                    Log.e(TAG, "Codec exception, retry in "
-                            + DecoderRetry.delayMs(retry.failures()) + " ms: " + e.getMessage());
-                    try { codec.stop(); } catch (Exception ignored) {}
-                    try { codec.release(); } catch (Exception ignored) {}
-                    releaseSlot(slot);
-                    if (listener != null) listener.onDecoderFailed();
+                    failDecoder(codec, e);
                 }
             }
         }
         return needCreate;
+    }
+
+    /**
+     * Queue one NAL unit (decoderLock held). No free input buffer at once: give decoded frames
+     * back (the decoder may be waiting for output space) and try again, for up to
+     * INPUT_WAIT_MS. Dropping a NAL unit corrupts the picture until the next key frame (#89).
+     */
+    private void feed(MediaCodec codec, byte[] data, int length, int flag) {
+        int inputBufferId = codec.dequeueInputBuffer(INPUT_POLL_US);
+        long waitUntil = nowMs() + INPUT_WAIT_MS;
+        // A close or a pause waiting for the lock ends the wait at once (UI thread)
+        while (inputBufferId < 0 && nowMs() < waitUntil && enabled
+                && closeWaiting.get() == 0) {
+            drainOutput(codec);
+            inputBufferId = codec.dequeueInputBuffer(INPUT_POLL_US);
+        }
+        if (inputBufferId >= 0) {
+            ByteBuffer inputBuffer = codec.getInputBuffer(inputBufferId);
+            if (inputBuffer != null) {
+                inputBuffer.clear();
+                inputBuffer.put(data, 0, length);
+                codec.queueInputBuffer(inputBufferId, 0, length, System.nanoTime() / 1000, flag);
+            }
+        } else if (enabled && closeWaiting.get() == 0) {
+            // Only a full wait is a decoder loss; a close or pause cut it short
+            inputDropped++;
+        }
+        drainOutput(codec);
+    }
+
+    /** The decoder failed while decoding (decoderLock held): release it, back off. */
+    private void failDecoder(MediaCodec codec, Exception e) {
+        decoder = null;
+        String slot = takeSlot();
+        retry.onFailure(nowMs());
+        Log.e(TAG, "Codec exception, retry in "
+                + DecoderRetry.delayMs(retry.failures()) + " ms: " + e.getMessage());
+        releaseNow(codec);
+        releaseSlot(slot);
+        if (listener != null) listener.onDecoderFailed();
+    }
+
+    /** Release a working decoder to replace it (decoderLock held): no back-off. */
+    private void dropDecoder(MediaCodec codec) {
+        decoder = null;
+        probation = false;
+        String slot = takeSlot();
+        releaseNow(codec);
+        releaseSlot(slot);
+    }
+
+    /** The decoder on probation has its parameter sets but no frame past the deadline. */
+    private boolean probationExpired() {
+        if (framesOut != probationFrames) {
+            // A frame came: the hardware decoder manages the size
+            probation = false;
+            return false;
+        }
+        return probationUntilMs > 0 && nowMs() > probationUntilMs;
     }
 
     /**
