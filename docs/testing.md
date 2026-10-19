@@ -29,11 +29,11 @@ Base pull requests on `v2`.
 
 What a `build` run publishes:
 
-| Branch    | Output                                                                                                                                                                                                                                |
-|-----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `v2`      | `decoder-v2.apk` and `decoder-v2-mapping.txt` in the [`latest`](https://github.com/OpenIPC/decoder/releases/tag/latest) release (replaced by every build); a message with the APK, version and commit to the OpenIPC Telegram channel |
-| `basic`   | `decoder.apk` and its mapping in `latest`; Telegram                                                                                                                                                                                   |
-| any other | workflow artifacts `decoder-<branch, / → ->` (APK) and `…-mapping` on the run page                                                                                                                                                    |
+| Branch    | Output                                                                                                                                                                                                                                             |
+|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `v2`      | `decoder-v2.apk` and `decoder-v2-mapping.txt` in the [`latest`](https://github.com/OpenIPC/decoder/releases/tag/latest) release (replaced by every build); the APK with its version and commit to the OpenIPC Telegram channel (new versions only) |
+| `basic`   | `decoder.apk` in `latest`; nothing to Telegram                                                                                                                                                                                                     |
+| any other | workflow artifacts `decoder-<branch, / → ->` (APK) and `…-mapping` on the run page                                                                                                                                                                 |
 
 Every run, `v2` and `basic` included, also keeps its mapping as the artifact `…-mapping`. Artifacts expire after 90 days.
 
@@ -47,10 +47,11 @@ CI is the reference: the project does not depend on local builds.
 
 ## Versions and releases
 
-- `v2` is **2.xx** (from 2.00). Every pull request that changes the app bumps `android/app/build.gradle` as its last commit before the merge: `versionName` +0.01, `versionCode` +1. Docs-only and CI-only pull requests do not.
-- `basic` keeps its 1.07.x line.
-- Development is continuous, so there is **no release per version** (#194). The [`latest`](https://github.com/OpenIPC/decoder/releases/tag/latest) release always holds the newest `v2` and `basic` builds. Every `v2` and `basic` build is also posted to the OpenIPC Telegram channel with its version and commit, and that is where their older builds can be found. Builds of other branches are only workflow artifacts of their runs (90 days).
-- **Test pre-releases**: to let a reporter test a branch, a pre-release named after the issue is made by hand from the branch's CI artifact, e.g. [`toys-187-test2`](https://github.com/OpenIPC/decoder/releases/tag/toys-187-test2) for #187. It is deleted when the test is over, or replaced by the next one.
+- Versions are **`MAJOR.MINOR.PATCH`** (`versionName` in `android/app/build.gradle`): PATCH for fixes and small changes, MINOR for a new feature, MAJOR for an incompatible change or a large update, only when the maintainer decides. Every pull request that changes the app or its build (`android/`, except the unit tests and Markdown files, and `.github/workflows/build.yml`, which holds build steps) bumps the version as its last commit before the merge: `versionName` by that rule and `versionCode` +1. Docs-only and test-only pull requests do not. A pull request that changes the app or the build but not the APKs (a test or publication step in the workflow, a comment) takes the `no-release` label instead and keeps the version. Numbers are not reserved for open pull requests: each one takes the next number when it is merged. CI checks this on every pull request to `v2` (`.github/check-version.sh` in the `version` workflow, `.github/workflows/version.yml`; adding or removing a label re-runs only this check, not the build): a new number must be canonical (no leading zeros), greater than the base one, and come with its own `CHANGELOG.md` section.
+- Until 2.17 `v2` counted **2.xx** (+0.01 per pull request); 2.17 is followed by 2.17.1 or 2.18.0. `basic` keeps its 1.7.x line (1.07.1 is 1.7.1).
+- **`CHANGELOG.md`** is the change history: the version bump commit of a pull request that changes the app adds the version's section (`## <version> — <date>`, newest first) in the same pull request.
+- Development is continuous, so there is **no release per version** (#194). The one release, [`latest`](https://github.com/OpenIPC/decoder/releases/latest), holds the newest `v2` and `basic` builds and is updated in place by both (`.github/publish-latest.sh`, #229): each branch replaces only its own files; a `v2` build moves the `latest` tag to the commit it built and sets the title `Decoder <version>`; the notes have one line per branch with its version and commit. The APK of every **new `v2` version** (not every build) is posted to the OpenIPC Telegram channel, where the older builds can be found; `basic` posts nothing there. Builds of other branches are only workflow artifacts of their runs (90 days).
+- **Test pre-releases**: to let a reporter test a branch, a pre-release named after the issue is made by hand from the branch's CI artifact (never from a local build), e.g. [`toys-187-test2`](https://github.com/OpenIPC/decoder/releases/tag/toys-187-test2) for #187. It is deleted when the test is over, or replaced by the next one.
 
   ```sh
   B=feat/my-branch                       # the branch to test
@@ -62,9 +63,9 @@ CI is the reference: the project does not depend on local builds.
     --title "… test build 1 (#187)" --notes "…"
   ```
 
-  The tag (`my-187-test1`) and the asset name are free to choose; the artifact is always named after the branch.
+  A test build never takes the place of `latest` or of another test build: always `--prerelease` (so it is never marked Latest and `releases/latest` keeps pointing at `latest`), a tag and an asset name of its own for every build (`<device>-<issue>-test<N>`, `decoder-<device>-test<N>.apk`, never `decoder-v2.apk` or `decoder.apk`); the artifact is always named after the branch.
 
-- The change history is the [merged pull requests](https://github.com/OpenIPC/decoder/pulls?q=is%3Apr+is%3Amerged+base%3Av2) and the [commits of `v2`](https://github.com/OpenIPC/decoder/commits/v2).
+- The change history is [`CHANGELOG.md`](../CHANGELOG.md); the details are in the [merged pull requests](https://github.com/OpenIPC/decoder/pulls?q=is%3Apr+is%3Amerged+base%3Av2).
 - The installed version and build hash show in the menu (under **Exit**, `v2.10, <hash>`) and in `/stats.json` (`version`, `git`).
 - Every build is `com.openipc.decoder` with the release signature, so a branch build installs over a release and keeps the settings.
 
