@@ -347,6 +347,9 @@ class MediaCodecManager {
 
     private void closeDecoderLocked() {
         synchronized (decoderLock) {
+            // A creation still running (another thread, older settings) is discarded when it
+            // ends: it must not replace the decoder the caller will make next (#226)
+            lifecycle++;
             retry.onSuccess();
             MediaCodec codec = decoder;
             // The next stream must not look live because of this one's last frame
@@ -414,6 +417,7 @@ class MediaCodecManager {
 
         MediaCodec local;
         GlMirror gl = null;
+        int turnApplied = 0;
         try {
             if (software) {
                 Log.i(TAG, "Start software video decoder " + softwareName
@@ -445,7 +449,7 @@ class MediaCodecManager {
             } else if (gl == null) {
                 turn = 0;
             }
-            appliedRotation = turn;
+            turnApplied = turn;
             try {
                 local.configure(format, target, null, 0);
                 local.start();
@@ -478,6 +482,8 @@ class MediaCodecManager {
             decoder = local;
             glMirror = gl;
             mirrored = gl != null;
+            // Only the decoder that stays sets these: a creation that lost must not (#226)
+            appliedRotation = turnApplied;
             // A software decoder holds a slot of its own budget, not of the hardware one
             heldMime = slot;
             softwareInUse = software;

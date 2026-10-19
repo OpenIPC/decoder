@@ -2386,6 +2386,12 @@ public class Decoder extends Activity
                         framePool.recycle(buffer);
                     } else if (buffer != null) {
                         if (videoDecoder.decodeFrame(buffer, codecH265, 0)) {
+                            // Restarted meanwhile (new settings): the new thread makes the
+                            // decoder, with the new turn and mirror (#226)
+                            if (gen != listenerGen) {
+                                framePool.recycle(buffer);
+                                break;
+                            }
                             createDecoder();
                             // The frame that triggered creation (often the SPS) goes in too
                             videoDecoder.decodeFrame(buffer, codecH265, 0);
