@@ -12,6 +12,14 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.17.1 — 2026-10-19
+
+- Single view: the decoder is set up for the stream's size from its SPS, so streams above
+  1080p (e.g. 2304×1296) play on hardware decoders that cannot find the size themselves; a
+  hardware decoder that gives no frame at a size it does not declare hands the stream to a
+  software one after 5 s. `/stats.json` shows `size` only while a picture is shown, and adds
+  `stream_size` and `decoder` (PR #220, #166).
+
 ## 2.17 — 2026-10-17
 
 - Turn in the camera settings (Auto, 0°, 90°, 180°, 270°), stored per slot; H.264/H.265 are
