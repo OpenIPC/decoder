@@ -63,7 +63,7 @@ A JPEG laid out like the screen, at the screen's resolution (at most 1920 wide, 
 
 ## Stream checks in the single view
 
-In the single view (and the U view) the page and the snapshot still show the whole grid ([#100](https://github.com/OpenIPC/decoder/issues/100)): the camera on screen is framed in blue, and every other configured slot gets a short stream check while the page is open. Its cell says what was found, for example `Stream OK · H.265 · 25 fps · 3.1 Mbit/s · checked 12 s ago`, or the error.
+In the single view (and the U view) the page and the snapshot still show the whole grid ([#100](https://github.com/OpenIPC/decoder/issues/100)): the camera on screen is framed in blue, its picture fitted into the cell with its own aspect ratio, as on the screen (a turned slot is not stretched, [#248](https://github.com/OpenIPC/decoder/issues/248)), and every other configured slot gets a short stream check while the page is open. Its cell says what was found, for example `Stream OK · H.265 · 25 fps · 3.1 Mbit/s · checked 12 s ago`, or the error.
 
 - A check connects, receives packets for about 3 s and does not decode.
 - Each slot is checked again about every 45 s, at most two checks run at a time, one new check starts every 2 s.

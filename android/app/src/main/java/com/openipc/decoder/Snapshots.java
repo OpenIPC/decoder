@@ -60,6 +60,27 @@ final class Snapshots {
         boolean ok;
         /** What the TV shows, in a grid drawn for the single view (#100): framed. */
         boolean onScreen;
+        /**
+         * Width / height of the picture as the screen shows it, fitted into the cell with
+         * black around it (the single view, e.g. a turned slot, #248); 0 fills the cell.
+         */
+        float aspect;
+    }
+
+    /**
+     * The largest rectangle of the given aspect ratio (width / height) centred in the cell,
+     * as {left, top, right, bottom}; the whole cell for 0 or a ratio within 1 % of its own.
+     */
+    static int[] fit(int left, int top, int right, int bottom, float aspect) {
+        int w = right - left, h = bottom - top;
+        if (aspect <= 0 || w <= 0 || h <= 0 || Math.abs(aspect * h / w - 1f) < 0.01f) {
+            return new int[] {left, top, right, bottom};
+        }
+        int fw = w, fh = h;
+        if (aspect * h > w) fh = Math.max(1, Math.round(w / aspect));
+        else fw = Math.max(1, Math.round(h * aspect));
+        int l = left + (w - fw) / 2, t = top + (h - fh) / 2;
+        return new int[] {l, t, l + fw, t + fh};
     }
 
     private static HandlerThread copyThread;
@@ -100,12 +121,20 @@ final class Snapshots {
             rects[i] = new Rect(col * width / side, row * height / side,
                     (col + 1) * width / side, (row + 1) * height / side);
         }
+        // Where each frame goes: its own aspect ratio inside the cell (#248)
+        Rect[] dst = new Rect[n];
+        for (int i = 0; i < n; i++) {
+            Cell c = cells.get(i);
+            Rect r = rects[i];
+            int[] f = fit(r.left, r.top, r.right, r.bottom, c != null ? c.aspect : 0);
+            dst[i] = new Rect(f[0], f[1], f[2], f[3]);
+        }
         // All copies are requested at once and run side by side, then awaited together
         Copy[] copies = new Copy[n];
         for (int i = 0; i < n; i++) {
             Cell c = cells.get(i);
             if (c != null && c.live && c.view != null) {
-                copies[i] = Copy.start(c.view, rects[i].width(), rects[i].height());
+                copies[i] = Copy.start(c.view, dst[i].width(), dst[i].height());
             }
         }
         long deadline = SystemClock.elapsedRealtime() + COPY_TIMEOUT_MS;
@@ -137,7 +166,7 @@ final class Snapshots {
             if (copies[i] != null && frame != null) copied++;
             boolean shown = c.live && frame != null;
             if (shown) {
-                canvas.drawBitmap(frame, null, r, frames);
+                canvas.drawBitmap(frame, null, dst[i], frames);
             }
             if (frame != null) frame.recycle();
             if (labels) {
