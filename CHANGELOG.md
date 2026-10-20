@@ -12,7 +12,13 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
-## 2.18.0 — 2026-10-19
+## 2.18.1 — 2026-10-20
+
+- Snapshot (`/snapshot.jpg`, the debug page): the single view's picture keeps its aspect ratio
+  in its cell, as on the screen, so a turned (portrait) slot is no longer stretched to 16:9
+  (#248).
+
+## 2.18.0 — 2026-10-20
 
 - Mirror in the camera settings, next to Turn: flips the picture left to right in the single
   view and the grid, for H.264, H.265 and MJPEG; a mirrored H.264/H.265 slot is drawn with
