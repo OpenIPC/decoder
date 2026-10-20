@@ -1500,6 +1500,10 @@ public class Decoder extends Activity
                             ? statusText.getText().toString() : c.live ? "Playing" : "No new frames";
                     // Copied with the grid cells, off the UI thread (#76)
                     if (c.live) c.view = mSurface;
+                    // As on the screen: a turned picture is not stretched to the cell (#248)
+                    if (mVideoWidth > 0 && mVideoHeight > 0) {
+                        c.aspect = (float) mVideoWidth / mVideoHeight;
+                    }
                 }
                 c.onScreen = onScreen(i);
                 cells.add(c);
