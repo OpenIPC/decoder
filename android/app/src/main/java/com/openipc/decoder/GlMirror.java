@@ -81,6 +81,8 @@ final class GlMirror implements SurfaceTexture.OnFrameAvailableListener {
     private SurfaceTexture surfaceTexture;
     private Surface input;
     private volatile boolean released;
+    /** eglInitialize() succeeded: tearDown() balances it with eglTerminate(). */
+    private boolean initialized;
 
     private GlMirror(int turnCcw, boolean mirror) {
         mvp = transform(turnCcw, mirror);
@@ -173,6 +175,7 @@ final class GlMirror implements SurfaceTexture.OnFrameAvailableListener {
         if (display == EGL14.EGL_NO_DISPLAY || !EGL14.eglInitialize(display, version, 0, version, 1)) {
             throw new IllegalStateException("EGL display: " + eglError());
         }
+        initialized = true;
         int[] attribs = {
                 EGL14.EGL_RED_SIZE, 8, EGL14.EGL_GREEN_SIZE, 8, EGL14.EGL_BLUE_SIZE, 8,
                 EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
@@ -270,9 +273,12 @@ final class GlMirror implements SurfaceTexture.OnFrameAvailableListener {
             // Destroying the EGL surface frees the view's surface for a plain decoder again
             if (window != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(display, window);
             if (context != EGL14.EGL_NO_CONTEXT) EGL14.eglDestroyContext(display, context);
+            // Android counts eglInitialize() per display: this only drops our reference, the
+            // other mirrored cells and the system renderer keep theirs (Qodo on #246)
+            if (initialized) EGL14.eglTerminate(display);
             EGL14.eglReleaseThread();
-            // No eglTerminate(): the display is shared with the other mirrored cells
         }
+        initialized = false;
         window = EGL14.EGL_NO_SURFACE;
         context = EGL14.EGL_NO_CONTEXT;
         display = EGL14.EGL_NO_DISPLAY;
