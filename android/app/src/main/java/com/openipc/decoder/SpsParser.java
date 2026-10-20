@@ -66,15 +66,16 @@ final class SpsParser {
         }
         b.ue(); // max_num_ref_frames
         b.u(1); // gaps_in_frame_num_value_allowed_flag
-        int widthMbs = b.ue() + 1;
-        int heightUnits = b.ue() + 1;
+        // In long: a malformed code must not wrap round to a small size (Qodo on #220)
+        long widthMbs = b.ueLong() + 1;
+        long heightUnits = b.ueLong() + 1;
         int frameMbsOnly = b.u(1);
         if (frameMbsOnly == 0) b.u(1); // mb_adaptive_frame_field_flag
         b.u(1); // direct_8x8_inference_flag
-        int width = widthMbs * 16;
-        int height = (2 - frameMbsOnly) * heightUnits * 16;
+        long width = widthMbs * 16;
+        long height = (2 - frameMbsOnly) * heightUnits * 16;
         if (b.u(1) == 1) {
-            int left = b.ue(), right = b.ue(), top = b.ue(), bottom = b.ue();
+            long left = b.ueLong(), right = b.ueLong(), top = b.ueLong(), bottom = b.ueLong();
             int arrayType = separatePlanes ? 0 : chroma;
             int cropX = arrayType == 1 || arrayType == 2 ? 2 : 1;
             int cropY = (arrayType == 1 ? 2 : 1) * (2 - frameMbsOnly);
@@ -114,10 +115,10 @@ final class SpsParser {
         b.ue(); // sps_seq_parameter_set_id
         int chroma = b.ue();
         boolean separatePlanes = chroma == 3 && b.u(1) == 1;
-        int width = b.ue();
-        int height = b.ue();
+        long width = b.ueLong();
+        long height = b.ueLong();
         if (b.u(1) == 1) {
-            int left = b.ue(), right = b.ue(), top = b.ue(), bottom = b.ue();
+            long left = b.ueLong(), right = b.ueLong(), top = b.ueLong(), bottom = b.ueLong();
             int arrayType = separatePlanes ? 0 : chroma;
             int subW = arrayType == 1 || arrayType == 2 ? 2 : 1;
             int subH = arrayType == 1 ? 2 : 1;
@@ -127,10 +128,10 @@ final class SpsParser {
         return valid(width, height);
     }
 
-    private static int[] valid(int width, int height) {
-        // Beyond 8K or empty: not a size worth configuring a decoder for
+    private static int[] valid(long width, long height) {
+        // Beyond 8K, empty or cropped below nothing: not a size worth configuring a decoder for
         return width > 0 && height > 0 && width <= 8192 && height <= 8192
-                ? new int[]{width, height} : null;
+                ? new int[]{(int) width, (int) height} : null;
     }
 
     /** The NAL unit without its emulation prevention bytes (00 00 03 → 00 00). */
@@ -171,12 +172,20 @@ final class SpsParser {
             pos += n;
         }
 
-        int ue() {
+        /** Unsigned Exp-Golomb code, 0 … 2^32 − 2. */
+        long ueLong() {
             int zeros = 0;
             while (u(1) == 0) {
                 if (++zeros > 31) throw new IllegalStateException("bad Exp-Golomb code");
             }
-            return zeros == 0 ? 0 : (int) ((1L << zeros) - 1 + u(zeros));
+            return zeros == 0 ? 0 : (1L << zeros) - 1 + (u(zeros) & 0xffffffffL);
+        }
+
+        /** {@link #ueLong()} where the syntax needs an int; larger values are malformed. */
+        int ue() {
+            long v = ueLong();
+            if (v > Integer.MAX_VALUE) throw new IllegalStateException("Exp-Golomb code too large");
+            return (int) v;
         }
 
         int se() {

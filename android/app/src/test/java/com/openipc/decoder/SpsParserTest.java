@@ -74,6 +74,58 @@ public class SpsParserTest {
         assertNull(SpsParser.size(b, 4, b.length, false));
     }
 
+    /** A baseline H.264 SPS with the given size fields (Exp-Golomb values as written). */
+    private static int[] h264Sps(long widthMbsMinus1, long heightMinus1, long[] crop) {
+        StringBuilder bits = new StringBuilder();
+        bits.append(bin(0x67, 8)).append(bin(66, 8)).append(bin(0, 8)).append(bin(31, 8));
+        ue(bits, 0); // seq_parameter_set_id
+        ue(bits, 0); // log2_max_frame_num_minus4
+        ue(bits, 2); // pic_order_cnt_type
+        ue(bits, 1); // max_num_ref_frames
+        bits.append('0'); // gaps_in_frame_num_value_allowed_flag
+        ue(bits, widthMbsMinus1);
+        ue(bits, heightMinus1);
+        bits.append("11"); // frame_mbs_only_flag, direct_8x8_inference_flag
+        if (crop != null) {
+            bits.append('1');
+            for (long c : crop) ue(bits, c);
+        } else {
+            bits.append('0');
+        }
+        bits.append("01"); // no VUI, then the stop bit
+        while (bits.length() % 8 != 0) bits.append('0');
+        byte[] b = new byte[bits.length() / 8];
+        for (int i = 0; i < b.length; i++) {
+            b[i] = (byte) Integer.parseInt(bits.substring(8 * i, 8 * i + 8), 2);
+        }
+        return SpsParser.size(b, 0, b.length, false);
+    }
+
+    private static String bin(long v, int n) {
+        StringBuilder s = new StringBuilder(Long.toBinaryString(v));
+        while (s.length() < n) s.insert(0, '0');
+        return s.toString();
+    }
+
+    private static void ue(StringBuilder bits, long v) {
+        String code = Long.toBinaryString(v + 1);
+        for (int i = 1; i < code.length(); i++) bits.append('0');
+        bits.append(code);
+    }
+
+    @Test
+    public void malformedSizesDoNotWrapRound() {
+        // The writer itself: 1280×720
+        assertArrayEquals(new int[]{1280, 720}, h264Sps(79, 44, null));
+        // 2^28 + 1 macroblocks wide is 2^32 + 16 pixels: 16 in 32-bit arithmetic (Qodo on #220)
+        assertNull(h264Sps(1L << 28, 44, null));
+        // Crops larger than the picture, and one that overflows an int when doubled
+        assertNull(h264Sps(79, 44, new long[]{700, 0, 0, 0}));
+        assertNull(h264Sps(79, 44, new long[]{1L << 31, 0, 0, 0}));
+        // A sane crop still works: 1920×1088 coded, 1080 shown
+        assertArrayEquals(new int[]{1920, 1080}, h264Sps(119, 67, new long[]{0, 0, 0, 4}));
+    }
+
     @Test
     public void emulationPreventionBytesAreRemoved() {
         assertArrayEquals(new byte[]{0, 0, 1, 0, 0, 0},

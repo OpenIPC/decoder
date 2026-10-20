@@ -78,6 +78,8 @@ class MediaCodecManager {
      * {@link #probationUntilMs} the stream goes to a software decoder (#166).
      */
     private boolean probation;
+    /** "mime WxH" the decoder on probation was set up for (Qodo on #220). */
+    private String probationKey;
     private long probationUntilMs;
     private int probationFrames;
     /** How long a decoder on probation may go without a frame once it has its parameter sets. */
@@ -379,15 +381,16 @@ class MediaCodecManager {
      */
     void setEnabled(boolean enabled) {
         this.enabled = enabled;
-        lifecycle++;
+        final int gen = ++lifecycle;
         if (enabled) return;
         final MediaCodec target = decoder;
-        if (target == null) return;
         new Thread(() -> {
             String slot;
             GlMirror gl;
             synchronized (decoderLock) {
-                if (decoder != target) return; // already replaced or released
+                // The stream that comes after the pause sends its own SPS (Qodo on #220)
+                if (gen == lifecycle && !this.enabled) forgetStream();
+                if (target == null || decoder != target) return; // already replaced or released
                 decoder = null;
                 slot = takeSlot();
                 gl = takeMirror();
@@ -456,6 +459,7 @@ class MediaCodecManager {
         streamHeight = 0;
         lastVps = null;
         probation = false;
+        probationKey = null;
     }
 
     private static long nowMs() {
@@ -497,12 +501,21 @@ class MediaCodecManager {
 
         String softwareName = null;
         boolean noHardwareFrame = false;
-        if (sized && sizeKey(type, width, height).equals(softwareFor)) {
-            // The hardware decoder gave no frame at this size: a software one, if it has room
+        final String key = sizeKey(type, width, height);
+        if (sized && key.equals(softwareFor)) {
+            // The hardware decoder gave no frame at this size: a software one, once it has room
             String sw = softwareDecoder(type);
             if (sw != null && InstanceBudget.tryAcquire(softwareSlot(type))) {
                 softwareName = sw;
                 noHardwareFrame = true;
+            } else if (sw != null) {
+                // Not the hardware one again: it showed nothing at this size (Qodo on #220)
+                synchronized (decoderLock) {
+                    retry.onFailure(nowMs());
+                }
+                Log.w(TAG, "No room for a software decoder at " + width + "×" + height
+                        + ", retrying");
+                return;
             }
         }
         if (softwareName == null && !InstanceBudget.tryAcquire(type)) {
@@ -555,7 +568,7 @@ class MediaCodecManager {
                 boolean declared = !sized || declaresSize(local, type, width, height);
                 // Probation only where a software decoder can take over, and once per size
                 onProbation = !software && sized && !declared && aboveFullHd(width, height)
-                        && !sizeKey(type, width, height).equals(softwareFor)
+                        && !key.equals(softwareFor)
                         && softwareDecoder(type) != null;
                 Log.i(TAG, "Decoder " + local.getName() + ": stream "
                         + (sized ? width + "×" + height : "size unknown")
@@ -603,6 +616,8 @@ class MediaCodecManager {
                 // A creation cancelled by a pause must not delay the next start
                 if (gen != lifecycle || !enabled) return;
                 retry.onFailure(nowMs());
+                // The hardware decoder refused a size it does not declare: software next time
+                if (onProbation) softwareFor = key;
             }
             Log.e(TAG, "Cannot setup decoder (attempt " + retry.failures() + "): " + e.getMessage());
             if (listener != null) listener.onDecoderFailed();
@@ -631,6 +646,7 @@ class MediaCodecManager {
             confWidth = maxW;
             confHeight = maxH;
             probation = onProbation;
+            probationKey = onProbation ? key : null;
             probationUntilMs = 0;
             probationFrames = framesOut;
         }
@@ -697,10 +713,10 @@ class MediaCodecManager {
                 dropDecoder(codec);
                 return retry.mayCreate(nowMs());
             } else if (probation && probationExpired()) {
-                Log.w(TAG, "No frame from " + decoderName + " at " + streamWidth + "×"
-                        + streamHeight + " in " + PROBATION_MS / 1000 + " s: software decoder");
-                softwareFor = sizeKey(codecH265 ? "video/hevc" : "video/avc",
-                        streamWidth, streamHeight);
+                // The size the decoder was set up for, not a later SPS's (Qodo on #220)
+                Log.w(TAG, "No frame from " + decoderName + " (" + probationKey + ") in "
+                        + PROBATION_MS / 1000 + " s: software decoder");
+                softwareFor = probationKey;
                 dropDecoder(codec);
                 // The next decoder starts at the next SPS, which comes with a key frame
                 return false;
@@ -767,6 +783,9 @@ class MediaCodecManager {
 
     /** The decoder failed while decoding (decoderLock held): release it, back off. */
     private void failDecoder(MediaCodec codec, Exception e) {
+        // A hardware decoder that fails at a size it does not declare: software next time
+        if (probation && probationKey != null) softwareFor = probationKey;
+        probation = false;
         decoder = null;
         String slot = takeSlot();
         GlMirror gl = takeMirror();
