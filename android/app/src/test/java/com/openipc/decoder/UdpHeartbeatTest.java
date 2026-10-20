@@ -99,7 +99,10 @@ public class UdpHeartbeatTest {
             // About one interval apart: the scheduler neither bursts nor stalls
             long span = at[at.length - 1] - at[0];
             assertTrue("span " + span, span >= 3 * 100 - 40 && span < 3 * 100 + 400);
-            assertTrue(h.sent() >= 4);
+            // The count goes up after send() returns, maybe after the toy got the packet (#247)
+            long until = System.nanoTime() / 1_000_000 + 1000;
+            while (h.sent() < 4 && System.nanoTime() / 1_000_000 < until) Thread.sleep(5);
+            assertTrue("sent " + h.sent(), h.sent() >= 4);
             h.close();
             assertFalse(h.running());
             // What was on its way is read; then nothing more
