@@ -63,7 +63,7 @@ class MediaCodecManager {
     /** Mirror the picture (#226): the decoder renders through {@link GlMirror}. */
     private volatile boolean mirror;
     /** The GL path of the current decoder (decoderLock), released after the decoder. */
-    private GlMirror glMirror;
+    private volatile GlMirror glMirror;
     /** The current decoder draws mirrored. */
     private volatile boolean mirrored;
 
@@ -281,7 +281,10 @@ class MediaCodecManager {
     }
 
     /** Mirror is on, but the current decoder draws unmirrored: the GL path failed (#226). */
-    boolean mirrorFailed() { return mirror && !mirrored && decoder != null; }
+    boolean mirrorFailed() {
+        GlMirror g = glMirror;
+        return mirror && decoder != null && (!mirrored || (g != null && g.drawFailed()));
+    }
 
     /** Detach the GL path of the current decoder (decoderLock held), like {@link #takeSlot}. */
     private GlMirror takeMirror() {

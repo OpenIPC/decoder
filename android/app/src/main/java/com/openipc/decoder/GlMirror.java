@@ -81,6 +81,8 @@ final class GlMirror implements SurfaceTexture.OnFrameAvailableListener {
     private SurfaceTexture surfaceTexture;
     private Surface input;
     private volatile boolean released;
+    /** A frame could not be shown (EGL error after setup): logged once, reported in stats. */
+    private volatile boolean drawFailed;
     /** eglInitialize() succeeded: tearDown() balances it with eglTerminate(). */
     private boolean initialized;
 
@@ -128,6 +130,15 @@ final class GlMirror implements SurfaceTexture.OnFrameAvailableListener {
             throw e;
         }
         return g;
+    }
+
+    /** A frame could not be drawn since setup (Qodo on #246). */
+    boolean drawFailed() { return drawFailed; }
+
+    private void drawFailed(String why) {
+        if (released) return;
+        if (!drawFailed) Log.w(TAG, "Mirror frame not shown: " + why);
+        drawFailed = true;
     }
 
     /** The surface the decoder renders into. */
@@ -230,8 +241,11 @@ final class GlMirror implements SurfaceTexture.OnFrameAvailableListener {
             surfaceTexture.updateTexImage();
             surfaceTexture.getTransformMatrix(st);
             int[] size = new int[2];
-            EGL14.eglQuerySurface(display, window, EGL14.EGL_WIDTH, size, 0);
-            EGL14.eglQuerySurface(display, window, EGL14.EGL_HEIGHT, size, 1);
+            if (!EGL14.eglQuerySurface(display, window, EGL14.EGL_WIDTH, size, 0)
+                    || !EGL14.eglQuerySurface(display, window, EGL14.EGL_HEIGHT, size, 1)) {
+                drawFailed("surface: " + eglError());
+                return;
+            }
             GLES20.glViewport(0, 0, size[0], size[1]);
             GLES20.glClearColor(0f, 0f, 0f, 1f);
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
@@ -247,10 +261,10 @@ final class GlMirror implements SurfaceTexture.OnFrameAvailableListener {
             GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 16, quad);
             GLES20.glEnableVertexAttribArray(aTex);
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-            EGL14.eglSwapBuffers(display, window);
+            if (!EGL14.eglSwapBuffers(display, window)) drawFailed("swap: " + eglError());
         } catch (RuntimeException e) {
             // The surface went away meanwhile (view or activity change): the owner releases us
-            Log.w(TAG, "Mirror frame: " + e.getMessage());
+            drawFailed(e.getMessage());
         }
     }
 
