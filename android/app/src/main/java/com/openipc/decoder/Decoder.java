@@ -222,6 +222,8 @@ public class Decoder extends Activity
             @Override public void onDecoderStarted() { removeClearOverlay(); }
             @Override public void onDecoderFailed() {}
         });
+        // Single view: streams above 1080p on decoders that need to know it up front (#166)
+        videoDecoder.allowLargeFrames(true);
         audioManager = new AudioManager();
         rtspClient = new RtspClient(framePool, nalAssembler, nalQueue);
         rtspClient.setListener(new RtspClient.Listener() {
@@ -1618,11 +1620,19 @@ public class Decoder extends Activity
                     rtspClient != null ? rtspClient.transportInUse() : null, mTransports[mActive]));
             single.put("transport_mode", mTransports[mActive] != null
                     ? mTransports[mActive].name() : null);
-            single.put("video", mResumed && "connected".equals(singleState)
-                    && singleRenderedWithin(SNAPSHOT_LIVE_MS));
+            boolean live = mResumed && "connected".equals(singleState)
+                    && singleRenderedWithin(SNAPSHOT_LIVE_MS);
+            single.put("video", live);
             single.put("status", statusText != null && statusText.getVisibility() == View.VISIBLE
                     ? statusText.getText().toString() : singleState);
-            if (mVideoWidth > 0) single.put("size", mVideoWidth + "x" + mVideoHeight);
+            // The decoded picture's size, only while it is shown: otherwise it is the size of
+            // an earlier stream (#166)
+            if (live && mVideoWidth > 0) single.put("size", mVideoWidth + "x" + mVideoHeight);
+            // What the camera sends, from the SPS, and the decoder taking it (#166)
+            int[] streamSize = videoDecoder.streamSize();
+            if (streamSize != null) single.put("stream_size", streamSize[0] + "x" + streamSize[1]);
+            String decoderName = videoDecoder.decoderName();
+            if (decoderName != null) single.put("decoder", decoderName);
             single.put("codec", rtspClient != null && rtspClient.isJpeg() ? "MJPEG"
                     : codecH265 ? "H.265" : "H.264");
             single.put("audio", audioCodec);
