@@ -608,12 +608,14 @@ public class Decoder extends Activity
         rtspClient.setSlotMirror(mMirrors[mActive]);
     }
 
-    private void createDecoder() {
+    /** A decoder for the stream of video thread {@code gen}, with that stream's turn and mirror. */
+    private void createDecoder(int gen) {
         videoDecoder.setSurface(mVideoSurface);
         RtspClient c = rtspClient;
         videoDecoder.setRotation(c != null ? c.rotate() : 0);
         videoDecoder.setMirror(c != null && c.mirror());
-        videoDecoder.createDecoder(codecH265);
+        // Restarted with new settings meanwhile: this decoder is dropped, the new thread makes one
+        videoDecoder.createDecoder(codecH265, () -> gen == listenerGen);
     }
 
     private void closeDecoder() { videoDecoder.closeDecoder(); }
@@ -1633,7 +1635,10 @@ public class Decoder extends Activity
             // Turned counter-clockwise, "size" is the turned one (#200, #201)
             int rotate = rtspClient != null ? rtspClient.rotate() : 0;
             if (rotate != 0) single.put("rotate", rotate);
-            if (rtspClient != null && rtspClient.mirror()) single.put("mirror", true);
+            if (rtspClient != null && rtspClient.mirror()) {
+                single.put("mirror", true);
+                if (videoDecoder.mirrorFailed()) single.put("mirror_failed", true);
+            }
             m.put("single", single);
         }
         QuadCell[] cells = quadCells;
@@ -1679,7 +1684,10 @@ public class Decoder extends Activity
                     Map<String, Object> hb = cell.heartbeatStats();
                     if (hb != null) c.put("heartbeat", hb);
                     if (cell.rotate() != 0) c.put("rotate", cell.rotate());
-                    if (cell.mirror()) c.put("mirror", true);
+                    if (cell.mirror()) {
+                        c.put("mirror", true);
+                        if (cell.mirrorFailed()) c.put("mirror_failed", true);
+                    }
                 }
                 list.add(c);
             }
@@ -2392,7 +2400,7 @@ public class Decoder extends Activity
                                 framePool.recycle(buffer);
                                 break;
                             }
-                            createDecoder();
+                            createDecoder(gen);
                             // The frame that triggered creation (often the SPS) goes in too
                             videoDecoder.decodeFrame(buffer, codecH265, 0);
                         }

@@ -280,8 +280,8 @@ class MediaCodecManager {
         mirror = on;
     }
 
-    /** The current decoder's picture is mirrored (#226). */
-    boolean isMirrored() { return mirrored && decoder != null; }
+    /** Mirror is on, but the current decoder draws unmirrored: the GL path failed (#226). */
+    boolean mirrorFailed() { return mirror && !mirrored && decoder != null; }
 
     /** Detach the GL path of the current decoder (decoderLock held), like {@link #takeSlot}. */
     private GlMirror takeMirror() {
@@ -375,6 +375,15 @@ class MediaCodecManager {
     }
 
     void createDecoder(boolean codecH265) {
+        createDecoder(codecH265, null);
+    }
+
+    /**
+     * Like {@link #createDecoder(boolean)}; {@code current} (may be null) is checked under the
+     * lock when the decoder is installed: false once the caller's stream was restarted with
+     * other settings, and the decoder made with the old ones is dropped (Qodo on #246).
+     */
+    void createDecoder(boolean codecH265, JpegCodec.Current current) {
         final int gen;
         synchronized (decoderLock) {
             if (decoder != null || !enabled || !retry.mayCreate(nowMs())) return;
@@ -455,9 +464,12 @@ class MediaCodecManager {
                 local.start();
                 if (listener != null) listener.onDecoderStarted();
             } catch (Exception e) {
-                local.release();
-                releaseMirror(gl);
-                gl = null;
+                try {
+                    local.release();
+                } finally {
+                    releaseMirror(gl);
+                    gl = null;
+                }
                 throw e;
             }
         } catch (Exception e) {
@@ -474,7 +486,8 @@ class MediaCodecManager {
 
         synchronized (decoderLock) {
             // Disabled meanwhile (pause/stop) or another thread was faster
-            if (decoder != null || !enabled || gen != lifecycle) {
+            if (decoder != null || !enabled || gen != lifecycle
+                    || (current != null && !current.holds())) {
                 InstanceBudget.release(slot);
                 releaseAsync(local, gl);
                 return;

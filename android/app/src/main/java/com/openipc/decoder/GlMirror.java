@@ -80,8 +80,7 @@ final class GlMirror implements SurfaceTexture.OnFrameAvailableListener {
     private int uMvp, uSt, aPos, aTex;
     private SurfaceTexture surfaceTexture;
     private Surface input;
-    private boolean released;
-    private volatile int framesDrawn;
+    private volatile boolean released;
 
     private GlMirror(int turnCcw, boolean mirror) {
         mvp = transform(turnCcw, mirror);
@@ -132,11 +131,10 @@ final class GlMirror implements SurfaceTexture.OnFrameAvailableListener {
     /** The surface the decoder renders into. */
     Surface input() { return input; }
 
-    /** Frames drawn onto the view's surface so far. */
-    int framesDrawn() { return framesDrawn; }
-
     /** Release GL and the thread; waits until the view's surface is free again. */
     void release() {
+        // A frame already queued on the GL thread is no longer drawn (Qodo on #246)
+        released = true;
         try {
             runSync(this::tearDown);
         } catch (Exception e) {
@@ -246,7 +244,7 @@ final class GlMirror implements SurfaceTexture.OnFrameAvailableListener {
             GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 16, quad);
             GLES20.glEnableVertexAttribArray(aTex);
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-            if (EGL14.eglSwapBuffers(display, window)) framesDrawn++;
+            EGL14.eglSwapBuffers(display, window);
         } catch (RuntimeException e) {
             // The surface went away meanwhile (view or activity change): the owner releases us
             Log.w(TAG, "Mirror frame: " + e.getMessage());

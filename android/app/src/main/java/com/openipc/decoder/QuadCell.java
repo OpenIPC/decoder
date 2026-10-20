@@ -444,6 +444,8 @@ class QuadCell implements RtspSession.Callback {
     void setSlotTurn(int rotate) { session.setSlotTurn(rotate); }
     /** The slot's Mirror (#226). */
     boolean mirror() { return session.mirror(); }
+    /** Mirror is on, but the video decoder draws unmirrored (the GL path failed). */
+    boolean mirrorFailed() { return !jpeg && decoder.mirrorFailed(); }
     void setSlotMirror(boolean on) { session.setSlotMirror(on); }
 
     /** Transport in use, with the mode after a fallback (#112). */
