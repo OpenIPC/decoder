@@ -442,6 +442,11 @@ class QuadCell implements RtspSession.Callback {
     /** Degrees counter-clockwise the frames are turned (#200, #201), 0 for none. */
     int rotate() { return session.rotate(); }
     void setSlotTurn(int rotate) { session.setSlotTurn(rotate); }
+    /** The slot's Mirror (#226). */
+    boolean mirror() { return session.mirror(); }
+    /** Mirror is on, but the video decoder draws unmirrored (the GL path failed). */
+    boolean mirrorFailed() { return !jpeg && decoder.mirrorFailed(); }
+    void setSlotMirror(boolean on) { session.setSlotMirror(on); }
 
     /** Transport in use, with the mode after a fallback (#112). */
     String transportLabel() { return Transport.label(session.transportInUse(), transport); }
@@ -698,6 +703,7 @@ class QuadCell implements RtspSession.Callback {
             if (s == null || !s.isValid()) return;
             decoder.setSurface(s);
             decoder.setRotation(session.rotate());
+            decoder.setMirror(session.mirror());
             decoder.createDecoder(codecH265);
             // Feed the frame that triggered creation (often the SPS) to the new decoder
             decoder.decodeFrame(buffer, codecH265, 0);
@@ -737,7 +743,7 @@ class QuadCell implements RtspSession.Callback {
             return;
         }
         Surface s = surface;
-        int[] size = jpegRenderer.render(frame, s, session.rotate(),
+        int[] size = jpegRenderer.render(frame, s, session.rotate(), session.mirror(),
                 () -> running && jpeg && s == surface);
         if (size == null) return;
         lastJpegDecodeMs = now;

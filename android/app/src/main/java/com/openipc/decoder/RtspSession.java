@@ -710,6 +710,12 @@ class RtspSession {
         return t >= 0 ? t : rotate;
     }
 
+    /** The slot's Mirror setting (#226): the picture flipped left↔right. */
+    private volatile boolean slotMirror;
+
+    boolean mirror() { return slotMirror; }
+    void setSlotMirror(boolean on) { slotMirror = on; }
+
     /** The slot's own turn (#201): -1 leaves it to the URL or the toy's default. */
     void setSlotTurn(int rotate) {
         int t = rotate == 0 || rotate == 90 || rotate == 180 || rotate == 270 ? rotate : -1;
