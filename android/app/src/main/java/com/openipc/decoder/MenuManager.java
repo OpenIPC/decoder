@@ -27,6 +27,7 @@ import android.view.inputmethod.EditorInfo;
 import android.webkit.HttpAuthHandler;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
@@ -542,7 +543,7 @@ class MenuManager {
     }
 
     void showUrlEditor(int mActive, String[] mHosts, Transport.Mode[] mTransports,
-            int[] mRotates) {
+            int[] mRotates, boolean[] mMirrors) {
         AlertDialog.Builder builder = new AlertDialog.Builder(activity);
         builder.setTitle("Camera " + (mActive + 1) + " URL");
 
@@ -589,6 +590,11 @@ class MenuManager {
         HorizontalScrollView turnRow = new HorizontalScrollView(activity);
         turnRow.addView(turn);
         content.addView(turnRow);
+        // Mirror of the picture (#226): left↔right, after the turn
+        CheckBox mirror = new CheckBox(activity);
+        mirror.setText("Mirror");
+        mirror.setChecked(mMirrors[mActive]);
+        content.addView(mirror);
         builder.setView(content);
 
         final int slot = mActive;
@@ -599,6 +605,7 @@ class MenuManager {
             if (checked != null) mTransports[slot] = (Transport.Mode) checked.getTag();
             View turned = turn.findViewById(turn.getCheckedRadioButtonId());
             if (turned != null) mRotates[slot] = (Integer) turned.getTag();
+            mMirrors[slot] = mirror.isChecked();
             if (listener != null) listener.onSaveSettings(); // triggers save + reconnect
         });
         builder.setNegativeButton("Cancel", (dialog, which) -> dialog.cancel());
