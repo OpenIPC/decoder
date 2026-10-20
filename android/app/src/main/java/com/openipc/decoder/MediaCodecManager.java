@@ -84,8 +84,11 @@ class MediaCodecManager {
     private int probationFrames;
     /** How long a decoder on probation may go without a frame once it has its parameter sets. */
     static final long PROBATION_MS = 5_000;
-    /** "mime WxH" of a stream the hardware decoder gave no frame for: software from then on. */
-    private volatile String softwareFor;
+    /** "mime WxH" of streams the hardware decoder gave no frame for: software from then on. */
+    private final java.util.Set<String> softwareFor = java.util.Collections.synchronizedSet(
+            new java.util.LinkedHashSet<>());
+    /** Sizes kept in {@link #softwareFor}: a camera switches between a few at most. */
+    static final int SOFTWARE_SIZES = 8;
     /** Name of the current decoder, for /stats.json. */
     private volatile String decoderName;
     /** Degrees counter-clockwise the decoder turns the picture (#201); 0 for none. */
@@ -502,7 +505,7 @@ class MediaCodecManager {
         String softwareName = null;
         boolean noHardwareFrame = false;
         final String key = sizeKey(type, width, height);
-        if (sized && key.equals(softwareFor)) {
+        if (sized && softwareFor.contains(key)) {
             // The hardware decoder gave no frame at this size: a software one, once it has room
             String sw = softwareDecoder(type);
             if (sw != null && InstanceBudget.tryAcquire(softwareSlot(type))) {
@@ -568,7 +571,7 @@ class MediaCodecManager {
                 boolean declared = !sized || declaresSize(local, type, width, height);
                 // Probation only where a software decoder can take over, and once per size
                 onProbation = !software && sized && !declared && aboveFullHd(width, height)
-                        && !key.equals(softwareFor)
+                        && !softwareFor.contains(key)
                         && softwareDecoder(type) != null;
                 Log.i(TAG, "Decoder " + local.getName() + ": stream "
                         + (sized ? width + "×" + height : "size unknown")
@@ -617,7 +620,7 @@ class MediaCodecManager {
                 if (gen != lifecycle || !enabled) return;
                 retry.onFailure(nowMs());
                 // The hardware decoder refused a size it does not declare: software next time
-                if (onProbation) softwareFor = key;
+                if (onProbation) markSoftware(key);
             }
             Log.e(TAG, "Cannot setup decoder (attempt " + retry.failures() + "): " + e.getMessage());
             if (listener != null) listener.onDecoderFailed();
@@ -716,7 +719,7 @@ class MediaCodecManager {
                 // The size the decoder was set up for, not a later SPS's (Qodo on #220)
                 Log.w(TAG, "No frame from " + decoderName + " (" + probationKey + ") in "
                         + PROBATION_MS / 1000 + " s: software decoder");
-                softwareFor = probationKey;
+                markSoftware(probationKey);
                 dropDecoder(codec);
                 // The next decoder starts at the next SPS, which comes with a key frame
                 return false;
@@ -784,7 +787,7 @@ class MediaCodecManager {
     /** The decoder failed while decoding (decoderLock held): release it, back off. */
     private void failDecoder(MediaCodec codec, Exception e) {
         // A hardware decoder that fails at a size it does not declare: software next time
-        if (probation && probationKey != null) softwareFor = probationKey;
+        if (probation && probationKey != null) markSoftware(probationKey);
         probation = false;
         decoder = null;
         String slot = takeSlot();
@@ -808,6 +811,25 @@ class MediaCodecManager {
         releaseNow(codec);
         releaseMirror(gl);
         releaseSlot(slot);
+    }
+
+    /**
+     * The hardware decoder gave no frame at this size (decoderLock held): software from now
+     * on, for this size among the last {@link #SOFTWARE_SIZES} (Qodo on #220). The next
+     * decoder waits for a fresh SPS, so it starts with the full parameter set and the key
+     * frame after it; the stream's size is kept for it.
+     */
+    private void markSoftware(String key) {
+        synchronized (softwareFor) {
+            softwareFor.remove(key);
+            softwareFor.add(key);
+            java.util.Iterator<String> it = softwareFor.iterator();
+            while (softwareFor.size() > SOFTWARE_SIZES && it.hasNext()) {
+                it.next();
+                it.remove();
+            }
+        }
+        spsSeen = false;
     }
 
     /** The decoder on probation has its parameter sets but no frame past the deadline. */
