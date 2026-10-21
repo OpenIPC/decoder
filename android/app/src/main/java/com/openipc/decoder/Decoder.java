@@ -1697,6 +1697,9 @@ public class Decoder extends Activity
                     if (jl != null) c.put("jieli", jl);
                     Map<String, Object> hb = cell.heartbeatStats();
                     if (hb != null) c.put("heartbeat", hb);
+                    // A udp:// push: a full socket buffer or ring, or loss on the way (#251)
+                    Map<String, Object> udp = cell.udpListenStats();
+                    if (udp != null) c.put("udp", udp);
                     if (cell.rotate() != 0) c.put("rotate", cell.rotate());
                     if (cell.mirror()) {
                         c.put("mirror", true);
@@ -1724,7 +1727,17 @@ public class Decoder extends Activity
                     ? mHosts[i] : null;
         }
         streamProbes.update(urls, mTransports, udpViewShown ? null : mHost,
-                mResumed && (udpViewShown || !quadEnabled));
+                mResumed && (udpViewShown ? !pushReceived() : !quadEnabled));
+    }
+
+    /**
+     * The U cell receives a push: no checks of other cameras then, their RTSP sessions made
+     * the box drop datagrams of the push (#251).
+     */
+    private boolean pushReceived() {
+        QuadCell[] cells = quadCells;
+        QuadCell u = udpViewShown && cells != null ? cells[U_CELL] : null;
+        return u != null && u.isConnected();
     }
 
     /**
@@ -1754,7 +1767,9 @@ public class Decoder extends Activity
         if (skip != null) return skip;
         StreamProbe.Result r = probeResult(i);
         if (r != null) return r.text(nowMs) + (streamProbes.isRunning(i) ? " \u00b7 checking" : "");
-        return streamProbes.isRunning(i) ? "Checking stream\u2026" : "Waiting for a stream check";
+        if (streamProbes.isRunning(i)) return "Checking stream\u2026";
+        return pushReceived() ? "Not checked while the U cell receives a push"
+                : "Waiting for a stream check";
     }
 
     /**

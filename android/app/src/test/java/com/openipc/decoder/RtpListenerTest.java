@@ -17,6 +17,8 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
@@ -25,6 +27,7 @@ import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -289,5 +292,41 @@ public class RtpListenerTest {
             Thread.sleep(10);
         }
         assertEquals(2, Collections.frequency(rec.statuses, "connected"));
+    }
+
+    @Test
+    public void udpStatsCountWhatArrivedAndWhatIsMissing() throws Exception {
+        int port = freePort();
+        rec.latch = new CountDownLatch(6);
+        listen("udp://@:" + port);
+        send(port, 96, 3);
+        seq += 5; // five packets lost on the way
+        send(port, 96, 3);
+        assertTrue(rec.latch.await(3, TimeUnit.SECONDS));
+        Map<String, Object> st = session.udpListenStats();
+        assertTrue((Integer) st.get("rcvbuf") > 0);
+        assertEquals(6L, st.get("received"));
+        assertEquals(0L, st.get("ring_dropped"));
+        assertEquals(5L, st.get("rtp_lost"));
+    }
+
+    @Test
+    public void socketDropsAreReadForThePort() throws Exception {
+        File f = File.createTempFile("udp", ".txt");
+        try {
+            try (FileWriter w = new FileWriter(f)) {
+                w.write("  sl  local_address rem_address   st tx_queue rx_queue tr tm->when"
+                        + " retrnsmt   uid  timeout inode ref pointer drops\n");
+                w.write("  12: 00000000:15E0 00000000:0000 07 00000000:00000000 00:00000000"
+                        + " 00000000 10123        0 4711 2 0000000000000000 57\n");
+                w.write("  13: 00000000:15E1 00000000:0000 07 00000000:00000000 00:00000000"
+                        + " 00000000 10123        0 4712 2 0000000000000000 9\n");
+            }
+            assertEquals(57, RtpListener.socketDrops(f.getPath(), 5600));
+            assertEquals(-1, RtpListener.socketDrops(f.getPath(), 5602));
+            assertEquals(-1, RtpListener.socketDrops(f.getPath() + ".none", 5600));
+        } finally {
+            f.delete();
+        }
     }
 }
