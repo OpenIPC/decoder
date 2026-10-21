@@ -1837,8 +1837,9 @@ public class Decoder extends Activity
                 StreamProbe.Result r = probeResult(i);
                 Map<String, Object> p = new LinkedHashMap<>();
                 p.put("state", r != null ? (r.ok ? "ok" : "error")
-                        : streamProbes.isRunning(i) ? "checking" : u || StreamProbes.skipReason(
-                        mHosts[i], DEFAULT_URL, udpViewShown ? null : mHost) != null
+                        : streamProbes.isRunning(i) ? "checking" : u || pushReceived()
+                        || StreamProbes.skipReason(mHosts[i], DEFAULT_URL,
+                                udpViewShown ? null : mHost) != null
                         ? "not checked" : "waiting");
                 if (r != null) {
                     p.put("checked_s_ago", (now - r.atMs) / 1000);

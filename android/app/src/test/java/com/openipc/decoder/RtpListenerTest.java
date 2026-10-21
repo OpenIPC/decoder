@@ -326,12 +326,21 @@ public class RtpListenerTest {
                         + " retrnsmt   uid  timeout inode ref pointer drops\n");
                 w.write("  12: 00000000:15E0 00000000:0000 07 00000000:00000000 00:00000000"
                         + " 00000000 10123        0 4711 2 0000000000000000 57\n");
+                w.write("  14: 030201EF:15E0 00000000:0000 07 00000000:00000000 00:00000000"
+                        + " 00000000 10123        0 4713 2 0000000000000000 5\n");
                 w.write("  13: 00000000:15E1 00000000:0000 07 00000000:00000000 00:00000000"
                         + " 00000000 10123        0 4712 2 0000000000000000 9\n");
             }
-            assertEquals(57, RtpListener.socketDrops(f.getPath(), 5600));
-            assertEquals(-1, RtpListener.socketDrops(f.getPath(), 5602));
-            assertEquals(-1, RtpListener.socketDrops(f.getPath() + ".none", 5600));
+            // The wildcard socket of the port, not the group bound on the same port
+            assertEquals(57, RtpListener.socketDrops(f.getPath(), "00000000:15E0"));
+            assertEquals(5, RtpListener.socketDrops(f.getPath(), "030201EF:15E0"));
+            assertEquals(-1, RtpListener.socketDrops(f.getPath(), "00000000:15E2"));
+            assertEquals(-1, RtpListener.socketDrops(f.getPath() + ".none", "00000000:15E0"));
+            assertEquals("030201EF",
+                    RtpListener.procAddress(InetAddress.getByName("239.1.2.3"), false));
+            assertEquals("0000000000000000FFFF0000030201EF",
+                    RtpListener.procAddress(InetAddress.getByName("239.1.2.3"), true));
+            assertEquals("00000000000000000000000000000000", RtpListener.procAddress(null, true));
         } finally {
             f.delete();
         }

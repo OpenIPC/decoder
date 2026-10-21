@@ -365,7 +365,7 @@ class RtpListener implements Closeable {
         rtpLost = lost;
         if (dropsReadable && now - dropsReadNs >= 1_000_000_000L) {
             dropsReadNs = now;
-            long d = socketDrops(url.port);
+            long d = socketDrops(url.address, url.port);
             // Not readable now is not readable later: no more tries
             if (d < 0) dropsReadable = false;
             socketDrops = d;
@@ -373,20 +373,56 @@ class RtpListener implements Closeable {
     }
 
     /**
-     * The kernel's drop count of the UDP sockets on {@code port}, from /proc/net/udp and udp6,
-     * or -1: apps of newer Android versions may not read them.
+     * The kernel's drop count of this listener's socket: the port and its bound address (the
+     * group of a multicast slot, or the wildcard), from /proc/net/udp and udp6; -1 when apps
+     * may not read them (Qodo on #252: other groups on the port are not counted).
      */
-    static long socketDrops(int port) {
+    static long socketDrops(InetAddress bound, int port) {
         long total = -1;
-        for (String file : new String[] {"/proc/net/udp", "/proc/net/udp6"}) {
-            long d = socketDrops(file, port);
+        String[][] files = {
+            {"/proc/net/udp", procAddress(bound, false)},
+            {"/proc/net/udp6", procAddress(bound, true)},
+        };
+        for (String[] f : files) {
+            if (f[1] == null) continue;
+            long d = socketDrops(f[0], f[1] + String.format(Locale.ROOT, ":%04X", port));
             if (d >= 0) total = Math.max(0, total) + d;
         }
         return total;
     }
 
-    static long socketDrops(String file, int port) {
-        String hexPort = String.format(Locale.ROOT, ":%04X", port);
+    /**
+     * An address as /proc/net/udp{,6} prints it: 32-bit words in host (little-endian) order;
+     * an IPv4 address in udp6 is IPv4-mapped. Null when it cannot be in that file.
+     */
+    static String procAddress(InetAddress a, boolean v6File) {
+        byte[] b;
+        if (a == null) {
+            b = new byte[v6File ? 16 : 4];
+        } else if (a.getAddress().length == 4) {
+            if (!v6File) {
+                b = a.getAddress();
+            } else {
+                b = new byte[16];
+                b[10] = (byte) 0xFF;
+                b[11] = (byte) 0xFF;
+                System.arraycopy(a.getAddress(), 0, b, 12, 4);
+            }
+        } else {
+            if (!v6File) return null;
+            b = a.getAddress();
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int w = 0; w < b.length; w += 4) {
+            for (int i = 3; i >= 0; i--) {
+                sb.append(String.format(Locale.ROOT, "%02X", b[w + i] & 0xFF));
+            }
+        }
+        return sb.toString();
+    }
+
+    /** Sum of the drops column of the rows whose local address is {@code local}, or -1. */
+    static long socketDrops(String file, String local) {
         long total = -1;
         try (BufferedReader in = new BufferedReader(new FileReader(file))) {
             in.readLine(); // the header
@@ -394,7 +430,7 @@ class RtpListener implements Closeable {
             while ((line = in.readLine()) != null) {
                 String[] f = line.trim().split("\\s+");
                 // sl local_address rem_address st ... drops (the last column)
-                if (f.length < 13 || !f[1].endsWith(hexPort)) continue;
+                if (f.length < 13 || !f[1].equalsIgnoreCase(local)) continue;
                 try {
                     total = Math.max(0, total) + Long.parseLong(f[f.length - 1]);
                 } catch (NumberFormatException ignored) {}
