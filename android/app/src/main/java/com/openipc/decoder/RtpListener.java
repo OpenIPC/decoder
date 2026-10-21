@@ -11,14 +11,20 @@ import android.content.Context;
 import android.net.wifi.WifiManager;
 import android.util.Log;
 
+import java.io.BufferedReader;
 import java.io.Closeable;
+import java.io.FileReader;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.MulticastSocket;
 import java.net.SocketTimeoutException;
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Receives the stream that Majestic sends to "outgoing" destinations (udp://host:port):
@@ -26,10 +32,20 @@ import java.util.Locale;
  * before every IDR, so it can be joined at any time without an SDP (#68).
  * A MulticastSocket is used for unicast too: joining a group from a DatagramChannel needs
  * API 24.
+ * <p>
+ * An app cannot get a socket buffer above {@code rmem_max} (256 KiB on many boxes), which is
+ * about one 1080p key frame, so a thread of its own does nothing but read the socket into a
+ * ring; reordering, assembly and the decoder never hold up the receive (#251).
  */
 class RtpListener implements Closeable {
     private static final String TAG = "OpenIPCDecoder";
     private static final int RCVBUF = 2 * 1024 * 1024;
+    /** Datagrams held between the receive thread and the rest: a few key frames. */
+    static final int RING = 1024;
+    /** Size of a ring slot; a longer datagram gets a slot of its own, not kept (Qodo on #252). */
+    private static final int SLOT = 1600;
+    /** Datagrams handled before the stop condition and the reorder deadlines again. */
+    private static final int BATCH = 64;
 
     interface Handler {
         void onPacket(byte[] buf, int offset, int length);
@@ -152,13 +168,33 @@ class RtpListener implements Closeable {
      * numbers, which must not push video packets out as late ones.
      */
     private final RtpReorder[] reorders = new RtpReorder[128];
+    private final ArrayBlockingQueue<byte[]> free = new ArrayBlockingQueue<>(RING);
+    private final ArrayBlockingQueue<byte[]> filled = new ArrayBlockingQueue<>(RING);
     private volatile boolean closed;
     private boolean joined;
     private long rejected;
+    /** The buffer the kernel actually gave, as getReceiveBufferSize() says. */
+    private final int rcvbuf;
+    private volatile long received;
+    /** Datagrams thrown away because the ring was full. */
+    private volatile long ringDropped;
+    private volatile IOException readError;
+    /**
+     * Published by the session thread for /stats.json (Qodo on #252): the video payload type
+     * (-1 until known), the gaps in its sequence, the kernel's drop count (-1: unreadable).
+     */
+    private volatile int videoPt;
+    /** Every payload type that was video in this listener: losses before a codec change stay. */
+    private final boolean[] videoTypes = new boolean[128];
+    private volatile long rtpLost;
+    private volatile long socketDrops = -1;
+    private boolean dropsReadable = true;
+    private long dropsReadNs;
 
     RtpListener(String tag, Url url) throws IOException {
         this.tag = tag;
         this.url = url;
+        this.videoPt = url.pt;
         MulticastSocket s = new MulticastSocket(null);
         try {
             if (url.multicast()) {
@@ -183,46 +219,107 @@ class RtpListener implements Closeable {
             throw e;
         }
         this.socket = s;
+        int got;
+        try {
+            got = s.getReceiveBufferSize();
+        } catch (IOException e) {
+            got = -1;
+        }
+        rcvbuf = got;
+        Log.i(TAG, tag + ": UDP port " + url.port + ", receive buffer " + got + " bytes (asked "
+                + RCVBUF + ")");
+        for (int i = 0; i < RING; i++) free.add(new byte[SLOT + 4]);
         if (joined) MulticastLock.acquire();
+    }
+
+    /**
+     * Reads the socket until it is closed. A slot is a datagram with its length in the first
+     * four bytes, copied from one large buffer: datagrams are short, slots stay small.
+     */
+    private void readLoop() {
+        byte[] buf = new byte[65536];
+        DatagramPacket p = new DatagramPacket(buf, buf.length);
+        InetAddress source = url.source;
+        try {
+            while (!closed) {
+                try {
+                    p.setLength(buf.length);
+                    socket.receive(p);
+                } catch (SocketTimeoutException e) {
+                    continue;
+                }
+                if (source != null && !source.equals(p.getAddress())) {
+                    if (rejected++ % 100 == 0) {
+                        Log.w(TAG, tag + ": UDP from an unexpected sender ignored ("
+                                + rejected + ")");
+                    }
+                    continue;
+                }
+                int len = p.getLength();
+                if (len < 12) continue;
+                received++;
+                byte[] slot = free.poll();
+                if (slot == null) {
+                    if (ringDropped++ % 100 == 0) {
+                        Log.w(TAG, tag + ": UDP ring full, datagram dropped (" + ringDropped + ")");
+                    }
+                    continue;
+                }
+                if (slot.length < len + 4) slot = new byte[len + 4];
+                slot[0] = (byte) (len >>> 24);
+                slot[1] = (byte) (len >>> 16);
+                slot[2] = (byte) (len >>> 8);
+                slot[3] = (byte) len;
+                System.arraycopy(buf, p.getOffset(), slot, 4, len);
+                filled.offer(slot);
+            }
+        } catch (IOException e) {
+            if (!closed) readError = e;
+        }
     }
 
     /** Receive until {@code keepGoing} turns false or {@link #close} is called. */
     void run(UdpReceiver.Condition keepGoing, Handler handler) throws IOException {
-        byte[] buf = new byte[65536];
-        DatagramPacket p = new DatagramPacket(buf, buf.length);
         RtpReorder.Sink sink = handler::onPacket;
-        InetAddress source = url.source;
+        Thread reader = new Thread(this::readLoop, tag + "-udp");
+        reader.setDaemon(true);
+        // Above the decoder and the UI: a stalled receive is a lost packet
+        reader.setPriority(Thread.MAX_PRIORITY);
+        reader.start();
         try {
             while (!closed && keepGoing.holds()) {
+                IOException e = readError;
+                if (e != null) throw e;
                 long now = System.nanoTime();
                 long ms = 250;
                 for (RtpReorder r : reorders) {
                     long d = r != null ? r.msUntilDeadline(now) : -1;
                     if (d >= 0) ms = Math.min(ms, d);
                 }
-                socket.setSoTimeout((int) Math.max(1, ms));
+                byte[] slot;
                 try {
-                    p.setLength(buf.length);
-                    socket.receive(p);
-                    if (source != null && !source.equals(p.getAddress())) {
-                        if (rejected++ % 100 == 0) {
-                            Log.w(TAG, tag + ": UDP from an unexpected sender ignored ("
-                                    + rejected + ")");
-                        }
-                        continue;
-                    }
-                    if (p.getLength() < 12) continue;
-                    int pt = buf[p.getOffset() + 1] & 0x7F;
+                    slot = filled.poll(Math.max(1, ms), TimeUnit.MILLISECONDS);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                // A batch of what is waiting, then the condition and the reorder deadlines
+                for (int n = 0; slot != null; n++) {
+                    int len = ((slot[0] & 0xFF) << 24) | ((slot[1] & 0xFF) << 16)
+                            | ((slot[2] & 0xFF) << 8) | (slot[3] & 0xFF);
+                    int pt = slot[5] & 0x7F;
                     RtpReorder r = reorders[pt];
                     if (r == null) r = reorders[pt] = new RtpReorder(64, UdpReceiver.REORDER_MS);
-                    r.push(buf, p.getOffset(), p.getLength(), System.nanoTime(), sink);
-                } catch (SocketTimeoutException ignored) {
-                    // Check the condition and the reorder deadlines
+                    r.push(slot, 4, len, System.nanoTime(), sink);
+                    // A slot grown for a long datagram is not kept: the ring stays small
+                    free.offer(slot.length > SLOT + 4 ? new byte[SLOT + 4] : slot);
+                    slot = n + 1 < BATCH ? filled.poll() : null;
                 }
                 now = System.nanoTime();
                 for (RtpReorder r : reorders) {
                     if (r != null) r.poll(now, sink);
                 }
+                publishStats(now);
             }
         } catch (IOException e) {
             if (!closed) throw e;
@@ -236,6 +333,112 @@ class RtpListener implements Closeable {
             }
             close();
         }
+    }
+
+    /**
+     * For /stats.json (#251): the buffer the kernel gave, datagrams read, dropped by a full
+     * ring, missing from the sequence of the video payload type (0 until it is known), and
+     * the kernel's drop count of the port when the app may read it.
+     */
+    Map<String, Object> stats() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("rcvbuf", rcvbuf);
+        m.put("received", received);
+        m.put("ring_dropped", ringDropped);
+        m.put("rtp_lost", rtpLost);
+        long drops = socketDrops;
+        if (drops >= 0) m.put("socket_drops", drops);
+        return m;
+    }
+
+    /** The video payload type, once the session knows it; its gaps are {@code rtp_lost}. */
+    void setVideoPt(int pt) { videoPt = pt; }
+
+    /** On the session thread: the loss counters for stats(), /proc at most once a second. */
+    private void publishStats(long now) {
+        int pt = videoPt;
+        if (pt >= 0) videoTypes[pt] = true;
+        long lost = 0;
+        for (int i = 0; i < reorders.length; i++) {
+            if (videoTypes[i] && reorders[i] != null) lost += reorders[i].skipped();
+        }
+        rtpLost = lost;
+        if (dropsReadable && now - dropsReadNs >= 1_000_000_000L) {
+            dropsReadNs = now;
+            long d = socketDrops(url.address, url.port);
+            // Not readable now is not readable later: no more tries
+            if (d < 0) dropsReadable = false;
+            socketDrops = d;
+        }
+    }
+
+    /**
+     * The kernel's drop count of this listener's socket: the port and its bound address (the
+     * group of a multicast slot, or the wildcard), from /proc/net/udp and udp6; -1 when apps
+     * may not read them (Qodo on #252: other groups on the port are not counted).
+     */
+    static long socketDrops(InetAddress bound, int port) {
+        long total = -1;
+        String[][] files = {
+            {"/proc/net/udp", procAddress(bound, false)},
+            {"/proc/net/udp6", procAddress(bound, true)},
+        };
+        for (String[] f : files) {
+            if (f[1] == null) continue;
+            long d = socketDrops(f[0], f[1] + String.format(Locale.ROOT, ":%04X", port));
+            if (d >= 0) total = Math.max(0, total) + d;
+        }
+        return total;
+    }
+
+    /**
+     * An address as /proc/net/udp{,6} prints it: 32-bit words in host (little-endian) order;
+     * an IPv4 address in udp6 is IPv4-mapped. Null when it cannot be in that file.
+     */
+    static String procAddress(InetAddress a, boolean v6File) {
+        byte[] b;
+        if (a == null) {
+            b = new byte[v6File ? 16 : 4];
+        } else if (a.getAddress().length == 4) {
+            if (!v6File) {
+                b = a.getAddress();
+            } else {
+                b = new byte[16];
+                b[10] = (byte) 0xFF;
+                b[11] = (byte) 0xFF;
+                System.arraycopy(a.getAddress(), 0, b, 12, 4);
+            }
+        } else {
+            if (!v6File) return null;
+            b = a.getAddress();
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int w = 0; w < b.length; w += 4) {
+            for (int i = 3; i >= 0; i--) {
+                sb.append(String.format(Locale.ROOT, "%02X", b[w + i] & 0xFF));
+            }
+        }
+        return sb.toString();
+    }
+
+    /** Sum of the drops column of the rows whose local address is {@code local}, or -1. */
+    static long socketDrops(String file, String local) {
+        long total = -1;
+        try (BufferedReader in = new BufferedReader(new FileReader(file))) {
+            in.readLine(); // the header
+            String line;
+            while ((line = in.readLine()) != null) {
+                String[] f = line.trim().split("\\s+");
+                // sl local_address rem_address st ... drops (the last column)
+                if (f.length < 13 || !f[1].equalsIgnoreCase(local)) continue;
+                try {
+                    total = Math.max(0, total) + Long.parseLong(f[f.length - 1]);
+                } catch (NumberFormatException ignored) {}
+            }
+        } catch (IOException | RuntimeException e) {
+            return -1;
+        }
+        return total;
     }
 
     /** From any thread; a blocked receive ends with the socket. */

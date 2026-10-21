@@ -438,6 +438,7 @@ class QuadCell implements RtspSession.Callback {
 
     /** The cooingdv heartbeat of an RTSP cell once it used one (#187), else null. */
     java.util.Map<String, Object> heartbeatStats() { return session.heartbeatStats(); }
+    java.util.Map<String, Object> udpListenStats() { return session.udpListenStats(); }
 
     /** Degrees counter-clockwise the frames are turned (#200, #201), 0 for none. */
     int rotate() { return session.rotate(); }
@@ -515,6 +516,9 @@ class QuadCell implements RtspSession.Callback {
 
     /** On key frames only, a frame comes once per GOP, which can be several seconds (#85). */
     static final long KEY_FRAMES_LIVE_MS = 10_000;
+
+    /** A stream is coming in: "connected", paused or not. */
+    boolean isConnected() { return "connected".equals(state); }
 
     /**
      * Connected, not paused and a frame shown within the last {@code ms} milliseconds (#98);

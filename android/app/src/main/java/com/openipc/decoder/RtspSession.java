@@ -732,6 +732,15 @@ class RtspSession {
         }
     }
 
+    /** Receive statistics for /stats.json while a udp:// slot listens (#251), else null. */
+    Map<String, Object> udpListenStats() {
+        RtpListener l;
+        synchronized (lock) {
+            l = listener;
+        }
+        return l != null ? l.stats() : null;
+    }
+
     /** FLOW-UFO statistics for /stats.json while a flowufo:// slot runs (#187), else null. */
     Map<String, Object> flowUfoStats() {
         FlowUfo.Client c = ufo;
@@ -971,6 +980,7 @@ class RtspSession {
                     sdp.videoPt = pt;
                     sdp.videoH265 = u.h265(pt);
                     current[0] = sdp;
+                    l.setVideoPt(pt);
                     Log.i(TAG, tag + ": RTP payload type " + pt
                             + (sdp.videoH265 ? ", H.265" : ", H.264"));
                     callback.onSdp(sdp);

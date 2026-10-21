@@ -151,10 +151,11 @@ One entry per grid cell; `slot` is 1–8 or `U`. An empty cell has only `slot`, 
 | `load`           | macroblocks/s the cell costs in its current mode, once size and rate are known                                                                                    |
 | `paused`         | paused by the decode planner (`Paused: decoder overloaded`)                                                                                                       |
 | `audio`          | this cell's sound plays                                                                                                                                           |
+| `udp`            | `udp://` slots and U: `rcvbuf` (socket buffer the kernel gave), `received`, `ring_dropped`, `rtp_lost`, `socket_drops` (if readable)                              |
 
 ### slots
 
-Single view and U view: every cell of the grid as the debug page shows it (3×3 in the U view or when the active slot is 5–8).
+Single view and U view: every cell of the grid as the debug page shows it (3×3 in the U view or when the active slot is 5–8). In the U view the other slots are not checked while the U cell receives a push (#251).
 
 | Field                   | Meaning                                                                                                                                                                         |
 |-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

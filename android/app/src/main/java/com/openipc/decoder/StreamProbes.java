@@ -165,6 +165,21 @@ final class StreamProbes {
         }
     }
 
+    /** The U cell receives a push: no probes start, running ones end (#251). */
+    private boolean held;
+
+    /** From the UI thread about once a second, and with every update. */
+    void hold(boolean on) {
+        synchronized (lock) {
+            if (held == on) return;
+            held = on;
+            if (!on) return;
+            for (Probe p : probes) {
+                if (p != null && !p.cancelled()) p.cancel();
+            }
+        }
+    }
+
     StreamProbes(String userAgent) {
         this.userAgent = userAgent;
         ((ThreadPoolExecutor) workers).allowCoreThreadTimeOut(true);
@@ -266,6 +281,7 @@ final class StreamProbes {
                 ticker = null;
                 return;
             }
+            if (held) return;
             int count = 0;
             for (boolean r : running) if (r) count++;
             if (count >= MAX_RUNNING) return;

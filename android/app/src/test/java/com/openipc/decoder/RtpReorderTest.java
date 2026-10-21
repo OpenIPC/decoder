@@ -112,4 +112,14 @@ public class RtpReorderTest {
         push(r, 0, 30000, 30001, 7, 8);
         assertEquals(Arrays.asList(30000, 30001, 7, 8), out);
     }
+
+    @Test
+    public void aLongJumpCountsAsLostUnlessTheStreamRestarted() {
+        RtpReorder r = new RtpReorder(64, 40);
+        push(r, 0, 10, 11, 212); // 200 packets lost in one burst (Qodo on #252)
+        assertEquals(Arrays.asList(10, 11, 212), out);
+        assertEquals(200, r.skipped());
+        push(r, 0, 20213); // a new stream, not a loss
+        assertEquals(200, r.skipped());
+    }
 }

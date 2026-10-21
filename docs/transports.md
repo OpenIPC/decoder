@@ -77,6 +77,7 @@ udp://[source@][address]:port[?codec=h264|h265][&pt=N]
 - Addresses must be numeric (IPv4 or IPv6 in brackets); no name lookup. A port is required.
 - A codec change on the camera is followed while playing. Video only.
 - Two slots cannot listen on the same port. The [U cell](usage.md#the-u-cell) listens on 5600.
+- A thread of its own reads the socket into a ring of 1024 datagrams: an app gets a socket buffer of at most `rmem_max` (often 256 KiB, about one 1080p key frame), so a burst must not wait for the decoder. Where datagrams went missing is in the cell's `udp` object in [`/stats.json`](debug.md#cells): `socket_drops` (socket buffer full, when Android lets the app read `/proc/net/udp`), `ring_dropped` (ring full) and `rtp_lost` (sequence gaps, lost anywhere on the way). A sender that paces its key frames avoids the bursts (#251).
 - On Wi‑Fi the app holds a multicast lock while it is in a group.
 - A pushed stream cannot fall back to TCP: when every key frame loses a piece, the cell decodes the damaged frames (`· damaged`).
 

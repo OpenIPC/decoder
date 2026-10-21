@@ -17,6 +17,8 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
@@ -25,6 +27,7 @@ import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -289,5 +292,79 @@ public class RtpListenerTest {
             Thread.sleep(10);
         }
         assertEquals(2, Collections.frequency(rec.statuses, "connected"));
+    }
+
+    @Test
+    public void udpStatsCountWhatArrivedAndWhatIsMissing() throws Exception {
+        int port = freePort();
+        rec.latch = new CountDownLatch(6);
+        listen("udp://@:" + port);
+        send(port, 96, 3);
+        seq += 5; // five packets lost on the way
+        send(port, 96, 3);
+        assertTrue(rec.latch.await(3, TimeUnit.SECONDS));
+        // Published by the session thread after the batch
+        Map<String, Object> st = session.udpListenStats();
+        long deadline = System.currentTimeMillis() + 2000;
+        while (!Long.valueOf(5).equals(st.get("rtp_lost"))
+                && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10);
+            st = session.udpListenStats();
+        }
+        assertTrue((Integer) st.get("rcvbuf") > 0);
+        assertEquals(6L, st.get("received"));
+        assertEquals(0L, st.get("ring_dropped"));
+        assertEquals(5L, st.get("rtp_lost"));
+    }
+
+    @Test
+    public void socketDropsAreReadForThePort() throws Exception {
+        File f = File.createTempFile("udp", ".txt");
+        try {
+            try (FileWriter w = new FileWriter(f)) {
+                w.write("  sl  local_address rem_address   st tx_queue rx_queue tr tm->when"
+                        + " retrnsmt   uid  timeout inode ref pointer drops\n");
+                w.write("  12: 00000000:15E0 00000000:0000 07 00000000:00000000 00:00000000"
+                        + " 00000000 10123        0 4711 2 0000000000000000 57\n");
+                w.write("  14: 030201EF:15E0 00000000:0000 07 00000000:00000000 00:00000000"
+                        + " 00000000 10123        0 4713 2 0000000000000000 5\n");
+                w.write("  13: 00000000:15E1 00000000:0000 07 00000000:00000000 00:00000000"
+                        + " 00000000 10123        0 4712 2 0000000000000000 9\n");
+            }
+            // The wildcard socket of the port, not the group bound on the same port
+            assertEquals(57, RtpListener.socketDrops(f.getPath(), "00000000:15E0"));
+            assertEquals(5, RtpListener.socketDrops(f.getPath(), "030201EF:15E0"));
+            assertEquals(-1, RtpListener.socketDrops(f.getPath(), "00000000:15E2"));
+            assertEquals(-1, RtpListener.socketDrops(f.getPath() + ".none", "00000000:15E0"));
+            assertEquals("030201EF",
+                    RtpListener.procAddress(InetAddress.getByName("239.1.2.3"), false));
+            assertEquals("0000000000000000FFFF0000030201EF",
+                    RtpListener.procAddress(InetAddress.getByName("239.1.2.3"), true));
+            assertEquals("00000000000000000000000000000000", RtpListener.procAddress(null, true));
+        } finally {
+            f.delete();
+        }
+    }
+
+    @Test
+    public void lossBeforeACodecChangeIsKept() throws Exception {
+        int port = freePort();
+        rec.latch = new CountDownLatch(4);
+        listen("udp://@:" + port);
+        send(port, 96, 2);
+        seq += 3; // three H.264 packets lost
+        send(port, 96, 2);
+        assertTrue(rec.latch.await(3, TimeUnit.SECONDS));
+        rec.latch = new CountDownLatch(2);
+        send(port, 97, 2); // the camera switched to H.265
+        assertTrue(rec.latch.await(3, TimeUnit.SECONDS));
+        long deadline = System.currentTimeMillis() + 2000;
+        Map<String, Object> st = session.udpListenStats();
+        while (!Long.valueOf(3).equals(st.get("rtp_lost"))
+                && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10);
+            st = session.udpListenStats();
+        }
+        assertEquals(3L, st.get("rtp_lost"));
     }
 }

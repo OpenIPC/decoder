@@ -12,6 +12,15 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.18.3 — 2026-10-21
+
+- `udp://` slots and the U cell: a thread of its own reads the socket into a ring of 1024
+  datagrams, so key-frame bursts no longer overflow the small socket buffer an app gets
+  (`rmem_max`) while the decoder or the UI hold up the receive; the log shows the buffer the
+  kernel gave. While the U cell receives a push, the other slots get no stream checks, which
+  made the box drop datagrams. `/stats.json` adds `udp` to the cell: `rcvbuf`, `received`,
+  `ring_dropped`, `rtp_lost` and, where the app may read it, `socket_drops` (#251).
+
 ## 2.18.2 — 2026-10-20
 
 - Single view: the decoder is set up for the stream's size from its SPS, so streams above
