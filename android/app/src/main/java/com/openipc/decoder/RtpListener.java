@@ -42,8 +42,10 @@ class RtpListener implements Closeable {
     private static final int RCVBUF = 2 * 1024 * 1024;
     /** Datagrams held between the receive thread and the rest: a few key frames. */
     static final int RING = 1024;
-    /** Starting size of a ring slot; one grows for a longer datagram. */
+    /** Size of a ring slot; a longer datagram gets a slot of its own, not kept (Qodo on #252). */
     private static final int SLOT = 1600;
+    /** Datagrams handled before the stop condition and the reorder deadlines again. */
+    private static final int BATCH = 64;
 
     interface Handler {
         void onPacket(byte[] buf, int offset, int length);
@@ -177,10 +179,20 @@ class RtpListener implements Closeable {
     /** Datagrams thrown away because the ring was full. */
     private volatile long ringDropped;
     private volatile IOException readError;
+    /**
+     * Published by the session thread for /stats.json (Qodo on #252): the video payload type
+     * (-1 until known), the gaps in its sequence, the kernel's drop count (-1: unreadable).
+     */
+    private volatile int videoPt;
+    private volatile long rtpLost;
+    private volatile long socketDrops = -1;
+    private boolean dropsReadable = true;
+    private long dropsReadNs;
 
     RtpListener(String tag, Url url) throws IOException {
         this.tag = tag;
         this.url = url;
+        this.videoPt = url.pt;
         MulticastSocket s = new MulticastSocket(null);
         try {
             if (url.multicast()) {
@@ -289,21 +301,23 @@ class RtpListener implements Closeable {
                     Thread.currentThread().interrupt();
                     break;
                 }
-                // Everything waiting, then the reorder deadlines
-                while (slot != null) {
+                // A batch of what is waiting, then the condition and the reorder deadlines
+                for (int n = 0; slot != null; n++) {
                     int len = ((slot[0] & 0xFF) << 24) | ((slot[1] & 0xFF) << 16)
                             | ((slot[2] & 0xFF) << 8) | (slot[3] & 0xFF);
                     int pt = slot[5] & 0x7F;
                     RtpReorder r = reorders[pt];
                     if (r == null) r = reorders[pt] = new RtpReorder(64, UdpReceiver.REORDER_MS);
                     r.push(slot, 4, len, System.nanoTime(), sink);
-                    free.offer(slot);
-                    slot = filled.poll();
+                    // A slot grown for a long datagram is not kept: the ring stays small
+                    free.offer(slot.length > SLOT + 4 ? new byte[SLOT + 4] : slot);
+                    slot = n + 1 < BATCH ? filled.poll() : null;
                 }
                 now = System.nanoTime();
                 for (RtpReorder r : reorders) {
                     if (r != null) r.poll(now, sink);
                 }
+                publishStats(now);
             }
         } catch (IOException e) {
             if (!closed) throw e;
@@ -321,23 +335,35 @@ class RtpListener implements Closeable {
 
     /**
      * For /stats.json (#251): the buffer the kernel gave, datagrams read, dropped by a full
-     * ring, missing from the sequence of the video payload type {@code videoPt} (-1: every
-     * type), and the kernel's drop count of the port when the app may read it.
+     * ring, missing from the sequence of the video payload type (0 until it is known), and
+     * the kernel's drop count of the port when the app may read it.
      */
-    Map<String, Object> stats(int videoPt) {
+    Map<String, Object> stats() {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("rcvbuf", rcvbuf);
         m.put("received", received);
         m.put("ring_dropped", ringDropped);
-        long lost = 0;
-        for (int pt = 0; pt < reorders.length; pt++) {
-            RtpReorder r = reorders[pt];
-            if (r != null && (videoPt < 0 || pt == videoPt)) lost += r.skipped();
-        }
-        m.put("rtp_lost", lost);
-        long drops = socketDrops(url.port);
+        m.put("rtp_lost", rtpLost);
+        long drops = socketDrops;
         if (drops >= 0) m.put("socket_drops", drops);
         return m;
+    }
+
+    /** The video payload type, once the session knows it; its gaps are {@code rtp_lost}. */
+    void setVideoPt(int pt) { videoPt = pt; }
+
+    /** On the session thread: the loss counters for stats(), /proc at most once a second. */
+    private void publishStats(long now) {
+        int pt = videoPt;
+        RtpReorder r = pt >= 0 ? reorders[pt] : null;
+        rtpLost = r != null ? r.skipped() : 0;
+        if (dropsReadable && now - dropsReadNs >= 1_000_000_000L) {
+            dropsReadNs = now;
+            long d = socketDrops(url.port);
+            // Not readable now is not readable later: no more tries
+            if (d < 0) dropsReadable = false;
+            socketDrops = d;
+        }
     }
 
     /**

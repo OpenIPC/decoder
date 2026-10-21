@@ -104,8 +104,6 @@ class RtspSession {
     private boolean udpPlaying;
     /** Listener of a udp:// slot, else null. */
     private RtpListener listener;
-    /** Video payload type of the stream the listener receives, or -1 (#251). */
-    private volatile int listenVideoPt = -1;
     /** A udp:// slot is listening: silence is reported, never "fixed" by a rebind. */
     private volatile boolean listening;
     /** Client of a flowufo:// slot (#187), else null: it probes on its own when silent. */
@@ -740,7 +738,7 @@ class RtspSession {
         synchronized (lock) {
             l = listener;
         }
-        return l != null ? l.stats(listenVideoPt) : null;
+        return l != null ? l.stats() : null;
     }
 
     /** FLOW-UFO statistics for /stats.json while a flowufo:// slot runs (#187), else null. */
@@ -947,7 +945,6 @@ class RtspSession {
             }
             listener = l;
             listening = true;
-            listenVideoPt = -1;
             // No RTSP here: nothing of an older connection may be sent by the watchdog
             keepalive = null;
             lastPacketMs = System.nanoTime() / 1_000_000;
@@ -983,7 +980,7 @@ class RtspSession {
                     sdp.videoPt = pt;
                     sdp.videoH265 = u.h265(pt);
                     current[0] = sdp;
-                    listenVideoPt = pt;
+                    l.setVideoPt(pt);
                     Log.i(TAG, tag + ": RTP payload type " + pt
                             + (sdp.videoH265 ? ", H.265" : ", H.264"));
                     callback.onSdp(sdp);

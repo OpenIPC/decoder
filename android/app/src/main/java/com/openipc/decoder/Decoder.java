@@ -1170,6 +1170,8 @@ public class Decoder extends Activity
                 v.setVisibility(showStats ? View.VISIBLE : View.GONE);
                 if (log) Log.i(TAG, "Quad-" + i + ": " + line);
             }
+            // Not only on debug requests: a push that starts ends the checks within a second
+            streamProbes.hold(pushReceived());
             checkDecoderStuck(cells);
             planDecoding(cells, now);
             updateDebugUrls();
@@ -1726,8 +1728,10 @@ public class Decoder extends Activity
             urls[i] = mHosts[i] != null && !mHosts[i].isEmpty() && !mHosts[i].equals(DEFAULT_URL)
                     ? mHosts[i] : null;
         }
+        boolean push = pushReceived();
+        streamProbes.hold(push);
         streamProbes.update(urls, mTransports, udpViewShown ? null : mHost,
-                mResumed && (udpViewShown ? !pushReceived() : !quadEnabled));
+                mResumed && (udpViewShown ? !push : !quadEnabled));
     }
 
     /**

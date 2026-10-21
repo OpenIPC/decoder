@@ -303,7 +303,14 @@ public class RtpListenerTest {
         seq += 5; // five packets lost on the way
         send(port, 96, 3);
         assertTrue(rec.latch.await(3, TimeUnit.SECONDS));
+        // Published by the session thread after the batch
         Map<String, Object> st = session.udpListenStats();
+        long deadline = System.currentTimeMillis() + 2000;
+        while (!Long.valueOf(5).equals(st.get("rtp_lost"))
+                && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10);
+            st = session.udpListenStats();
+        }
         assertTrue((Integer) st.get("rcvbuf") > 0);
         assertEquals(6L, st.get("received"));
         assertEquals(0L, st.get("ring_dropped"));
