@@ -184,6 +184,8 @@ class RtpListener implements Closeable {
      * (-1 until known), the gaps in its sequence, the kernel's drop count (-1: unreadable).
      */
     private volatile int videoPt;
+    /** Every payload type that was video in this listener: losses before a codec change stay. */
+    private final boolean[] videoTypes = new boolean[128];
     private volatile long rtpLost;
     private volatile long socketDrops = -1;
     private boolean dropsReadable = true;
@@ -355,8 +357,12 @@ class RtpListener implements Closeable {
     /** On the session thread: the loss counters for stats(), /proc at most once a second. */
     private void publishStats(long now) {
         int pt = videoPt;
-        RtpReorder r = pt >= 0 ? reorders[pt] : null;
-        rtpLost = r != null ? r.skipped() : 0;
+        if (pt >= 0) videoTypes[pt] = true;
+        long lost = 0;
+        for (int i = 0; i < reorders.length; i++) {
+            if (videoTypes[i] && reorders[i] != null) lost += reorders[i].skipped();
+        }
+        rtpLost = lost;
         if (dropsReadable && now - dropsReadNs >= 1_000_000_000L) {
             dropsReadNs = now;
             long d = socketDrops(url.port);

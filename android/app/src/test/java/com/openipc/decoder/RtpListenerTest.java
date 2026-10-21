@@ -336,4 +336,26 @@ public class RtpListenerTest {
             f.delete();
         }
     }
+
+    @Test
+    public void lossBeforeACodecChangeIsKept() throws Exception {
+        int port = freePort();
+        rec.latch = new CountDownLatch(4);
+        listen("udp://@:" + port);
+        send(port, 96, 2);
+        seq += 3; // three H.264 packets lost
+        send(port, 96, 2);
+        assertTrue(rec.latch.await(3, TimeUnit.SECONDS));
+        rec.latch = new CountDownLatch(2);
+        send(port, 97, 2); // the camera switched to H.265
+        assertTrue(rec.latch.await(3, TimeUnit.SECONDS));
+        long deadline = System.currentTimeMillis() + 2000;
+        Map<String, Object> st = session.udpListenStats();
+        while (!Long.valueOf(3).equals(st.get("rtp_lost"))
+                && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10);
+            st = session.udpListenStats();
+        }
+        assertEquals(3L, st.get("rtp_lost"));
+    }
 }

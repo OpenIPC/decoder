@@ -77,6 +77,9 @@ class RtpReorder {
         } else if (d >= SLOTS) {
             // Too far ahead to wait for: hand over what is held, then continue from here
             flushAll(sink);
+            // The rest of the jump is lost too, unless it is so far that the stream restarted
+            int gap = (short) (seq - expected);
+            if (gap > 0 && gap < RESTART_BEHIND) skipped += gap;
             restart(seq, buf, offset, len, sink);
         } else {
             int i = seq & (SLOTS - 1);
