@@ -293,6 +293,9 @@ class RtpListener implements Closeable {
         RtpReorder.Sink sink = handler::onPacket;
         Thread reader = new Thread(this::readLoop, tag + "-udp");
         reader.setDaemon(true);
+        // Nice -8 before the thread starts; readLoop() raises it to -19 and keeps this when the
+        // system refuses (Qodo on #254)
+        reader.setPriority(Thread.MAX_PRIORITY);
         reader.start();
         try {
             while (!closed && keepGoing.holds()) {
