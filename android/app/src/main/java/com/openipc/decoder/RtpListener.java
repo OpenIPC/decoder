@@ -9,6 +9,7 @@ package com.openipc.decoder;
 
 import android.content.Context;
 import android.net.wifi.WifiManager;
+import android.os.Process;
 import android.util.Log;
 
 import java.io.BufferedReader;
@@ -35,7 +36,9 @@ import java.util.concurrent.TimeUnit;
  * <p>
  * An app cannot get a socket buffer above {@code rmem_max} (256 KiB on many boxes), which is
  * about one 1080p key frame, so a thread of its own does nothing but read the socket into a
- * ring; reordering, assembly and the decoder never hold up the receive (#251).
+ * ring; reordering, assembly and the decoder never hold up the receive (#251). It runs at the
+ * audio priority: in a loaded grid a thread at the display priority still waited long enough for
+ * a key-frame burst to fill the socket buffer (#253).
  */
 class RtpListener implements Closeable {
     private static final String TAG = "OpenIPCDecoder";
@@ -237,6 +240,13 @@ class RtpListener implements Closeable {
      * four bytes, copied from one large buffer: datagrams are short, slots stay small.
      */
     private void readLoop() {
+        // Nice -19, above the decoder and the UI (Thread.MAX_PRIORITY is only -8): a stalled
+        // receive is a lost datagram (#253)
+        try {
+            Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO);
+        } catch (RuntimeException e) {
+            Log.w(TAG, tag + ": UDP receive thread keeps its priority: " + e.getMessage());
+        }
         byte[] buf = new byte[65536];
         DatagramPacket p = new DatagramPacket(buf, buf.length);
         InetAddress source = url.source;
@@ -283,7 +293,8 @@ class RtpListener implements Closeable {
         RtpReorder.Sink sink = handler::onPacket;
         Thread reader = new Thread(this::readLoop, tag + "-udp");
         reader.setDaemon(true);
-        // Above the decoder and the UI: a stalled receive is a lost packet
+        // Nice -8 before the thread starts; readLoop() raises it to -19 and keeps this when the
+        // system refuses (Qodo on #254)
         reader.setPriority(Thread.MAX_PRIORITY);
         reader.start();
         try {

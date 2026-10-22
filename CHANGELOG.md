@@ -12,6 +12,12 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.18.4 — 2026-10-22
+
+- `udp://` slots and the U cell: the receive thread runs at the audio priority, so a push no
+  longer loses datagrams in a loaded 3×3 grid; before, key-frame bursts still overflowed the
+  socket buffer while the thread waited for the CPU (#253).
+
 ## 2.18.3 — 2026-10-21
 
 - `udp://` slots and the U cell: a thread of its own reads the socket into a ring of 1024
