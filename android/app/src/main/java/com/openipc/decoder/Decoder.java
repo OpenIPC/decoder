@@ -2503,6 +2503,7 @@ public class Decoder extends Activity
     protected void onPause() {
         super.onPause();
         mResumed = false;
+        sShown = false;
         streamProbes.stopAll();
         menuManager.onPauseDismissBrowser();
         // The UDP view is not a saved mode: after a resume the slot or grid comes back
@@ -2660,12 +2661,15 @@ public class Decoder extends Activity
     protected void onResume() {
         super.onResume();
         mResumed = true;
+        sShown = true;
         hideSystemBars();
         startStreams();
         updateDebugUrls();
     }
 
     private boolean mResumed;
+    /** Some activity of the app is on the screen: Start on boot then leaves it alone (#255). */
+    static volatile boolean sShown;
 
     private void startStreams() {
         singleStallSeconds = 0;

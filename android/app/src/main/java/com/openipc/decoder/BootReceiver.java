@@ -46,11 +46,16 @@ public class BootReceiver extends BroadcastReceiver {
     public void onReceive(Context context, Intent intent) {
         if (!Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) return;
         if (!enabled(context)) return;
+        // A firmware autorun opened it already: another start would pause and resume it,
+        // which restarts every stream
+        if (Decoder.sShown) {
+            Log.i(TAG, "Start on boot: the app is open already");
+            return;
+        }
         if (!overlayAllowed(context)) {
             Log.w(TAG, "Start on boot: no permission to draw over other apps, Android may block the start");
         }
         Log.i(TAG, "Start on boot: opening the app");
-        // A firmware autorun may have opened it already: singleTop brings that one to the front
         Intent start = new Intent(context, Decoder.class);
         start.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         try {
