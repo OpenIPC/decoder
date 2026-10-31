@@ -66,6 +66,7 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
    rtsp://username:password@ip_address:554/stream=0
    ```
    Under the URL you can choose the transport; Auto (UDP, falling back to TCP) is the default for a new slot. Below it, **Turn** turns the picture of a camera mounted sideways or upside down, and **Mirror** flips it left to right. Other URL types: [Transports](docs/transports.md).
+   **Start on boot** opens the app by itself after the device restarts, for a box that only shows cameras: [Start on boot](docs/usage.md#start-on-boot).
 4. Press **Save**. The app connects straight away and reconnects automatically if the stream drops.
 
 ## Controls

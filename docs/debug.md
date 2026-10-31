@@ -93,6 +93,7 @@ In the single view (and the U view) the page and the snapshot still show the who
 | `ui_thread`     | string              | `ok`, or `not responding within 1000 ms` (then only the fields above are present)                                                                                  |
 | `mode`          | string              | `single`, `multi-view`, `slides` (multi-view with Slides on), `udp` (U cell full-screen), `paused` (app in background); `no activity` when no activity is attached |
 | `active_slot`   | number              | active slot, 1–8                                                                                                                                                   |
+| `start_on_boot` | object              | `on` (bool, [Start on boot](usage.md#start-on-boot)) and `overlay`: `allowed`, `missing` (Android may block the start) or `not needed` (before Android 10)         |
 | `decoder`       | object              | multi-view only: `capacity` (macroblocks/s), `learnt` (bool), `failed_load` (macroblocks/s, 0: none), see [architecture.md](architecture.md#decode-planner)        |
 | `decoder_stuck` | bool                | multi-view only: frames arrive in at least two cells and none is decoded for 20 s                                                                                  |
 | `udp`           | object              | U view only: `port` (5600) and `addresses` (the device's IPs to send to)                                                                                           |

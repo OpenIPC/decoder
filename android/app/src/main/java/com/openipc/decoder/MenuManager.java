@@ -88,6 +88,8 @@ class MenuManager {
         void onReset();
         void onShowSettings();
         void onSaveSettings();
+        /** Start on boot turned on or off in Settings (#255). */
+        void onStartOnBoot(boolean on);
         void onWebUI();
     }
 
@@ -543,7 +545,7 @@ class MenuManager {
     }
 
     void showUrlEditor(int mActive, String[] mHosts, Transport.Mode[] mTransports,
-            int[] mRotates, boolean[] mMirrors) {
+            int[] mRotates, boolean[] mMirrors, boolean startOnBoot) {
         AlertDialog.Builder builder = new AlertDialog.Builder(activity);
         builder.setTitle("Camera " + (mActive + 1) + " URL");
 
@@ -595,6 +597,11 @@ class MenuManager {
         mirror.setText("Mirror");
         mirror.setChecked(mMirrors[mActive]);
         content.addView(mirror);
+        // Start on boot (#255): for the app, not the slot
+        CheckBox boot = new CheckBox(activity);
+        boot.setText("Start on boot");
+        boot.setChecked(startOnBoot);
+        content.addView(boot);
         builder.setView(content);
 
         final int slot = mActive;
@@ -606,6 +613,9 @@ class MenuManager {
             View turned = turn.findViewById(turn.getCheckedRadioButtonId());
             if (turned != null) mRotates[slot] = (Integer) turned.getTag();
             mMirrors[slot] = mirror.isChecked();
+            if (listener != null && boot.isChecked() != startOnBoot) {
+                listener.onStartOnBoot(boot.isChecked());
+            }
             if (listener != null) listener.onSaveSettings(); // triggers save + reconnect
         });
         builder.setNegativeButton("Cancel", (dialog, which) -> dialog.cancel());
@@ -615,6 +625,23 @@ class MenuManager {
         track(dialog);
         dialog.show();
         input.requestFocus();
+    }
+
+    /**
+     * Start on boot without the permission to draw over other apps (#255), on a device with no
+     * screen to allow it: the adb command that does.
+     */
+    void showBootPermissionHint(String packageName) {
+        AlertDialog dialog = new AlertDialog.Builder(activity)
+                .setTitle("Start on boot")
+                .setMessage("Android opens the app after a reboot only if it may draw over other "
+                        + "apps, and this device has no screen to allow it. Allow it over adb:\n\n"
+                        + "adb shell appops set " + packageName + " SYSTEM_ALERT_WINDOW allow\n\n"
+                        + "Or use the autorun of the device's own app list, if it has one.")
+                .setPositiveButton("OK", null)
+                .create();
+        track(dialog);
+        dialog.show();
     }
 
     /**

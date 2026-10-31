@@ -66,6 +66,7 @@
    rtsp://username:password@ip_address:554/stream=0
    ```
    地址下方可选择传输方式，新槽位默认为 Auto（优先 UDP，必要时回退到 TCP）。其下的 **Turn** 可旋转画面，适用于侧装或倒装的摄像机；**Mirror** 可将画面左右镜像。其他地址格式见 [Transports](docs/transports.md)（英文）。
+   **Start on boot** 可在设备重启后自动打开应用，适用于只用来显示摄像机画面的盒子：[Start on boot](docs/usage.md#start-on-boot)（英文）。
 4. 点击 **Save**。应用会立即连接；视频流中断时会自动重连。
 
 ## 操作说明

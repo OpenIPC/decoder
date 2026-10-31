@@ -10,6 +10,7 @@
 - [WebUI](#webui)
 - [Opening a camera from another app](#opening-a-camera-from-another-app)
 - [Screenshots](#screenshots)
+- [Start on boot](#start-on-boot)
 - [Reset](#reset)
 
 ## First camera
@@ -19,6 +20,7 @@
 3. Enter the camera URL, for example `rtsp://user:password@192.168.1.10:554/stream=0`, and choose the transport under it (**TCP / UDP / Auto / Multicast**, a new slot starts on Auto). URL formats: [transports.md](transports.md).
    Below them, **Turn** (**Auto**, **0°**, **90° ↺**, **180°**, **270° ↺**, counter-clockwise) turns the picture of a camera mounted sideways or upside down ([#201](https://github.com/OpenIPC/decoder/issues/201)). **Auto** leaves it to the URL's `?rotate=` and the toys' defaults. It applies in the single view and in the grid, to H.264, H.265 and MJPEG, and to snapshots and screenshots; the decoder turns the picture (Android 6+; before that only MJPEG is turned).
    **Mirror** flips the picture left to right, after the turn ([#226](https://github.com/OpenIPC/decoder/issues/226)), in the single view and in the grid, for H.264, H.265 and MJPEG, and in snapshots and screenshots. A mirrored H.264/H.265 slot is drawn with OpenGL ES instead of straight by the decoder (this path also turns it, on any Android version); a mirrored MJPEG slot is decoded in software.
+   **Start on boot** is for the app, not the slot: see [Start on boot](#start-on-boot).
 4. **Save**. The app connects at once and reconnects by itself when the stream drops (exponential back-off, 1 s up to 30 s).
 
 The URL dialog is titled `Camera N URL`. The picture is fitted to the screen whatever its shape, without cropping. URLs are stored encrypted, see [security.md](security.md#credential-store).
@@ -117,6 +119,21 @@ adb shell am start -a android.intent.action.SEND -t text/plain \
 ## Screenshots
 
 A long press in the single view saves the picture to `Pictures/OpenIPC` (at most 3840×2160; a larger stream is scaled down). Screenshots need Android 7.0 or newer; Android 7–9 ask for the storage permission first. For a picture of the whole grid from another computer use `/snapshot.jpg` of the [debug page](debug.md#snapshot).
+
+## Start on boot
+
+For a box that only shows cameras (a wall display, a stand): the app opens by itself after the device starts, with the saved slots and view ([#255](https://github.com/OpenIPC/decoder/issues/255)).
+
+- **The device's own autorun first.** Some TV-box firmwares have one in their app list: the Menu key on the Decoder tile, then **AUTORUN** (**CLEAN AUTORUN** turns it off). It needs nothing from the app. Do not turn on both: the app would be opened twice.
+- **Otherwise, Start on boot** in **Settings** (any slot; off by default). It takes effect when the device has finished starting, which on a TV box can be a minute after power-on.
+- Android 10 and newer open an app from the background only if it may draw over other apps. When you turn the setting on without that permission, the app opens the system screen *Display over other apps*. Many TV boxes have no such screen: the app then shows the adb command that allows it:
+
+  ```sh
+  adb shell appops set com.openipc.decoder SYSTEM_ALERT_WINDOW allow
+  ```
+
+- Whether it is on and allowed: `start_on_boot` in [`/stats.json`](debug.md#statsjson-fields). **Reset** turns it off.
+- Waking a box from standby is up to the device: if it stays dark after power-on until a key is pressed, no app setting changes that.
 
 ## Reset
 

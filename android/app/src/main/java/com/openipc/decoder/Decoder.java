@@ -592,7 +592,8 @@ public class Decoder extends Activity
 
     @Override
     public void onShowSettings() {
-        menuManager.showUrlEditor(mActive, mHosts, mTransports, mRotates, mMirrors);
+        menuManager.showUrlEditor(mActive, mHosts, mTransports, mRotates, mMirrors,
+                BootReceiver.enabled(this));
     }
 
     @Override
@@ -600,6 +601,21 @@ public class Decoder extends Activity
 
     @Override
     public void onSaveSettings() { saveSettings(); }
+
+    @Override
+    public void onStartOnBoot(boolean on) {
+        BootReceiver.setEnabled(this, on);
+        Log.i(TAG, "Start on boot " + (on ? "on" : "off"));
+        if (!on || BootReceiver.overlayAllowed(this)) return;
+        // Android 10+ (#255): the system screen to allow drawing over other apps, if there is one
+        Intent allow = new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:" + getPackageName()));
+        try {
+            startActivity(allow);
+        } catch (ActivityNotFoundException e) {
+            menuManager.showBootPermissionHint(getPackageName());
+        }
+    }
 
     // ====================== Video lifecycle ======================
 
@@ -1598,6 +1614,11 @@ public class Decoder extends Activity
         m.put("mode", !mResumed ? "paused" : udpViewShown ? "udp"
                 : quadEnabled ? (slides ? "slides" : "multi-view") : "single");
         m.put("active_slot", mActive + 1);
+        Map<String, Object> boot = new LinkedHashMap<>();
+        boot.put("on", BootReceiver.enabled(this));
+        boot.put("overlay", !BootReceiver.overlayNeeded() ? "not needed"
+                : BootReceiver.overlayAllowed(this) ? "allowed" : "missing");
+        m.put("start_on_boot", boot);
         DecodePlanner planner = decodePlanner;
         if (quadEnabled && planner != null) {
             // Decoder capacity in macroblocks/s: declared, or learnt on this device (#85)
