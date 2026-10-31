@@ -15,6 +15,9 @@ import android.os.Build;
 import android.provider.Settings;
 import android.util.Log;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 public class BootReceiver extends BroadcastReceiver {
     private static final String TAG = "OpenIPCDecoder";
     /** In the "settings" preferences, so Reset (#171) turns it off too. */
@@ -42,13 +45,22 @@ public class BootReceiver extends BroadcastReceiver {
         return !overlayNeeded() || Settings.canDrawOverlays(context);
     }
 
+    /** For /stats.json, with or without an activity (Qodo on #256). */
+    static Map<String, Object> state(Context context) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("on", enabled(context));
+        m.put("overlay", !overlayNeeded() ? "not needed"
+                : overlayAllowed(context) ? "allowed" : "missing");
+        return m;
+    }
+
     @Override
     public void onReceive(Context context, Intent intent) {
         if (!Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) return;
         if (!enabled(context)) return;
         // A firmware autorun opened it already: another start would pause and resume it,
         // which restarts every stream
-        if (Decoder.sShown) {
+        if (Decoder.sAlive.get() > 0) {
             Log.i(TAG, "Start on boot: the app is open already");
             return;
         }

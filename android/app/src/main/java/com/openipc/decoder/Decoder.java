@@ -190,6 +190,7 @@ public class Decoder extends Activity
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        sAlive.incrementAndGet();
         setContentView(R.layout.decoder);
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -1614,11 +1615,7 @@ public class Decoder extends Activity
         m.put("mode", !mResumed ? "paused" : udpViewShown ? "udp"
                 : quadEnabled ? (slides ? "slides" : "multi-view") : "single");
         m.put("active_slot", mActive + 1);
-        Map<String, Object> boot = new LinkedHashMap<>();
-        boot.put("on", BootReceiver.enabled(this));
-        boot.put("overlay", !BootReceiver.overlayNeeded() ? "not needed"
-                : BootReceiver.overlayAllowed(this) ? "allowed" : "missing");
-        m.put("start_on_boot", boot);
+        m.put("start_on_boot", BootReceiver.state(this));
         DecodePlanner planner = decodePlanner;
         if (quadEnabled && planner != null) {
             // Decoder capacity in macroblocks/s: declared, or learnt on this device (#85)
@@ -2503,7 +2500,6 @@ public class Decoder extends Activity
     protected void onPause() {
         super.onPause();
         mResumed = false;
-        sShown = false;
         streamProbes.stopAll();
         menuManager.onPauseDismissBrowser();
         // The UDP view is not a saved mode: after a resume the slot or grid comes back
@@ -2602,6 +2598,7 @@ public class Decoder extends Activity
         if (menuManager != null) menuManager.dismissAll();
         getWindow().getDecorView().removeCallbacks(hideBarsRunnable);
         super.onDestroy();
+        sAlive.decrementAndGet();
         DebugServer.get().clearSource(debugSource);
         streamProbes.shutdown();
         audioManager.shutdown();
@@ -2661,15 +2658,18 @@ public class Decoder extends Activity
     protected void onResume() {
         super.onResume();
         mResumed = true;
-        sShown = true;
         hideSystemBars();
         startStreams();
         updateDebugUrls();
     }
 
     private boolean mResumed;
-    /** Some activity of the app is on the screen: Start on boot then leaves it alone (#255). */
-    static volatile boolean sShown;
+    /**
+     * Decoder activities alive, from onCreate to onDestroy: Start on boot leaves an app that a
+     * firmware autorun is opening alone, even before it resumes (#255, Qodo on #256).
+     */
+    static final java.util.concurrent.atomic.AtomicInteger sAlive =
+            new java.util.concurrent.atomic.AtomicInteger();
 
     private void startStreams() {
         singleStallSeconds = 0;
