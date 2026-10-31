@@ -635,8 +635,10 @@ class MenuManager {
         AlertDialog dialog = new AlertDialog.Builder(activity)
                 .setTitle("Start on boot")
                 .setMessage("Android opens the app after a reboot only if it may draw over other "
-                        + "apps, and this device has no screen to allow it. Allow it over adb:\n\n"
-                        + "adb shell appops set " + packageName + " SYSTEM_ALERT_WINDOW allow\n\n"
+                        + "apps, and this device has no screen to allow it. Allow it over adb "
+                        + "(write-settings saves it at once, or a reboot soon after loses it):\n\n"
+                        + "adb shell appops set " + packageName + " SYSTEM_ALERT_WINDOW allow\n"
+                        + "adb shell appops write-settings\n\n"
                         + "Or use the autorun of the device's own app list, if it has one.")
                 .setPositiveButton("OK", null)
                 .create();

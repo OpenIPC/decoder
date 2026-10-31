@@ -2612,8 +2612,9 @@ public class Decoder extends Activity
         super.onNewIntent(intent);
         setIntent(intent);
         // Android 10+ may deliver it to the resumed activity without onPause()/onResume():
-        // apply the shared link now
-        if (mResumed) {
+        // apply the shared link now. Without one (the launcher, Start on boot after a firmware
+        // autorun, #255) there is nothing to apply, and a restart would only blink the streams
+        if (mResumed && intent.hasExtra(Intent.EXTRA_TEXT)) {
             leaveUdpView();
             stopStreams();
             startStreams();

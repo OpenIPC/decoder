@@ -130,7 +130,10 @@ For a box that only shows cameras (a wall display, a stand): the app opens by it
 
   ```sh
   adb shell appops set com.openipc.decoder SYSTEM_ALERT_WINDOW allow
+  adb shell appops write-settings
   ```
+
+  `write-settings` saves the change at once: Android writes app ops to disk with a delay, and a reboot soon after `appops set` loses it.
 
 - Whether it is on and allowed: `start_on_boot` in [`/stats.json`](debug.md#statsjson-fields). **Reset** turns it off.
 - Waking a box from standby is up to the device: if it stays dark after power-on until a key is pressed, no app setting changes that.
