@@ -799,7 +799,9 @@ public class JieliTest {
         Jieli.noVideoMs = 300;
         Jieli.reopenMs = 700;
         Jieli.diagnosticPorts = new int[] {diag};
-        Jieli.diagnosticMs = 500;
+        // The port lives this long (then up to a receive timeout more): long enough for the
+        // packet below to arrive on a loaded CI runner, where a pause of a second failed it (#257)
+        Jieli.diagnosticMs = 3000;
         try (FakeToy toy = new FakeToy(60000, true)) {
             toy.rtpPort = rtp;
             toy.sendVideo = false;
@@ -827,7 +829,7 @@ public class JieliTest {
             Map<String, Object> one = (Map<String, Object>) d.get(String.valueOf(diag));
             assertEquals(1, one.get("packets"));
             // The diagnostic port is freed after diagnosticMs while the session goes on
-            until = now() + 3000;
+            until = now() + 6000;
             boolean freed = false;
             while (now() < until && !freed) {
                 try (DatagramSocket again = new DatagramSocket(diag, LOOPBACK)) {

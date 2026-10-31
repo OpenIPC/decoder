@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -101,9 +102,11 @@ public class RtpListenerTest {
     // ====================== Session ======================
 
     private static final class Recorder implements RtspSession.Callback {
-        final List<String> statuses = Collections.synchronizedList(new ArrayList<>());
-        final List<Sdp> sdps = Collections.synchronizedList(new ArrayList<>());
-        final List<Integer> pts = Collections.synchronizedList(new ArrayList<>());
+        // Filled by the session thread while the test reads them: Collections.frequency() and
+        // for-each iterate, which a synchronizedList does not guard (#257)
+        final List<String> statuses = new CopyOnWriteArrayList<>();
+        final List<Sdp> sdps = new CopyOnWriteArrayList<>();
+        final List<Integer> pts = new CopyOnWriteArrayList<>();
         volatile CountDownLatch latch = new CountDownLatch(3);
 
         @Override public void onStatus(String status) { statuses.add(status); }
