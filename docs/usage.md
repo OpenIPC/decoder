@@ -137,6 +137,8 @@ For a box that only shows cameras (a wall display, a stand): the app opens by it
 
 - Whether it is on and allowed: `start_on_boot` in [`/stats.json`](debug.md#statsjson-fields). **Reset** turns it off.
 - Waking a box from standby is up to the device: if it stays dark after power-on until a key is pressed, no app setting changes that.
+- When the app opens is up to the device too: Android tells apps that it has started only after its own queue of start-up work. On TV boxes that is about a minute after power-on; some phone firmwares hold it back much longer (about 12 minutes on a TECNO phone with Android 15), and the app opens only then. Allowing autostart in the phone's own manager (e.g. Phone Master → *Auto-start management*) does not shorten that wait, but on such phones it may be needed for the app to start at all.
+- If the phone is locked when the app opens, it opens behind the lock screen. With the developer option *Don't keep activities* on, Android closes it again at once, and the home screen is shown after unlocking.
 
 ## Reset
 
