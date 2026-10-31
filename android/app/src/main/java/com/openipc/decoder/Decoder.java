@@ -190,7 +190,7 @@ public class Decoder extends Activity
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        sAlive.incrementAndGet();
+        sOpening = true;
         setContentView(R.layout.decoder);
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -2501,6 +2501,7 @@ public class Decoder extends Activity
     protected void onPause() {
         super.onPause();
         mResumed = false;
+        sShown = false;
         streamProbes.stopAll();
         menuManager.onPauseDismissBrowser();
         // The UDP view is not a saved mode: after a resume the slot or grid comes back
@@ -2599,7 +2600,7 @@ public class Decoder extends Activity
         if (menuManager != null) menuManager.dismissAll();
         getWindow().getDecorView().removeCallbacks(hideBarsRunnable);
         super.onDestroy();
-        sAlive.decrementAndGet();
+        sOpening = false;
         DebugServer.get().clearSource(debugSource);
         streamProbes.shutdown();
         audioManager.shutdown();
@@ -2659,6 +2660,8 @@ public class Decoder extends Activity
     protected void onResume() {
         super.onResume();
         mResumed = true;
+        sOpening = false;
+        sShown = true;
         hideSystemBars();
         startStreams();
         updateDebugUrls();
@@ -2666,11 +2669,13 @@ public class Decoder extends Activity
 
     private boolean mResumed;
     /**
-     * Decoder activities alive, from onCreate to onDestroy: Start on boot leaves an app that a
-     * firmware autorun is opening alone, even before it resumes (#255, Qodo on #256).
+     * The activity is being opened (onCreate until its first onResume) or is on the screen:
+     * Start on boot then leaves it alone, e.g. after a firmware autorun; one paused behind
+     * another app is brought back (#255, Qodo on #256).
      */
-    static final java.util.concurrent.atomic.AtomicInteger sAlive =
-            new java.util.concurrent.atomic.AtomicInteger();
+    static volatile boolean sOpening, sShown;
+
+    static boolean openOrOpening() { return sOpening || sShown; }
 
     private void startStreams() {
         singleStallSeconds = 0;

@@ -66,7 +66,7 @@ public class BootReceiver extends BroadcastReceiver {
         if (!enabled(context)) return;
         // A firmware autorun opened it already: another start would pause and resume it,
         // which restarts every stream
-        if (Decoder.sAlive.get() > 0) {
+        if (Decoder.openOrOpening()) {
             Log.i(TAG, "Start on boot: the app is open already");
             return;
         }
