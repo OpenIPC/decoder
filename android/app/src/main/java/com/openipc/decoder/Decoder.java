@@ -1605,6 +1605,8 @@ public class Decoder extends Activity
         // The video decoders and what they can do: instances, adaptive playback (#88)
         List<Map<String, Object>> decoders = CodecInfo.videoDecodersIfReady();
         m.put("decoders", decoders != null ? decoders : "loading");
+        // Preferences and a permission check: no UI state, so also when the UI thread hangs
+        m.put("start_on_boot", BootReceiver.state(this));
         return m;
     }
 
@@ -1615,7 +1617,6 @@ public class Decoder extends Activity
         m.put("mode", !mResumed ? "paused" : udpViewShown ? "udp"
                 : quadEnabled ? (slides ? "slides" : "multi-view") : "single");
         m.put("active_slot", mActive + 1);
-        m.put("start_on_boot", BootReceiver.state(this));
         DecodePlanner planner = decodePlanner;
         if (quadEnabled && planner != null) {
             // Decoder capacity in macroblocks/s: declared, or learnt on this device (#85)
