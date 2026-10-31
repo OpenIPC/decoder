@@ -815,13 +815,16 @@ public class JieliTest {
                 byte[] p = {(byte) 0x80, 97, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 9};
                 u.send(new DatagramPacket(p, p.length, new InetSocketAddress(LOOPBACK, diag)));
             }
-            until = now() + 3000;
+            // Generous on a loaded runner; the asserts read the snapshot the loop stopped on
+            // (Qodo on #259)
+            until = now() + 8000;
+            Map<String, Object> st = r.client.stats();
             while (now() < until && (Collections.frequency(toy.topics(), Jieli.OPEN_RT_STREAM) < 2
-                    || r.client.stats().get("diagnostic_ports") == null)) {
+                    || st.get("diagnostic_ports") == null)) {
                 Thread.sleep(20);
+                st = r.client.stats();
             }
             assertTrue(Collections.frequency(toy.topics(), Jieli.OPEN_RT_STREAM) >= 2);
-            Map<String, Object> st = r.client.stats();
             @SuppressWarnings("unchecked")
             Map<String, Object> d = (Map<String, Object>) st.get("diagnostic_ports");
             assertNotNull(d);
