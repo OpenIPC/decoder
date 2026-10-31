@@ -799,7 +799,9 @@ public class JieliTest {
         Jieli.noVideoMs = 300;
         Jieli.reopenMs = 700;
         Jieli.diagnosticPorts = new int[] {diag};
-        Jieli.diagnosticMs = 500;
+        // The port lives this long (then up to a receive timeout more): long enough for the
+        // packet below to arrive on a loaded CI runner, where a pause of a second failed it (#257)
+        Jieli.diagnosticMs = 3000;
         try (FakeToy toy = new FakeToy(60000, true)) {
             toy.rtpPort = rtp;
             toy.sendVideo = false;
@@ -813,13 +815,16 @@ public class JieliTest {
                 byte[] p = {(byte) 0x80, 97, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 9};
                 u.send(new DatagramPacket(p, p.length, new InetSocketAddress(LOOPBACK, diag)));
             }
-            until = now() + 3000;
+            // Generous on a loaded runner; the asserts read the snapshot the loop stopped on
+            // (Qodo on #259)
+            until = now() + 8000;
+            Map<String, Object> st = r.client.stats();
             while (now() < until && (Collections.frequency(toy.topics(), Jieli.OPEN_RT_STREAM) < 2
-                    || r.client.stats().get("diagnostic_ports") == null)) {
+                    || st.get("diagnostic_ports") == null)) {
                 Thread.sleep(20);
+                st = r.client.stats();
             }
             assertTrue(Collections.frequency(toy.topics(), Jieli.OPEN_RT_STREAM) >= 2);
-            Map<String, Object> st = r.client.stats();
             @SuppressWarnings("unchecked")
             Map<String, Object> d = (Map<String, Object>) st.get("diagnostic_ports");
             assertNotNull(d);
@@ -827,7 +832,7 @@ public class JieliTest {
             Map<String, Object> one = (Map<String, Object>) d.get(String.valueOf(diag));
             assertEquals(1, one.get("packets"));
             // The diagnostic port is freed after diagnosticMs while the session goes on
-            until = now() + 3000;
+            until = now() + 6000;
             boolean freed = false;
             while (now() < until && !freed) {
                 try (DatagramSocket again = new DatagramSocket(diag, LOOPBACK)) {
