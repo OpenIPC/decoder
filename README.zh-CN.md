@@ -66,7 +66,6 @@
    rtsp://username:password@ip_address:554/stream=0
    ```
    地址下方可选择传输方式，新槽位默认为 Auto（优先 UDP，必要时回退到 TCP）。其下的 **Turn** 可旋转画面，适用于侧装或倒装的摄像机；**Mirror** 可将画面左右镜像。其他地址格式见 [Transports](docs/transports.md)（英文）。
-   **Start on boot** 可在设备重启后自动打开应用，适用于只用来显示摄像机画面的盒子：[Start on boot](docs/usage.md#start-on-boot)（英文）。
 4. 点击 **Save**。应用会立即连接；视频流中断时会自动重连。
 
 ## 操作说明
@@ -87,6 +86,10 @@
 | 长按                  | 截图（单路画面）/ 播放该画面的声音（多画面）           |
 
 菜单各项、遥控器、从其他应用分享地址以及 **Reset** 的说明见 [Usage](docs/usage.md)（英文）。
+
+## 开机自启
+
+只用来显示摄像机画面的盒子可以在开机后自动打开应用。如果设备自带的应用列表提供自启功能（在 Decoder 图标上按 Menu 键 → **AUTORUN**），请优先使用。否则在 **Settings** 中勾选 **Start on boot**；Android 10 及以上还需要"在其他应用上层显示"的权限，应用会提示如何授予。详见 [Start on boot](docs/usage.md#start-on-boot)（英文）。
 
 ## 已知限制
 

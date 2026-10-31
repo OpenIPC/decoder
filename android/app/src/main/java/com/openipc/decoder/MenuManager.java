@@ -34,6 +34,7 @@ import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.window.OnBackInvokedDispatcher;
 
@@ -602,7 +603,11 @@ class MenuManager {
         boot.setText("Start on boot");
         boot.setChecked(startOnBoot);
         content.addView(boot);
-        builder.setView(content);
+        // A phone in landscape with the keyboard up is too short for all rows: they scroll
+        // (Qodo on #256)
+        ScrollView scroll = new ScrollView(activity);
+        scroll.addView(content);
+        builder.setView(scroll);
 
         final int slot = mActive;
         builder.setPositiveButton("Save", (dialog, which) -> {
