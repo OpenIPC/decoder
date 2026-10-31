@@ -304,6 +304,7 @@ final class DebugServer {
             m.put("app", "OpenIPC Decoder");
             m.put("server", state);
             m.put("mode", "no activity");
+            if (App.context != null) m.put("start_on_boot", BootReceiver.state(App.context));
         }
         return m;
     }

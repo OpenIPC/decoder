@@ -87,6 +87,10 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 
 Every item, the remote, sharing a URL from another app and **Reset**: [Usage](docs/usage.md).
 
+## Start on boot
+
+For a box that only shows cameras, the app can open by itself after the device starts. Use the device's own autorun first, where its app list has one (the Menu key on the Decoder tile → **AUTORUN**). Otherwise turn on **Start on boot** in **Settings**; Android 10 and newer also need the permission to draw over other apps, and the app shows how to give it. Details: [Start on boot](docs/usage.md#start-on-boot).
+
 ## Known limitations
 
 > [!IMPORTANT]

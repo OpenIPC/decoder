@@ -6,6 +6,10 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Multicast RTP over Wi-Fi (#68): without a multicast lock the driver drops it -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- Start on boot (#255): the receiver opens the app when the setting is on -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Android 10+ lets an app start an activity from a boot receiver only with this (#255) -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
@@ -59,6 +63,12 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+        <!-- Start on boot (#255); BOOT_COMPLETED is a protected broadcast: only the system sends it -->
+        <receiver android:name="BootReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

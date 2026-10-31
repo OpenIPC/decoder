@@ -190,6 +190,7 @@ public class Decoder extends Activity
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        sOpening = true;
         setContentView(R.layout.decoder);
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -592,7 +593,8 @@ public class Decoder extends Activity
 
     @Override
     public void onShowSettings() {
-        menuManager.showUrlEditor(mActive, mHosts, mTransports, mRotates, mMirrors);
+        menuManager.showUrlEditor(mActive, mHosts, mTransports, mRotates, mMirrors,
+                BootReceiver.enabled(this));
     }
 
     @Override
@@ -600,6 +602,21 @@ public class Decoder extends Activity
 
     @Override
     public void onSaveSettings() { saveSettings(); }
+
+    @Override
+    public void onStartOnBoot(boolean on) {
+        BootReceiver.setEnabled(this, on);
+        Log.i(TAG, "Start on boot " + (on ? "on" : "off"));
+        if (!on || BootReceiver.overlayAllowed(this)) return;
+        // Android 10+ (#255): the system screen to allow drawing over other apps, if there is one
+        Intent allow = new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:" + getPackageName()));
+        try {
+            startActivity(allow);
+        } catch (ActivityNotFoundException e) {
+            menuManager.showBootPermissionHint(getPackageName());
+        }
+    }
 
     // ====================== Video lifecycle ======================
 
@@ -1588,6 +1605,8 @@ public class Decoder extends Activity
         // The video decoders and what they can do: instances, adaptive playback (#88)
         List<Map<String, Object>> decoders = CodecInfo.videoDecodersIfReady();
         m.put("decoders", decoders != null ? decoders : "loading");
+        // Preferences and a permission check: no UI state, so also when the UI thread hangs
+        m.put("start_on_boot", BootReceiver.state(this));
         return m;
     }
 
@@ -2482,6 +2501,7 @@ public class Decoder extends Activity
     protected void onPause() {
         super.onPause();
         mResumed = false;
+        sShown = false;
         streamProbes.stopAll();
         menuManager.onPauseDismissBrowser();
         // The UDP view is not a saved mode: after a resume the slot or grid comes back
@@ -2580,6 +2600,7 @@ public class Decoder extends Activity
         if (menuManager != null) menuManager.dismissAll();
         getWindow().getDecorView().removeCallbacks(hideBarsRunnable);
         super.onDestroy();
+        sOpening = false;
         DebugServer.get().clearSource(debugSource);
         streamProbes.shutdown();
         audioManager.shutdown();
@@ -2591,8 +2612,9 @@ public class Decoder extends Activity
         super.onNewIntent(intent);
         setIntent(intent);
         // Android 10+ may deliver it to the resumed activity without onPause()/onResume():
-        // apply the shared link now
-        if (mResumed) {
+        // apply the shared link now. Without one (the launcher, Start on boot after a firmware
+        // autorun, #255) there is nothing to apply, and a restart would only blink the streams
+        if (mResumed && intent.hasExtra(Intent.EXTRA_TEXT)) {
             leaveUdpView();
             stopStreams();
             startStreams();
@@ -2638,12 +2660,22 @@ public class Decoder extends Activity
     protected void onResume() {
         super.onResume();
         mResumed = true;
+        sOpening = false;
+        sShown = true;
         hideSystemBars();
         startStreams();
         updateDebugUrls();
     }
 
     private boolean mResumed;
+    /**
+     * The activity is being opened (onCreate until its first onResume) or is on the screen:
+     * Start on boot then leaves it alone, e.g. after a firmware autorun; one paused behind
+     * another app is brought back (#255, Qodo on #256).
+     */
+    static volatile boolean sOpening, sShown;
+
+    static boolean openOrOpening() { return sOpening || sShown; }
 
     private void startStreams() {
         singleStallSeconds = 0;

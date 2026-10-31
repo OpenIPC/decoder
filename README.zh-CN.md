@@ -87,6 +87,10 @@
 
 菜单各项、遥控器、从其他应用分享地址以及 **Reset** 的说明见 [Usage](docs/usage.md)（英文）。
 
+## 开机自启
+
+只用来显示摄像机画面的盒子可以在开机后自动打开应用。如果设备自带的应用列表提供自启功能（在 Decoder 图标上按 Menu 键 → **AUTORUN**），请优先使用。否则在 **Settings** 中勾选 **Start on boot**；Android 10 及以上还需要"在其他应用上层显示"的权限，应用会提示如何授予。详见 [Start on boot](docs/usage.md#start-on-boot)（英文）。
+
 ## 已知限制
 
 > [!IMPORTANT]

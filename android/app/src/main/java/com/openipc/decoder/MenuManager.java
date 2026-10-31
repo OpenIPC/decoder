@@ -34,6 +34,7 @@ import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.window.OnBackInvokedDispatcher;
 
@@ -88,6 +89,8 @@ class MenuManager {
         void onReset();
         void onShowSettings();
         void onSaveSettings();
+        /** Start on boot turned on or off in Settings (#255). */
+        void onStartOnBoot(boolean on);
         void onWebUI();
     }
 
@@ -543,7 +546,7 @@ class MenuManager {
     }
 
     void showUrlEditor(int mActive, String[] mHosts, Transport.Mode[] mTransports,
-            int[] mRotates, boolean[] mMirrors) {
+            int[] mRotates, boolean[] mMirrors, boolean startOnBoot) {
         AlertDialog.Builder builder = new AlertDialog.Builder(activity);
         builder.setTitle("Camera " + (mActive + 1) + " URL");
 
@@ -595,7 +598,16 @@ class MenuManager {
         mirror.setText("Mirror");
         mirror.setChecked(mMirrors[mActive]);
         content.addView(mirror);
-        builder.setView(content);
+        // Start on boot (#255): for the app, not the slot
+        CheckBox boot = new CheckBox(activity);
+        boot.setText("Start on boot");
+        boot.setChecked(startOnBoot);
+        content.addView(boot);
+        // A phone in landscape with the keyboard up is too short for all rows: they scroll
+        // (Qodo on #256)
+        ScrollView scroll = new ScrollView(activity);
+        scroll.addView(content);
+        builder.setView(scroll);
 
         final int slot = mActive;
         builder.setPositiveButton("Save", (dialog, which) -> {
@@ -606,6 +618,9 @@ class MenuManager {
             View turned = turn.findViewById(turn.getCheckedRadioButtonId());
             if (turned != null) mRotates[slot] = (Integer) turned.getTag();
             mMirrors[slot] = mirror.isChecked();
+            if (listener != null && boot.isChecked() != startOnBoot) {
+                listener.onStartOnBoot(boot.isChecked());
+            }
             if (listener != null) listener.onSaveSettings(); // triggers save + reconnect
         });
         builder.setNegativeButton("Cancel", (dialog, which) -> dialog.cancel());
@@ -615,6 +630,25 @@ class MenuManager {
         track(dialog);
         dialog.show();
         input.requestFocus();
+    }
+
+    /**
+     * Start on boot without the permission to draw over other apps (#255), on a device with no
+     * screen to allow it: the adb command that does.
+     */
+    void showBootPermissionHint(String packageName) {
+        AlertDialog dialog = new AlertDialog.Builder(activity)
+                .setTitle("Start on boot")
+                .setMessage("Android opens the app after a reboot only if it may draw over other "
+                        + "apps, and this device has no screen to allow it. Allow it over adb "
+                        + "(write-settings saves it at once, or a reboot soon after loses it):\n\n"
+                        + "adb shell appops set " + packageName + " SYSTEM_ALERT_WINDOW allow\n"
+                        + "adb shell appops write-settings\n\n"
+                        + "Or use the autorun of the device's own app list, if it has one.")
+                .setPositiveButton("OK", null)
+                .create();
+        track(dialog);
+        dialog.show();
     }
 
     /**

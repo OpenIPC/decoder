@@ -12,6 +12,16 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.19.0 — 2026-10-31
+
+- **Start on boot** in Settings, off by default: the app opens by itself after the device
+  starts, for a box that only shows cameras. Android 10+ needs the permission to draw over
+  other apps for it; turning the setting on opens that system screen, or shows the adb command
+  on devices without one. A firmware autorun, where the device has one, needs nothing from the
+  app. `/stats.json` adds `start_on_boot` (#255).
+- Opening the app again while it plays (the launcher, a second autostart) no longer restarts
+  the streams; only a shared link does (#255).
+
 ## 2.18.4 — 2026-10-22
 
 - `udp://` slots and the U cell: the receive thread runs at the audio priority, so a push no
