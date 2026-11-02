@@ -178,6 +178,8 @@ public class Decoder extends Activity
     private boolean okDown;
     /** That OK was held: the long action ran, its release does nothing more. */
     private boolean okHeld;
+    /** Up or Down went down in the single view: only its own release may pan. */
+    private boolean arrowDown;
     /** Up or Down repeated while held: it zoomed, its release does not pan as well. */
     private boolean arrowRepeated;
     /** The multi-view cell a long OK or Menu acts on, -1 before the first key. */
@@ -2827,7 +2829,10 @@ public class Decoder extends Activity
             case KeyEvent.KEYCODE_DPAD_DOWN:
                 // A short Up or Down pans; a held one zoomed already
                 if (isSingleView() && !menuManager.isPopupShowing()) {
-                    if (!arrowRepeated) panBy(keyCode);
+                    // Only a press that reached this view, neither cancelled nor held (Qodo on
+                    // #264)
+                    if (arrowDown && !arrowRepeated && !event.isCanceled()) panBy(keyCode);
+                    arrowDown = false;
                     arrowRepeated = false;
                     return true;
                 }
@@ -2851,6 +2856,7 @@ public class Decoder extends Activity
         if (isSingleView()) {
             if (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
                 if (event.getRepeatCount() == 0) {
+                    arrowDown = true;
                     arrowRepeated = false;
                 } else {
                     arrowRepeated = true;
@@ -2904,7 +2910,12 @@ public class Decoder extends Activity
         quadContainer.removeCallbacks(hideQuadSelection);
         for (int i = 0; i < CELL_COUNT; i++) {
             View f = quadSelectFrames[i];
-            if (f != null) f.setVisibility(show && i == quadSelected ? View.VISIBLE : View.GONE);
+            if (f == null) continue;
+            boolean on = show && i == quadSelected;
+            f.setVisibility(on ? View.VISIBLE : View.GONE);
+            // Above the cell's hint, which an empty slot or a waiting U cell keeps for good;
+            // the frame has no fill, so the hint, badge and stats stay readable (Qodo on #264)
+            if (on) f.bringToFront();
         }
         if (show) quadContainer.postDelayed(hideQuadSelection, RemoteKeys.SELECTION_SHOWN_MS);
     }
