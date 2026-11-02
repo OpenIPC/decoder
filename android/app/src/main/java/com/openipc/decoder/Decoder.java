@@ -974,6 +974,8 @@ public class Decoder extends Activity
                 // Long press selects the cell whose audio plays (#12); the U cell has video only
                 if (idx != U_CELL) {
                     quadViews[idx].setOnLongClickListener(v -> {
+                        // The remote's next arrow starts from the cell touched last (Qodo on #264)
+                        quadSelected = idx;
                         toggleQuadAudio(idx);
                         return true;
                     });
@@ -2888,8 +2890,15 @@ public class Decoder extends Activity
         } else if (quadEnabled && !udpViewShown) {
             ensureQuadSelected();
             showQuadSelection(true);
+            QuadCell[] cells = quadCells;
+            boolean camera = cells != null && cells[quadSelected] != null;
             if (quadSelected == U_CELL) {
                 Toast.makeText(this, "The U cell has video only", Toast.LENGTH_SHORT).show();
+            } else if (!camera && quadAudio != quadSelected) {
+                // An empty slot has no sound to play; one stored from before may still go off
+                // (Qodo on #264)
+                Toast.makeText(this, "Camera " + (quadSelected + 1) + " is not configured",
+                        Toast.LENGTH_SHORT).show();
             } else {
                 toggleQuadAudio(quadSelected);
             }

@@ -71,7 +71,7 @@ The app is in the Leanback launcher of Android TV devices and does not require a
 With the menu closed the remote does what the gestures do ([#263](https://github.com/OpenIPC/decoder/issues/263)):
 
 - **Single view:** hold **Up** to zoom in and **Down** to zoom out; down to 1× is the reset. A short press of an arrow moves the zoomed picture. Zoom, channel and page keys, and **+** / **−** on a keyboard, zoom in and out in steps.
-- **Multi-view:** an arrow shows a yellow frame on the selected cell (the one whose sound plays, or the first); the next arrows move it. The frame goes away after 4 s.
+- **Multi-view:** an arrow shows a yellow frame on the selected cell (the one chosen or long-pressed last; at first the one whose sound plays, or the first); the next arrows move it. The frame goes away after 4 s. An empty slot can be selected but has no sound.
 - **Hold OK:** a screenshot in the single view; in multi-view the selected cell's sound on or off. **Menu** does the same, for remotes whose **OK** has no long press. So that **OK** can be held, the menu opens when it is released.
 
 ## Multi-view
