@@ -76,14 +76,14 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 [ Exit     | Reset  | Debug  | UDP    ]
 ```
 
-| Input                 | Action                                                                 |
-|-----------------------|------------------------------------------------------------------------|
-| Tap / **OK**          | Open or close the menu                                                 |
-| **1**–**8**           | Camera slot; the number's colour shows the connection quality          |
-| **Grid** / **Slides** | Multi-view or one camera / every frame or key frames only              |
-| **Debug** / **UDP**   | Text in the multi-view cells / the camera that pushes RTP to port 5600 |
-| Pinch, double tap     | Zoom and pan, reset the zoom (single view)                             |
-| Long press            | Screenshot (single view) / play this cell's sound (multi-view)         |
+| Input                                     | Action                                                                                     |
+|-------------------------------------------|--------------------------------------------------------------------------------------------|
+| Tap / **OK**                              | Open or close the menu                                                                     |
+| **1**–**8**                               | Camera slot; the number's colour shows the connection quality                              |
+| **Grid** / **Slides**                     | Multi-view or one camera / every frame or key frames only                                  |
+| **Debug** / **UDP**                       | Text in the multi-view cells / the camera that pushes RTP to port 5600                     |
+| Pinch, double tap / hold **Up**, **Down** | Zoom and pan, reset the zoom (single view); the arrows pan                                 |
+| Long press / hold **OK**                  | Screenshot (single view) / play this cell's sound (multi-view, the arrows choose the cell) |
 
 Every item, the remote, sharing a URL from another app and **Reset**: [Usage](docs/usage.md).
 

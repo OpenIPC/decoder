@@ -20,6 +20,7 @@ import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Insets;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -171,6 +172,19 @@ public class Decoder extends Activity
     private float mPanY;
     private static final float ZOOM_MIN = 1.0f;
     private static final float ZOOM_MAX = 5.0f;
+
+    // Remote control with the menu closed (#263)
+    /** An OK went down with no menu shown: its release opens the menu, unless it was held. */
+    private boolean okDown;
+    /** That OK was held: the long action ran, its release does nothing more. */
+    private boolean okHeld;
+    /** Up or Down repeated while held: it zoomed, its release does not pan as well. */
+    private boolean arrowRepeated;
+    /** The multi-view cell a long OK or Menu acts on, -1 before the first key. */
+    private int quadSelected = -1;
+    /** A frame around each cell, shown on the selected one for a while after a key. */
+    private final View[] quadSelectFrames = new View[CELL_COUNT];
+    private final Runnable hideQuadSelection = () -> showQuadSelection(false);
 
     // Screenshot
     private boolean isTakingScreenshot;
@@ -935,6 +949,8 @@ public class Decoder extends Activity
         Arrays.fill(quadViews, null);
         Arrays.fill(quadAudioBadges, null);
         Arrays.fill(quadStats, null);
+        Arrays.fill(quadSelectFrames, null);
+        quadContainer.removeCallbacks(hideQuadSelection);
         for (int row = 0; row < size; row++) {
             LinearLayout lr = new LinearLayout(this);
             lr.setOrientation(LinearLayout.HORIZONTAL);
@@ -985,6 +1001,17 @@ public class Decoder extends Activity
                 sp.setMargins(dp(2), dp(2), dp(2), dp(2));
                 cell.addView(stats, sp);
                 quadStats[idx] = stats;
+                // The cell a remote's long OK acts on (#263): a frame, no fill, above the video
+                View frame = new View(this);
+                GradientDrawable border = new GradientDrawable();
+                border.setColor(Color.TRANSPARENT);
+                border.setStroke(dp(3), 0xFFFFD000);
+                frame.setBackground(border);
+                frame.setVisibility(View.GONE);
+                cell.addView(frame, new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT));
+                quadSelectFrames[idx] = frame;
                 lr.addView(cell, new LinearLayout.LayoutParams(
                         0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
             }
@@ -2727,12 +2754,29 @@ public class Decoder extends Activity
                 // still down, its repeats must not open it again (#207, Qodo on #208)
                 if (event.getRepeatCount() > 0) return true;
                 if (menuManager.isPopupShowing()) {
+                    okDown = false;
                     menuManager.dismissPopup();
-                } else {
-                    menuManager.showMenu(findViewById(R.id.decoder), quadEnabled, mActive,
-                            mVersion, BuildConfig.GIT_HASH, mHosts);
+                    return true;
                 }
+                // The menu opens on release, so that a held OK can be the long press of a
+                // touch screen instead (#263): onKeyLongPress needs the key tracked
+                okDown = true;
+                okHeld = false;
+                event.startTracking();
                 return true;
+            // Menu does what a held OK does, for remotes whose OK has no long press (as on
+            // Debug in the menu, #207); with the menu shown the menu gets the key
+            case KeyEvent.KEYCODE_MENU:
+                if (menuManager.isPopupShowing()) return super.onKeyDown(keyCode, event);
+                if (event.getRepeatCount() == 0) remoteLongAction();
+                return true;
+            case KeyEvent.KEYCODE_DPAD_UP:
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                if (menuManager.isPopupShowing()) return super.onKeyDown(keyCode, event);
+                if (onArrowDown(keyCode, event)) return true;
+                return super.onKeyDown(keyCode, event);
             // Back is not intercepted here (#30): the menu is a focusable PopupWindow and the
             // dialogs are Dialogs, which handle back themselves, also as predictive back
             // gestures (OnBackInvokedDispatcher, Android 13+). Without a popup, back keeps its
@@ -2744,8 +2788,151 @@ public class Decoder extends Activity
                 }
                 return super.onKeyDown(keyCode, event);
             default:
+                int zoom = RemoteKeys.zoomDirection(keyCode);
+                if (zoom != 0 && isSingleView() && !menuManager.isPopupShowing()) {
+                    zoomBy(zoom > 0 ? RemoteKeys.ZOOM_STEP : 1f / RemoteKeys.ZOOM_STEP);
+                    return true;
+                }
                 return super.onKeyDown(keyCode, event);
         }
+    }
+
+    @Override
+    public boolean onKeyLongPress(int keyCode, KeyEvent event) {
+        if ((keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER)
+                && okDown) {
+            okHeld = true;
+            remoteLongAction();
+            return true;
+        }
+        return super.onKeyLongPress(keyCode, event);
+    }
+
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+            case KeyEvent.KEYCODE_ENTER:
+                // Only an OK whose press reached this activity: the release of an OK that
+                // closed the menu, or was pressed in it, opens nothing (#207)
+                if (!okDown) return true;
+                okDown = false;
+                if (!okHeld && !event.isCanceled() && !menuManager.isPopupShowing()) {
+                    menuManager.showMenu(findViewById(R.id.decoder), quadEnabled, mActive,
+                            mVersion, BuildConfig.GIT_HASH, mHosts);
+                }
+                okHeld = false;
+                return true;
+            case KeyEvent.KEYCODE_DPAD_UP:
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                // A short Up or Down pans; a held one zoomed already
+                if (isSingleView() && !menuManager.isPopupShowing()) {
+                    if (!arrowRepeated) panBy(keyCode);
+                    arrowRepeated = false;
+                    return true;
+                }
+                return super.onKeyUp(keyCode, event);
+            default:
+                return super.onKeyUp(keyCode, event);
+        }
+    }
+
+    /** The single view is on screen: neither the grid nor the U view. */
+    private boolean isSingleView() {
+        return !quadEnabled && !udpViewShown;
+    }
+
+    /**
+     * An arrow with the menu closed (#263). Single view: Left and Right pan the zoomed picture,
+     * also while held; Up and Down zoom in and out while held and pan on a short press (on
+     * release). Multi-view: the selection frame moves between the cells.
+     */
+    private boolean onArrowDown(int keyCode, KeyEvent event) {
+        if (isSingleView()) {
+            if (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                if (event.getRepeatCount() == 0) {
+                    arrowRepeated = false;
+                } else {
+                    arrowRepeated = true;
+                    zoomBy(keyCode == KeyEvent.KEYCODE_DPAD_UP ? RemoteKeys.ZOOM_HOLD_STEP
+                            : 1f / RemoteKeys.ZOOM_HOLD_STEP);
+                }
+            } else {
+                panBy(keyCode);
+            }
+            return true;
+        }
+        if (quadEnabled && !udpViewShown && quadContainer.getChildCount() > 1) {
+            int size = quadContainer.getChildCount();
+            boolean shown = quadSelected >= 0 && quadSelectFrames[quadSelected] != null
+                    && quadSelectFrames[quadSelected].getVisibility() == View.VISIBLE;
+            // The first arrow only shows where the selection is; the next ones move it
+            if (shown) quadSelected = RemoteKeys.moveCell(quadSelected, size, keyCode);
+            else ensureQuadSelected();
+            showQuadSelection(true);
+            return true;
+        }
+        return false;
+    }
+
+    /** A held OK or Menu with the menu closed: the long press of a touch screen (#263). */
+    private void remoteLongAction() {
+        if (isSingleView()) {
+            takeScreenshot();
+        } else if (quadEnabled && !udpViewShown) {
+            ensureQuadSelected();
+            showQuadSelection(true);
+            if (quadSelected == U_CELL) {
+                Toast.makeText(this, "The U cell has video only", Toast.LENGTH_SHORT).show();
+            } else {
+                toggleQuadAudio(quadSelected);
+            }
+        }
+    }
+
+    /** A valid selected cell: the one whose sound plays, else the first. */
+    private void ensureQuadSelected() {
+        if (quadSelected >= 0 && quadSelected < CELL_COUNT && quadViews[quadSelected] != null) {
+            return;
+        }
+        quadSelected = quadAudio >= 0 && quadAudio < CELL_COUNT && quadViews[quadAudio] != null
+                ? quadAudio : 0;
+    }
+
+    /** The frame on the selected cell for a while, or on none. */
+    private void showQuadSelection(boolean show) {
+        quadContainer.removeCallbacks(hideQuadSelection);
+        for (int i = 0; i < CELL_COUNT; i++) {
+            View f = quadSelectFrames[i];
+            if (f != null) f.setVisibility(show && i == quadSelected ? View.VISIBLE : View.GONE);
+        }
+        if (show) quadContainer.postDelayed(hideQuadSelection, RemoteKeys.SELECTION_SHOWN_MS);
+    }
+
+    /** Zoom of the single view by a factor, about the centre of the screen (#263). */
+    private void zoomBy(float factor) {
+        if (mFitWidth <= 0 || mFitHeight <= 0) return;
+        float next = RemoteKeys.zoom(mZoomScale, factor, ZOOM_MIN, ZOOM_MAX);
+        if (next == ZOOM_MIN) {
+            resetZoom();
+            return;
+        }
+        mPanX = RemoteKeys.panAfterZoom(mPanX, mZoomScale, next);
+        mPanY = RemoteKeys.panAfterZoom(mPanY, mZoomScale, next);
+        mZoomScale = next;
+        clampPan();
+        applyZoomTransform();
+    }
+
+    /** One step of pan of the zoomed single view for an arrow (#263). */
+    private void panBy(int keyCode) {
+        if (mZoomScale <= ZOOM_MIN || mFitWidth <= 0) return;
+        float[] d = RemoteKeys.panForArrow(keyCode,
+                RemoteKeys.PAN_STEP * Math.min(mFitWidth, mFitHeight));
+        mPanX += d[0];
+        mPanY += d[1];
+        clampPan();
+        applyZoomTransform();
     }
 
     // QuadCell class — extracted to QuadCell.java
