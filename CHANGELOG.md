@@ -12,6 +12,12 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.21.0 — 2026-11-04
+
+- Toy drones with a Lewei camera (vendor app WiFi UFO): the new slot URL `lewei://192.168.0.1`
+  plays their H.264 video from TCP port 7060 and restores the one byte the camera inverts in each
+  frame (#262). No flight command is sent.
+
 ## 2.20.0 — 2026-11-02
 
 - A remote with only a D-pad now reaches the actions that were touch-only (#263). With the

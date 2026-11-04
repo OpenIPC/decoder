@@ -50,7 +50,7 @@ final class StreamProbes {
         // A listening slot would take the port; the camera pushes to it, nothing to ask
         if (RtpListener.Url.matches(url)) return "UDP listen slot: not checked in single view";
         // A toy drone sends to one client; a check would take the stream from the screen
-        if (FlowUfo.Url.matches(url) || Jieli.Url.matches(url)) {
+        if (FlowUfo.Url.matches(url) || Jieli.Url.matches(url) || Lewei.Url.matches(url)) {
             return "toy drone slot: not checked in single view";
         }
         String e = endpoint(url);

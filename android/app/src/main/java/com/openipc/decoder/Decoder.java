@@ -1840,6 +1840,7 @@ public class Decoder extends Activity
         if (HttpMjpeg.matches(url)) return "HTTP";
         if (FlowUfo.Url.matches(url)) return "FLOW-UFO UDP";
         if (Jieli.Url.matches(url)) return "Jieli RTP";
+        if (Lewei.Url.matches(url)) return "Lewei TCP";
         Transport.Mode m = StreamProbe.probeMode(mTransports[i]);
         return "check over " + (m == Transport.Mode.MULTICAST ? "multicast" : m.name());
     }
