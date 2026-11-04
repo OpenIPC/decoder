@@ -12,6 +12,15 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.20.0 — 2026-11-02
+
+- A remote with only a D-pad now reaches the actions that were touch-only (#263). With the
+  menu closed: in the single view hold **Up** / **Down** to zoom in and out (down to 1× resets
+  it) and the arrows pan; zoom, channel and page keys and **+** / **−** zoom in steps. In
+  multi-view the arrows move a yellow frame over the cells. A held **OK**, or **Menu**, does
+  what a long press does: a screenshot in the single view, the selected cell's sound on or
+  off in multi-view. A remote's **OK** now opens the menu on release.
+
 ## 2.19.1 — 2026-11-02
 
 - The OpenIPC brand launcher icon and Android TV banner, shared by the OpenIPC Android apps:

@@ -55,18 +55,24 @@ Items that are on (Grid, Slides, Debug, UDP and the active slot) have an orange 
 
 ## Gestures and keys
 
-| Input                                   | Action                                                                |
-|-----------------------------------------|-----------------------------------------------------------------------|
-| Tap / **OK** / **Enter** (D-pad centre) | Open or close the menu                                                |
-| **Back** / **Esc**                      | Close the menu or a dialog; without one, Back keeps its system action |
-| Pinch, then drag                        | Zoom (1× to 5×) and pan, single view                                  |
-| Double tap                              | Reset the zoom                                                        |
-| Long press, single view                 | Save a screenshot, see [Screenshots](#screenshots)                    |
-| Long press, multi-view                  | Play this cell's sound; again to mute                                 |
+| Input                                                                               | Action                                                                |
+|-------------------------------------------------------------------------------------|-----------------------------------------------------------------------|
+| Tap / **OK** / **Enter** (D-pad centre)                                             | Open or close the menu (a remote's **OK** on release)                 |
+| **Back** / **Esc**                                                                  | Close the menu or a dialog; without one, Back keeps its system action |
+| Pinch, then drag; remote: hold **Up** / **Down**, then the arrows                   | Zoom (1× to 5×) and pan, single view                                  |
+| Double tap; remote: hold **Down** down to 1×                                        | Reset the zoom                                                        |
+| Long press, single view; remote: hold **OK**, or **Menu**                           | Save a screenshot, see [Screenshots](#screenshots)                    |
+| Long press, multi-view; remote: an arrow to the cell, then hold **OK**, or **Menu** | Play this cell's sound; again to mute                                 |
 
 ## Remote control
 
 The app is in the Leanback launcher of Android TV devices and does not require a touchscreen. **OK** opens the menu; the D-pad moves through the grid; the first key after a menu opened by touch moves the focus to the active item. In the reset dialog **Cancel** has the focus, so a stray **OK** deletes nothing.
+
+With the menu closed the remote does what the gestures do ([#263](https://github.com/OpenIPC/decoder/issues/263)):
+
+- **Single view:** hold **Up** to zoom in and **Down** to zoom out; down to 1× is the reset. A short press of an arrow moves the zoomed picture. Zoom, channel and page keys, and **+** / **−** on a keyboard, zoom in and out in steps.
+- **Multi-view:** an arrow shows a yellow frame on the selected cell (the one chosen or long-pressed last; at first the one whose sound plays, or the first); the next arrows move it. The frame goes away after 4 s. An empty slot can be selected but has no sound.
+- **Hold OK:** a screenshot in the single view; in multi-view the selected cell's sound on or off. **Menu** does the same, for remotes whose **OK** has no long press. So that **OK** can be held, the menu opens when it is released.
 
 ## Multi-view
 
@@ -88,7 +94,7 @@ Each cell has its own connection and decoder. The device's video decoder has a f
 
 Substreams of the cameras, where available, let more cells play at full rate. Some cameras accept only one RTSP client at a time.
 
-**Audio:** long-press a cell to play its sound, long-press it again to mute. The selected cell shows an **AUDIO** badge and is remembered.
+**Audio:** long-press a cell to play its sound, long-press it again to mute (remote: an arrow to the cell, then hold **OK**, or **Menu**). The selected cell shows an **AUDIO** badge and is remembered.
 
 ## Slides
 
@@ -118,7 +124,7 @@ adb shell am start -a android.intent.action.SEND -t text/plain \
 
 ## Screenshots
 
-A long press in the single view saves the picture to `Pictures/OpenIPC` (at most 3840×2160; a larger stream is scaled down). Screenshots need Android 7.0 or newer; Android 7–9 ask for the storage permission first. For a picture of the whole grid from another computer use `/snapshot.jpg` of the [debug page](debug.md#snapshot).
+A long press in the single view (remote: hold **OK**, or **Menu**) saves the picture to `Pictures/OpenIPC` (at most 3840×2160; a larger stream is scaled down). Screenshots need Android 7.0 or newer; Android 7–9 ask for the storage permission first. For a picture of the whole grid from another computer use `/snapshot.jpg` of the [debug page](debug.md#snapshot).
 
 ## Start on boot
 
