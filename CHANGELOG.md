@@ -15,8 +15,9 @@ were released.
 ## 2.21.0 — 2026-11-04
 
 - Toy drones with a Lewei camera (vendor app WiFi UFO): the new slot URL `lewei://192.168.0.1`
-  plays their H.264 video from TCP port 7060 and restores the one byte the camera inverts in each
-  frame (#262). No flight command is sent.
+  asks for their H.264 video on TCP port 7060 and restores the one byte the camera inverts in each
+  frame (#262). Checked with a capture of the vendor app, not yet on a toy. No flight command is
+  sent.
 
 ## 2.20.0 — 2026-11-02
 
