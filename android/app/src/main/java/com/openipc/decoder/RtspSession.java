@@ -967,7 +967,12 @@ class RtspSession {
                     @Override
                     public void onState(boolean receiving, String text) {
                         if (gen != generation) return;
-                        if (receiving) inUse = "Lewei TCP";
+                        if (receiving) {
+                            inUse = "Lewei TCP";
+                        } else if (c.streamRequested) {
+                            // After a lost connection: the slot waits again (Qodo on #267)
+                            status(gen, "buffering");
+                        }
                         callback.onDetail(text);
                     }
 

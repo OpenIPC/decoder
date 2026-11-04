@@ -67,6 +67,8 @@ final class Lewei {
     private static final int ARG_AT = 14;
     private static final int LENGTH_AT = 22;
     private static final int STREAM_TYPE_AT = 26;
+    /** Where the length of a frame is, in the 32 bytes before it. */
+    private static final int FRAME_LENGTH_AT = 4;
     /** Where the counter of a frame is, in the 32 bytes before it. */
     private static final int COUNTER_AT = 8;
 
@@ -206,6 +208,16 @@ final class Lewei {
                 }
                 int length = le32(buf, start + LENGTH_AT);
                 if (length < 0 || length > MAX_MESSAGE) {
+                    start++;
+                    skipped++;
+                    resync();
+                    continue;
+                }
+                // A damaged length would hold back the good messages behind it: a video
+                // message says its length twice
+                if (le32(buf, start + CMD_AT) == CMD_VIDEO && length > VIDEO_HEADER
+                        && end - start >= HEADER + FRAME_LENGTH_AT + 4
+                        && le32(buf, start + HEADER + FRAME_LENGTH_AT) != length - VIDEO_HEADER) {
                     start++;
                     skipped++;
                     resync();

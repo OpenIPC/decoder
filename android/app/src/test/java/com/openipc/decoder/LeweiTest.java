@@ -56,6 +56,7 @@ public class LeweiTest {
         body[0] = (byte) (key ? 1 : 0);
         body[4] = (byte) annexB.length;
         body[5] = (byte) (annexB.length >> 8);
+        body[6] = (byte) (annexB.length >> 16);
         body[8] = (byte) timeMs;
         body[9] = (byte) (timeMs >> 8);
         body[10] = (byte) (timeMs >> 16);
@@ -190,6 +191,23 @@ public class LeweiTest {
         assertTrue(r.isVideo());
         assertEquals(Lewei.VIDEO_HEADER + 4, r.bodyLength);
         assertEquals(6 + tooLong.length, r.skipped);
+    }
+
+    /** A plausible but wrong length must not hold back the frames behind it (Qodo on #267). */
+    @Test
+    public void wrongVideoLengthIsSeenBeforeItsBodyArrives() {
+        byte[] damaged = video(false, 1, new byte[]{0, 0, 1, 0x21});
+        damaged[23] = 0x10;
+        byte[] good = video(false, 2, new byte[]{0, 0, 1, 0x21, 1});
+        ByteArrayOutputStream s = new ByteArrayOutputStream();
+        s.write(damaged, 0, damaged.length);
+        s.write(good, 0, good.length);
+        byte[] b = s.toByteArray();
+        Lewei.Reader r = new Lewei.Reader();
+        feed(r, b, 0, b.length);
+        assertTrue(r.next());
+        assertEquals(Lewei.VIDEO_HEADER + 5, r.bodyLength);
+        assertEquals(2, r.timeMs());
     }
 
     @Test

@@ -135,7 +135,7 @@ To use it: join the `HF_…` Wi‑Fi, [stay connected](#connecting), close the v
 |             |                                                                                                                                                       |
 |-------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Wi‑Fi name  | not known yet                                                                                                                                         |
-| Camera      | Lewei; vendor app *WiFi UFO* (`com.lewei.multiple.lewei`), seen on a VISUO drone                                                                      |
+| Camera      | Lewei; vendor app *WiFi UFO* 4.5.x (`com.lewei.multiple.lewei`, Google Play), seen on a VISUO drone                                                   |
 | Toy address | `192.168.0.1`, TCP port 7060                                                                                                                          |
 | Slot URL    | `lewei://192.168.0.1` (or `lewei://` alone)                                                                                                           |
 | Status      | written from a capture of the vendor app and played from that capture; not yet tried on a toy ([#262](https://github.com/OpenIPC/decoder/issues/262)) |
