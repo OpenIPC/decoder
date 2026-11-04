@@ -11,6 +11,7 @@ import android.annotation.SuppressLint;
 import android.app.AlertDialog;
 import android.app.Dialog;
 import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
@@ -162,15 +163,24 @@ class MenuManager {
         });
     }
 
+    /**
+     * A focusable popup that closes on Back. Below Android 6 a popup takes Back only with a
+     * background of its own (#265), so it gets a transparent one.
+     */
+    private PopupWindow menuPopup(View content) {
+        PopupWindow popup = new PopupWindow(content, LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT, true);
+        popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        return popup;
+    }
+
     void showMenu(View anchor, boolean quadEnabled, int mActive, String version,
                   String gitHash, String[] mHosts) {
         boolean single = !quadEnabled && !udpShown;
         if (mMenuIsCached) {
             updateCachedMenu(quadEnabled, mActive, mHosts);
             if (mMenuPopup != null) return;
-            mMenuPopup = new PopupWindow(mMenuLayout,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT, true);
+            mMenuPopup = menuPopup(mMenuLayout);
             int margin = dp(12);
             mMenuPopup.showAtLocation(anchor, Gravity.TOP | Gravity.START, margin, margin);
             mMenuPopup.setOnDismissListener(() -> mMenuPopup = null);
@@ -203,8 +213,7 @@ class MenuManager {
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setFocusableInTouchMode(true);
 
-        PopupWindow popup = new PopupWindow(layout, LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT, true);
+        PopupWindow popup = menuPopup(layout);
         int margin = dp(12);
         popup.showAtLocation(anchor, Gravity.TOP | Gravity.START, margin, margin);
         mMenuPopup = popup;
