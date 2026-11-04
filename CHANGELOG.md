@@ -12,6 +12,11 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.20.1 — 2026-11-04
+
+- On Android 5 **Back** closes the open menu again; it did nothing, only OK or Esc closed it
+  (#265).
+
 ## 2.20.0 — 2026-11-02
 
 - A remote with only a D-pad now reaches the actions that were touch-only (#263). With the
