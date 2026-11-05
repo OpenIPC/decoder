@@ -12,6 +12,11 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.21.0 — 2026-11-05
+
+- Toy drones with a Lewei camera (vendor app WiFi UFO): the new slot URL `lewei://192.168.0.1`
+  asks for their H.264 video on TCP port 7060 and restores the one byte the camera inverts in each
+  frame (#262). Checked on a VISUO drone. No flight command is sent.
 ## 2.20.1 — 2026-11-04
 
 - On Android 5 **Back** closes the open menu again; it did nothing, only OK or Esc closed it

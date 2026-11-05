@@ -116,7 +116,7 @@ For a box that only shows cameras, the app can open by itself after the device s
 | [Testing and releases](docs/testing.md) | branches, CI, unit tests, versions and releases, branch builds, `mapping.txt`, building locally                                                              |
 | [Security](docs/security.md)            | credential store, debug server (LAN only), log redaction, no encryption on the network                                                                       |
 | [Devices](docs/devices.md)              | verified and not working devices, hardware decoder notes, device and camera reports                                                                          |
-| [Drones and Wi‑Fi toys](docs/toys.md)   | how toys stream, FLOW-UFO, KY UFO and Jieli drones, what to try with an unknown toy, what to send                                                            |
+| [Drones and Wi‑Fi toys](docs/toys.md)   | how toys stream, FLOW-UFO, KY UFO, Jieli and Lewei drones, what to try with an unknown toy, what to send                                                     |
 
 The change history is the [merged pull requests](https://github.com/OpenIPC/decoder/pulls?q=is%3Apr+is%3Amerged+base%3Av2) and the [commits of v2](https://github.com/OpenIPC/decoder/commits/v2).
 

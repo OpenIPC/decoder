@@ -6,6 +6,7 @@
 - [FLOW-UFO](#flow-ufo)
 - [KY UFO RTSP toys](#ky-ufo-rtsp-toys)
 - [HF / Jieli toys](#hf--jieli-toys)
+- [Lewei toys](#lewei-toys)
 - [Credits](#credits)
 - [An unknown toy](#an-unknown-toy)
 - [What to send in a report](#what-to-send-in-a-report)
@@ -45,6 +46,7 @@ The Wi‑Fi name and the address the phone gets usually tell the family. The toy
 | `FLOW-UFO-xxxxxx`, `FLOW_xxxxxx`                               | `192.168.169.x` | FLOW-UFO (BL60x camera; turbodrone calls it `wifi_uav`)  | `flowufo://192.168.169.1` (UDP 8800 and 8801)                                   | works since 2.15, checked with a D16 ([#187](https://github.com/OpenIPC/decoder/issues/187))                                                                                        |
 | `FLY-UFO-xxxxxx` and other cooingdv toys (KY UFO, RC UFO apps) | `192.168.1.x`   | KY UFO RTSP                                              | `rtsp://192.168.1.1:7070/webcam` (with the heartbeat to UDP 7099)               | works since 2.15, checked with a K200; the picture is turned upright ([#187](https://github.com/OpenIPC/decoder/issues/187), [#200](https://github.com/OpenIPC/decoder/issues/200)) |
 | `HF_xxxxxxxx`                                                  | `192.168.80.x`  | Jieli / HF (Jieli AC79 camera, vendor app *DVRunning 2*) | `jieli://192.168.80.1` (CTP on TCP 3333, video to the phone's UDP 2224 or 6666) | works since 2.16, checked with a YL3 ([#187](https://github.com/OpenIPC/decoder/issues/187))                                                                                        |
+| `WiFi-720P-xxxxxx` (a VISUO drone, vendor app *WiFi UFO*)      | `192.168.0.x`   | Lewei                                                    | `lewei://192.168.0.1` (H.264 on TCP 7060)                                       | works since 2.21.0, checked with a VISUO drone ([#262](https://github.com/OpenIPC/decoder/issues/262))                                                                              |
 
 When a `flowufo://` or `jieli://` slot points at the phone itself, or at the network of another family, its status says so (for example *192.168.1.100 is this phone; the toy is usually 192.168.1.1*, *This network looks like a KY UFO RTSP toy: try rtsp://192.168.1.1:7070/webcam* or, on a `192.168.80.x` network, *try jieli://192.168.80.1*).
 
@@ -128,7 +130,29 @@ Status texts while it connects: *Connecting to the toy (CTP 192.168.80.1:3333)*,
 
 To use it: join the `HF_…` Wi‑Fi, [stay connected](#connecting), close the vendor app, put `jieli://192.168.80.1` into a slot. Wait about 30 s and [send a report](#what-to-send-in-a-report) in [#187](https://github.com/OpenIPC/decoder/issues/187), with or without a picture: `/stats.json` and `/log` tell what the toy really sends.
 
+## Lewei toys
+
+|             |                                                                                                                                                          |
+|-------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Wi‑Fi name  | `WiFi-720P-xxxxxx`                                                                                                                                       |
+| Camera      | Lewei; vendor app *WiFi UFO* 4.5.x (`com.lewei.multiple.lewei`, Google Play), seen on a VISUO drone                                                      |
+| Toy address | `192.168.0.1`, TCP port 7060                                                                                                                             |
+| Slot URL    | `lewei://192.168.0.1` (or `lewei://` alone)                                                                                                              |
+| Status      | works since 2.21.0, checked with a VISUO drone: the protocol follows a capture of the vendor app ([#262](https://github.com/OpenIPC/decoder/issues/262)) |
+
+What the app does, as a capture of the vendor app shows it; [pylwdrone](https://github.com/meekworth/pylwdrone) (Apache-2.0) names the fields:
+
+- It connects to TCP port 7060. Every message starts with a 46-byte header: `lewei_cmd`, a zero byte and nine little-endian 32-bit numbers (the command, an argument, one unused, the length of what follows, the stream type, two keys).
+- Command 2 with the argument 1 asks for the high-definition stream, and the video starts at once. Command 1 every second keeps it going, command 3 ends it.
+- The video is **H.264** in Annex B form, one frame in each message of command 257, behind 32 bytes of its own (a flag, the length of the frame, a counter in ms). The tested drone sends 1280×720 at 20 fps, about 2.8 Mbit/s.
+- With stream type 1 the camera has **inverted one byte** of each frame, at a place that follows from the length and the counter; the app inverts it back. Without that, frames decode only partly. Type 129 is not handled: the log says so, and the picture will have errors.
+- If no video comes for 5 s, the app connects again.
+- **No flight command is ever sent.** The vendor app also talks to TCP port 8060 (the time, a query) and sends flight packets over UDP; the video does not need either, so the app does neither.
+- The first messages of a session are written to the log in hex, for a [report](#what-to-send-in-a-report).
+
 ## Credits
+
+The Lewei fields and the inverted byte come from [pylwdrone](https://github.com/meekworth/pylwdrone) (Apache-2.0), used as a description.
 
 What the app does for FLOW-UFO and KY UFO toys was checked against [turbodrone](https://github.com/marshallrichards/turbodrone) (Apache-2.0), which flies these drones from a computer: its `wifi_uav` backend is the FLOW-UFO protocol and its `cooingdv` backend the KY UFO RTSP toys. The default quality parameters, the second port 8801 and its timing, the camera status bytes, leaving lagging frames out of the acknowledgement, the raster tables of `dqt=raster` and the 7099 heartbeat come from its code and research notes; no code of it is used. For the HF / Jieli toys its research notes on the same Jieli SDK (`rxdrone`, `cooingdv_jieli`: RTP/JPEG to UDP 6666, audio on 1234, the stream ports) describe the video part; the control part follows a PCAPdroid capture of the vendor app posted in [#196](https://github.com/OpenIPC/decoder/issues/196). More open-source work on such toys is collected in [#196](https://github.com/OpenIPC/decoder/issues/196).
 
@@ -163,9 +187,10 @@ Do not send the vendor app itself or parts of it. The capture contains only the 
 
 The drones a tester checked in [#187](https://github.com/OpenIPC/decoder/issues/187):
 
-| Toy       | Wi‑Fi       | Family                      | URL                              | Status                                                                                                      |
-|-----------|-------------|-----------------------------|----------------------------------|-------------------------------------------------------------------------------------------------------------|
-| D16       | `FLOW_…`    | FLOW-UFO, WIFI UAV app      | `flowufo://192.168.169.1:8800`   | video works                                                                                                 |
-| K200      | `FLY-UFO-…` | KY UFO, RTSP                | `rtsp://192.168.1.1:7070/webcam` | video works; the sideways picture is turned upright ([#200](https://github.com/OpenIPC/decoder/issues/200)) |
-| Drone YL3 | `HF_…`      | Jieli AC79, DVRunning 2 app | `jieli://192.168.80.1`           | video works; the sideways picture is turned upright; picture quality depends on the toy                     |
+| Toy       | Wi‑Fi         | Family                      | URL                              | Status                                                                                                      |
+|-----------|---------------|-----------------------------|----------------------------------|-------------------------------------------------------------------------------------------------------------|
+| D16       | `FLOW_…`      | FLOW-UFO, WIFI UAV app      | `flowufo://192.168.169.1:8800`   | video works                                                                                                 |
+| K200      | `FLY-UFO-…`   | KY UFO, RTSP                | `rtsp://192.168.1.1:7070/webcam` | video works; the sideways picture is turned upright ([#200](https://github.com/OpenIPC/decoder/issues/200)) |
+| Drone YL3 | `HF_…`        | Jieli AC79, DVRunning 2 app | `jieli://192.168.80.1`           | video works; the sideways picture is turned upright; picture quality depends on the toy                     |
+| VISUO     | `WiFi-720P-…` | Lewei, WiFi UFO app         | `lewei://192.168.0.1`            | video works ([#262](https://github.com/OpenIPC/decoder/issues/262))                                         |
 

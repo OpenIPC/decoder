@@ -110,6 +110,8 @@ class RtspSession {
     private volatile FlowUfo.Client ufo;
     /** Client of a jieli:// slot (#187), else null: it asks for the stream again on its own. */
     private volatile Jieli.Client jieli;
+    /** Client of a lewei:// slot (#262), else null: it ends the session on its own when silent. */
+    private volatile Lewei.Client lewei;
     /** Heartbeat of the RTSP connection now (#187), else null; counts of the earlier ones. */
     private volatile UdpHeartbeat heartbeat;
     private volatile int heartbeatsBefore;
@@ -238,6 +240,7 @@ class RtspSession {
         if (listener != null) listener.close();
         if (ufo != null) ufo.close();
         if (jieli != null) jieli.close();
+        if (lewei != null) lewei.close();
         if (heartbeat != null) heartbeat.close();
         if (udp != null) {
             udp.close();
@@ -311,7 +314,7 @@ class RtspSession {
                     }
                 }
             }
-            if (active && !listening && ufo == null && jieli == null
+            if (active && !listening && ufo == null && jieli == null && lewei == null
                     && System.nanoTime() / 1_000_000 - lastPacketMs > watchdogMs) {
                 Log.w(TAG, tag + ": stream is inactive, reconnecting");
                 active = false;
@@ -343,6 +346,10 @@ class RtspSession {
         if (FlowUfo.Url.matches(url)) {
             rotate = 0;
             return flowUfo(gen, FlowUfo.Url.parse(url));
+        }
+        if (Lewei.Url.matches(url)) {
+            rotate = 0;
+            return lewei(gen, Lewei.Url.parse(url));
         }
         if (Jieli.Url.matches(url)) {
             Jieli.Url j = Jieli.Url.parse(url);
@@ -934,6 +941,71 @@ class RtspSession {
         sdp.videoPt = pt;
         sdp.videoJpeg = pt == Jieli.PT_JPEG;
         return sdp;
+    }
+
+    /**
+     * A lewei:// slot (#262): H.264 over the toy's TCP port, handed on as RTP to the normal
+     * path. A session that ends after the stream was asked for counts like a PLAY that worked,
+     * so the next attempt comes soon, not after a growing back-off.
+     */
+    private boolean lewei(int gen, Lewei.Url u) throws IOException {
+        Lewei.Client c = new Lewei.Client(tag, u, NetInfo::bindToNetworkOf);
+        synchronized (lock) {
+            if (gen != generation) return false;
+            lewei = c;
+            keepalive = null;
+            lastPacketMs = System.nanoTime() / 1_000_000;
+            streamBytes = 0;
+            bitrateMarkNs = System.nanoTime();
+            active = true;
+        }
+        try {
+            // Not under the lock: onSdp closes decoders, and stop() runs on the UI thread
+            if (gen != generation) return false;
+            callback.onSdp(jieliSdp(Lewei.Packetizer.PT));
+            final boolean[] first = {true};
+            try {
+                c.run(() -> active && gen == generation, new Lewei.Listener() {
+                    @Override
+                    public void onState(boolean receiving, String text) {
+                        if (gen != generation) return;
+                        if (receiving) {
+                            inUse = "Lewei TCP";
+                        } else if (c.streamRequested) {
+                            // After a lost connection: the slot waits again (Qodo on #267)
+                            status(gen, "buffering");
+                        }
+                        callback.onDetail(text);
+                    }
+
+                    @Override
+                    public boolean onRtp(byte[] buf, int offset, int length) {
+                        if (gen != generation) return false;
+                        streamBytes += length;
+                        if (!callback.onPacket(CHANNEL_VIDEO, buf, offset, length)) return false;
+                        lastPacketMs = System.nanoTime() / 1_000_000;
+                        if (first[0]) {
+                            first[0] = false;
+                            status(gen, "connected");
+                        }
+                        return true;
+                    }
+                });
+            } catch (IOException e) {
+                if (!c.streamRequested || gen != generation) throw e;
+                Log.w(TAG, tag + ": Lewei: " + e.getMessage() + "; connecting again");
+                callback.onFailure(e.getMessage());
+            }
+            return true;
+        } finally {
+            synchronized (lock) {
+                if (lewei == c) {
+                    lewei = null;
+                    inUse = null;
+                }
+            }
+            c.close();
+        }
     }
 
     private boolean listen(int gen, RtpListener.Url u) throws IOException {
