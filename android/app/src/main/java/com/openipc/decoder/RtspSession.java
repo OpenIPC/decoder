@@ -960,6 +960,8 @@ class RtspSession {
             active = true;
         }
         try {
+            // Not under the lock: onSdp closes decoders, and stop() runs on the UI thread
+            if (gen != generation) return false;
             callback.onSdp(jieliSdp(Lewei.Packetizer.PT));
             final boolean[] first = {true};
             try {
