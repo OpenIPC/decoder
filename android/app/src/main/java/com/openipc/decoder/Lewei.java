@@ -101,7 +101,11 @@ final class Lewei {
                 int close = rest.indexOf(']');
                 if (close < 0) throw new IOException("Bad host in URL");
                 host = rest.substring(1, close);
-                colon = rest.indexOf(':', close);
+                String tail = rest.substring(close + 1);
+                if (!tail.isEmpty() && tail.charAt(0) != ':') {
+                    throw new IOException("Bad host in URL");
+                }
+                colon = tail.isEmpty() ? -1 : close + 1;
             } else if (colon >= 0) {
                 host = rest.substring(0, colon);
             }

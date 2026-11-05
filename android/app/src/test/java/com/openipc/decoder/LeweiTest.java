@@ -87,8 +87,19 @@ public class LeweiTest {
     }
 
     @Test
+    public void bracketedHosts() throws IOException {
+        Lewei.Url plain = Lewei.Url.parse("lewei://[::1]");
+        assertEquals("::1", plain.host);
+        assertEquals(Lewei.Url.parse("lewei://").port, plain.port);
+        Lewei.Url port = Lewei.Url.parse("lewei://[::1]:17060");
+        assertEquals("::1", port.host);
+        assertEquals(17060, port.port);
+    }
+
+    @Test
     public void badUrls() {
-        for (String s : new String[]{"lewei://h:0", "lewei://h:x", "lewei://a b", "lewei://[::1"}) {
+        for (String s : new String[]{"lewei://h:0", "lewei://h:x", "lewei://a b", "lewei://[::1",
+                "lewei://[192.168.0.1]garbage:1234", "lewei://[::1]x"}) {
             try {
                 Lewei.Url.parse(s);
                 fail(s);
