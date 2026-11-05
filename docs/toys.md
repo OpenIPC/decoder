@@ -46,7 +46,7 @@ The Wi‑Fi name and the address the phone gets usually tell the family. The toy
 | `FLOW-UFO-xxxxxx`, `FLOW_xxxxxx`                               | `192.168.169.x` | FLOW-UFO (BL60x camera; turbodrone calls it `wifi_uav`)  | `flowufo://192.168.169.1` (UDP 8800 and 8801)                                   | works since 2.15, checked with a D16 ([#187](https://github.com/OpenIPC/decoder/issues/187))                                                                                        |
 | `FLY-UFO-xxxxxx` and other cooingdv toys (KY UFO, RC UFO apps) | `192.168.1.x`   | KY UFO RTSP                                              | `rtsp://192.168.1.1:7070/webcam` (with the heartbeat to UDP 7099)               | works since 2.15, checked with a K200; the picture is turned upright ([#187](https://github.com/OpenIPC/decoder/issues/187), [#200](https://github.com/OpenIPC/decoder/issues/200)) |
 | `HF_xxxxxxxx`                                                  | `192.168.80.x`  | Jieli / HF (Jieli AC79 camera, vendor app *DVRunning 2*) | `jieli://192.168.80.1` (CTP on TCP 3333, video to the phone's UDP 2224 or 6666) | works since 2.16, checked with a YL3 ([#187](https://github.com/OpenIPC/decoder/issues/187))                                                                                        |
-| not known yet (a VISUO drone, vendor app *WiFi UFO*)           | `192.168.0.x`   | Lewei                                                    | `lewei://192.168.0.1` (H.264 on TCP 7060)                                       | since 2.21.0, not yet tried on a toy ([#262](https://github.com/OpenIPC/decoder/issues/262))                                                                                        |
+| `WiFi-720P-xxxxxx` (a VISUO drone, vendor app *WiFi UFO*)      | `192.168.0.x`   | Lewei                                                    | `lewei://192.168.0.1` (H.264 on TCP 7060)                                       | since 2.21.0, not yet tried on a toy ([#262](https://github.com/OpenIPC/decoder/issues/262))                                                                                        |
 
 When a `flowufo://` or `jieli://` slot points at the phone itself, or at the network of another family, its status says so (for example *192.168.1.100 is this phone; the toy is usually 192.168.1.1*, *This network looks like a KY UFO RTSP toy: try rtsp://192.168.1.1:7070/webcam* or, on a `192.168.80.x` network, *try jieli://192.168.80.1*).
 
@@ -132,13 +132,13 @@ To use it: join the `HF_…` Wi‑Fi, [stay connected](#connecting), close the v
 
 ## Lewei toys
 
-|             |                                                                                                                                                       |
-|-------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Wi‑Fi name  | not known yet                                                                                                                                         |
-| Camera      | Lewei; vendor app *WiFi UFO* 4.5.x (`com.lewei.multiple.lewei`, Google Play), seen on a VISUO drone                                                   |
-| Toy address | `192.168.0.1`, TCP port 7060                                                                                                                          |
-| Slot URL    | `lewei://192.168.0.1` (or `lewei://` alone)                                                                                                           |
-| Status      | written from a capture of the vendor app and played from that capture; not yet tried on a toy ([#262](https://github.com/OpenIPC/decoder/issues/262)) |
+|             |                                                                                                                                                          |
+|-------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Wi‑Fi name  | `WiFi-720P-xxxxxx`                                                                                                                                       |
+| Camera      | Lewei; vendor app *WiFi UFO* 4.5.x (`com.lewei.multiple.lewei`, Google Play), seen on a VISUO drone                                                      |
+| Toy address | `192.168.0.1`, TCP port 7060                                                                                                                             |
+| Slot URL    | `lewei://192.168.0.1` (or `lewei://` alone)                                                                                                              |
+| Status      | works since 2.21.0, checked with a VISUO drone: the protocol follows a capture of the vendor app ([#262](https://github.com/OpenIPC/decoder/issues/262)) |
 
 What the app does, as a capture of the vendor app shows it; [pylwdrone](https://github.com/meekworth/pylwdrone) (Apache-2.0) names the fields:
 
@@ -192,5 +192,5 @@ The drones a tester checked in [#187](https://github.com/OpenIPC/decoder/issues/
 | D16       | `FLOW_…`      | FLOW-UFO, WIFI UAV app      | `flowufo://192.168.169.1:8800`   | video works                                                                                                 |
 | K200      | `FLY-UFO-…`   | KY UFO, RTSP                | `rtsp://192.168.1.1:7070/webcam` | video works; the sideways picture is turned upright ([#200](https://github.com/OpenIPC/decoder/issues/200)) |
 | Drone YL3 | `HF_…`        | Jieli AC79, DVRunning 2 app | `jieli://192.168.80.1`           | video works; the sideways picture is turned upright; picture quality depends on the toy                     |
-| VISUO     | not known yet | Lewei, WiFi UFO app         | `lewei://192.168.0.1`            | not yet tried on the toy ([#262](https://github.com/OpenIPC/decoder/issues/262))                            |
+| VISUO     | `WiFi-720P-…` | Lewei, WiFi UFO app         | `lewei://192.168.0.1`            | video works ([#262](https://github.com/OpenIPC/decoder/issues/262))                                         |
 
