@@ -59,6 +59,8 @@ final class Lewei {
     static final long QUIET_MS = 5000;
     private static final int CONNECT_TIMEOUT_MS = 5000;
     private static final int READ_TICK_MS = 200;
+    /** How long close() lets the session send the stop command before it closes the TCP. */
+    static volatile long closeGraceMs = 1000;
     /** Messages logged whole from the start of a session, for reports from the field. */
     private static final int LOGGED_MESSAGES = 6;
 
@@ -382,7 +384,8 @@ final class Lewei {
     /**
      * One session on the calling thread until {@code keepGoing} fails or close(). A lost
      * connection or a toy that stopped sending ends run() with an exception: the session
-     * starts again.
+     * starts again. Once the stream was asked for, the session ends with the stop command on
+     * the same connection, as the vendor app and pylwdrone do (#269).
      */
     static final class Client implements Closeable {
         private final String tag;
@@ -390,7 +393,14 @@ final class Lewei {
         private final Jieli.TcpSetup setup;
         private final Socket socket = new Socket();
         private volatile boolean closed;
-        /** The stream was asked for on this connection. */
+        private final java.util.concurrent.CountDownLatch ended =
+                new java.util.concurrent.CountDownLatch(1);
+        private final java.util.concurrent.atomic.AtomicBoolean closerArmed =
+                new java.util.concurrent.atomic.AtomicBoolean();
+        /**
+         * The stream was asked for on this connection: from now on close() leaves the socket
+         * to run(), which sends the stop first.
+         */
         volatile boolean streamRequested;
 
         Client(String tag, Url url, Jieli.TcpSetup setup) {
@@ -400,6 +410,29 @@ final class Lewei {
         }
 
         void run(KeepGoing keepGoing, Listener listener) throws IOException {
+            try {
+                session(keepGoing, listener);
+            } finally {
+                // A write blocked on a toy that stopped reading ends when the socket is closed
+                // after the grace period, on every way out, not only after close() (Qodo on #270)
+                if (streamRequested && !socket.isClosed()) {
+                    armCloser();
+                    try {
+                        socket.getOutputStream().write(command(CMD_STOP));
+                    } catch (IOException ignored) {
+                        // The connection is gone: the toy sees the TCP close
+                    }
+                }
+                try {
+                    socket.close();
+                } catch (IOException ignored) {
+                    // Closed is closed
+                }
+                ended.countDown();
+            }
+        }
+
+        private void session(KeepGoing keepGoing, Listener listener) throws IOException {
             InetAddress target = InetAddress.getByName(url.host);
             String bound = setup.prepare(socket, target);
             listener.onState(false, "Waiting for the toy: connecting to " + url.endpoint());
@@ -414,6 +447,9 @@ final class Lewei {
             socket.setSoTimeout(READ_TICK_MS);
             InputStream in = socket.getInputStream();
             OutputStream out = socket.getOutputStream();
+            // Stopped before the request: no request. close() closes the socket until the flag
+            // below is set, so a stop during this write ends it (Qodo on #270)
+            if (closed) return;
             out.write(command(CMD_START));
             streamRequested = true;
             listener.onState(false, "Waiting for the toy: asked for video on " + url.endpoint());
@@ -473,7 +509,6 @@ final class Lewei {
                                 + QUIET_MS / 1000 + " s");
                     }
                 }
-                out.write(command(CMD_STOP));
             } catch (IOException e) {
                 if (!closed && keepGoing.check()) throw e;
             }
@@ -494,14 +529,41 @@ final class Lewei {
             return System.nanoTime() / 1_000_000;
         }
 
+        /**
+         * Ends run() from any thread, the UI thread too: no socket write here. Before the stream
+         * was asked for the socket closes at once, which also ends a connect or the request
+         * itself; after that it is left to the session thread, which sends the stop command and
+         * closes it within one read tick (as Jieli does, #188). A stop that comes that late is
+         * the one risk: a new session may already have connected.
+         */
         @Override
         public void close() {
             closed = true;
-            try {
-                socket.close();
-            } catch (IOException e) {
-                // Closed is closed
+            if (!streamRequested) {
+                try {
+                    socket.close();
+                } catch (IOException e) {
+                    // Closed is closed
+                }
+                return;
             }
+            armCloser();
+        }
+
+        /** Closes the socket after closeGraceMs unless run() has ended by then; once. */
+        private void armCloser() {
+            if (ended.getCount() == 0 || !closerArmed.compareAndSet(false, true)) return;
+            Thread t = new Thread(() -> {
+                try {
+                    if (!ended.await(closeGraceMs, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                        socket.close();
+                    }
+                } catch (InterruptedException | IOException ignored) {
+                    // Nothing more to do
+                }
+            }, tag + "-lewei-close");
+            t.setDaemon(true);
+            t.start();
         }
     }
 }
