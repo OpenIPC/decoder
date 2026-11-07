@@ -59,6 +59,8 @@ final class Lewei {
     static final long QUIET_MS = 5000;
     private static final int CONNECT_TIMEOUT_MS = 5000;
     private static final int READ_TICK_MS = 200;
+    /** How long close() lets the session send the stop command before it closes the TCP. */
+    static volatile long closeGraceMs = 1000;
     /** Messages logged whole from the start of a session, for reports from the field. */
     private static final int LOGGED_MESSAGES = 6;
 
@@ -382,7 +384,8 @@ final class Lewei {
     /**
      * One session on the calling thread until {@code keepGoing} fails or close(). A lost
      * connection or a toy that stopped sending ends run() with an exception: the session
-     * starts again.
+     * starts again. Once the stream was asked for, the session ends with the stop command on
+     * the same connection, as the vendor app and pylwdrone do (#269).
      */
     static final class Client implements Closeable {
         private final String tag;
@@ -390,6 +393,11 @@ final class Lewei {
         private final Jieli.TcpSetup setup;
         private final Socket socket = new Socket();
         private volatile boolean closed;
+        private final Object lock = new Object();
+        /** The socket is connected: close() leaves it to run(), which sends the stop first. */
+        private boolean connected;
+        private final java.util.concurrent.CountDownLatch ended =
+                new java.util.concurrent.CountDownLatch(1);
         /** The stream was asked for on this connection. */
         volatile boolean streamRequested;
 
@@ -400,6 +408,28 @@ final class Lewei {
         }
 
         void run(KeepGoing keepGoing, Listener listener) throws IOException {
+            try {
+                session(keepGoing, listener);
+            } finally {
+                // A write blocked on a toy that stopped reading ends when close() closes the
+                // socket after its grace period
+                if (streamRequested && !socket.isClosed()) {
+                    try {
+                        socket.getOutputStream().write(command(CMD_STOP));
+                    } catch (IOException ignored) {
+                        // The connection is gone: the toy sees the TCP close
+                    }
+                }
+                try {
+                    socket.close();
+                } catch (IOException ignored) {
+                    // Closed is closed
+                }
+                ended.countDown();
+            }
+        }
+
+        private void session(KeepGoing keepGoing, Listener listener) throws IOException {
             InetAddress target = InetAddress.getByName(url.host);
             String bound = setup.prepare(socket, target);
             listener.onState(false, "Waiting for the toy: connecting to " + url.endpoint());
@@ -408,6 +438,10 @@ final class Lewei {
             } catch (IOException e) {
                 throw closed ? e : new IOException("Cannot reach the toy's video port "
                         + url.endpoint() + ": " + e.getMessage(), e);
+            }
+            synchronized (lock) {
+                if (closed) return;
+                connected = true;
             }
             Log.i(TAG, tag + ": Lewei: connected to " + url.endpoint() + " (" + bound + ")");
             socket.setTcpNoDelay(true);
@@ -473,7 +507,6 @@ final class Lewei {
                                 + QUIET_MS / 1000 + " s");
                     }
                 }
-                out.write(command(CMD_STOP));
             } catch (IOException e) {
                 if (!closed && keepGoing.check()) throw e;
             }
@@ -494,14 +527,37 @@ final class Lewei {
             return System.nanoTime() / 1_000_000;
         }
 
+        /**
+         * Ends run() from any thread, the UI thread too: no socket write here. An unconnected
+         * socket closes at once; a connected one is left to the session thread, which sends
+         * the stop command and closes it within one read tick (as Jieli does, #188). A stop
+         * that comes that late is the one risk: a new session may already have connected.
+         */
         @Override
         public void close() {
             closed = true;
-            try {
-                socket.close();
-            } catch (IOException e) {
-                // Closed is closed
+            synchronized (lock) {
+                if (!connected) {
+                    try {
+                        socket.close();
+                    } catch (IOException e) {
+                        // Closed is closed
+                    }
+                    return;
+                }
             }
+            if (ended.getCount() == 0) return;
+            Thread t = new Thread(() -> {
+                try {
+                    if (!ended.await(closeGraceMs, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                        socket.close();
+                    }
+                } catch (InterruptedException | IOException ignored) {
+                    // Nothing more to do
+                }
+            }, tag + "-lewei-close");
+            t.setDaemon(true);
+            t.start();
         }
     }
 }

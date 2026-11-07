@@ -391,4 +391,126 @@ public class LeweiTest {
             }
         }
     }
+
+    /**
+     * close() as RtspSession.stop() calls it, from another thread while video plays: the stop
+     * command still reaches the toy on the same connection, and run() ends quietly (#269).
+     */
+    @Test(timeout = 15000)
+    public void closeFromAnotherThreadSendsTheStop() throws Exception {
+        try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            AtomicInteger stops = new AtomicInteger();
+            CountDownLatch done = new CountDownLatch(1);
+            AtomicReference<Throwable> failed = new AtomicReference<>();
+            Thread toy = new Thread(() -> {
+                try (Socket s = server.accept()) {
+                    DataInputStream in = new DataInputStream(s.getInputStream());
+                    OutputStream out = s.getOutputStream();
+                    byte[] m = new byte[Lewei.HEADER];
+                    while (true) {
+                        in.readFully(m);
+                        if (m[10] == Lewei.CMD_START) {
+                            out.write(video(true, 1000, new byte[]{0, 0, 1, 0x27, 1}));
+                        } else if (m[10] == Lewei.CMD_STOP) {
+                            stops.incrementAndGet();
+                            // The connection closes after the stop, not before
+                            if (in.read() != -1) throw new IOException("data after the stop");
+                            return;
+                        }
+                    }
+                } catch (IOException | RuntimeException e) {
+                    failed.set(e);
+                } finally {
+                    done.countDown();
+                }
+            });
+            toy.setDaemon(true);
+            toy.start();
+
+            Lewei.Url u = Lewei.Url.parse("lewei://127.0.0.1:" + server.getLocalPort());
+            Lewei.Client c = new Lewei.Client("t", u, (sock, target) -> "default");
+            CountDownLatch receiving = new CountDownLatch(1);
+            AtomicReference<Throwable> runFailed = new AtomicReference<>();
+            CountDownLatch runEnded = new CountDownLatch(1);
+            Thread session = new Thread(() -> {
+                try {
+                    c.run(() -> true, new Lewei.Listener() {
+                        @Override
+                        public void onState(boolean on, String text) {
+                            if (on) receiving.countDown();
+                        }
+
+                        @Override
+                        public boolean onRtp(byte[] buf, int offset, int length) {
+                            return true;
+                        }
+                    });
+                } catch (Throwable e) {
+                    runFailed.set(e);
+                } finally {
+                    runEnded.countDown();
+                }
+            });
+            session.setDaemon(true);
+            session.start();
+            assertTrue(receiving.await(5, TimeUnit.SECONDS));
+            c.close();
+            assertTrue(runEnded.await(5, TimeUnit.SECONDS));
+            assertTrue(done.await(5, TimeUnit.SECONDS));
+            if (runFailed.get() != null) throw new AssertionError(runFailed.get());
+            if (failed.get() != null) throw new AssertionError(failed.get());
+            assertEquals(1, stops.get());
+        }
+    }
+
+    /** A toy that sends no video and reads nothing more: close() still ends run() (#269). */
+    @Test(timeout = 15000)
+    public void closeEndsASessionBeforeAnyVideo() throws Exception {
+        long grace = Lewei.closeGraceMs;
+        Lewei.closeGraceMs = 300;
+        try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            CountDownLatch hold = new CountDownLatch(1);
+            Thread toy = new Thread(() -> {
+                try (Socket s = server.accept()) {
+                    s.getInputStream().read(new byte[Lewei.HEADER]);
+                    hold.await();
+                } catch (IOException | InterruptedException e) {
+                    // the test sees it
+                }
+            });
+            toy.setDaemon(true);
+            toy.start();
+            Lewei.Url u = Lewei.Url.parse("lewei://127.0.0.1:" + server.getLocalPort());
+            Lewei.Client c = new Lewei.Client("t", u, (sock, target) -> "default");
+            CountDownLatch runEnded = new CountDownLatch(1);
+            Thread session = new Thread(() -> {
+                try {
+                    c.run(() -> true, new Lewei.Listener() {
+                        @Override
+                        public void onState(boolean on, String text) {
+                        }
+
+                        @Override
+                        public boolean onRtp(byte[] buf, int offset, int length) {
+                            return true;
+                        }
+                    });
+                } catch (IOException e) {
+                    // closed: no exception expected, but the end is what counts here
+                } finally {
+                    runEnded.countDown();
+                }
+            });
+            session.setDaemon(true);
+            session.start();
+            long until = System.nanoTime() + 5_000_000_000L;
+            while (!c.streamRequested && System.nanoTime() < until) Thread.sleep(10);
+            assertTrue(c.streamRequested);
+            c.close();
+            assertTrue(runEnded.await(5, TimeUnit.SECONDS));
+            hold.countDown();
+        } finally {
+            Lewei.closeGraceMs = grace;
+        }
+    }
 }

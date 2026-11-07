@@ -143,7 +143,7 @@ To use it: join the `HF_…` Wi‑Fi, [stay connected](#connecting), close the v
 What the app does, as a capture of the vendor app shows it; [pylwdrone](https://github.com/meekworth/pylwdrone) (Apache-2.0) names the fields:
 
 - It connects to TCP port 7060. Every message starts with a 46-byte header: `lewei_cmd`, a zero byte and nine little-endian 32-bit numbers (the command, an argument, one unused, the length of what follows, the stream type, two keys).
-- Command 2 with the argument 1 asks for the high-definition stream, and the video starts at once. Command 1 every second keeps it going, command 3 ends it.
+- Command 2 with the argument 1 asks for the high-definition stream, and the video starts at once. Command 1 every second keeps it going, command 3 ends it: the app sends it on the same connection when the slot stops or the session starts over, then closes the connection.
 - The video is **H.264** in Annex B form, one frame in each message of command 257, behind 32 bytes of its own (a flag, the length of the frame, a counter in ms). The tested drone sends 1280×720 at 20 fps, about 2.8 Mbit/s.
 - With stream type 1 the camera has **inverted one byte** of each frame, at a place that follows from the length and the counter; the app inverts it back. Without that, frames decode only partly. Type 129 is not handled: the log says so, and the picture will have errors.
 - If no video comes for 5 s, the app connects again.
