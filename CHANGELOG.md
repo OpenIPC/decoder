@@ -12,6 +12,12 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.21.1 — 2026-11-07
+
+- A Lewei toy (`lewei://`) now gets the stop command (3) when the slot stops, on the same
+  connection and before it closes, as the vendor app does. Before, the command was never sent
+  and the toy saw only the closed connection (#269).
+
 ## 2.21.0 — 2026-11-05
 
 - Toy drones with a Lewei camera (vendor app WiFi UFO): the new slot URL `lewei://192.168.0.1`
