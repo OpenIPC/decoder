@@ -393,14 +393,14 @@ final class Lewei {
         private final Jieli.TcpSetup setup;
         private final Socket socket = new Socket();
         private volatile boolean closed;
-        private final Object lock = new Object();
-        /** The socket is connected: close() leaves it to run(), which sends the stop first. */
-        private boolean connected;
         private final java.util.concurrent.CountDownLatch ended =
                 new java.util.concurrent.CountDownLatch(1);
         private final java.util.concurrent.atomic.AtomicBoolean closerArmed =
                 new java.util.concurrent.atomic.AtomicBoolean();
-        /** The stream was asked for on this connection. */
+        /**
+         * The stream was asked for on this connection: from now on close() leaves the socket
+         * to run(), which sends the stop first.
+         */
         volatile boolean streamRequested;
 
         Client(String tag, Url url, Jieli.TcpSetup setup) {
@@ -442,15 +442,14 @@ final class Lewei {
                 throw closed ? e : new IOException("Cannot reach the toy's video port "
                         + url.endpoint() + ": " + e.getMessage(), e);
             }
-            synchronized (lock) {
-                if (closed) return;
-                connected = true;
-            }
             Log.i(TAG, tag + ": Lewei: connected to " + url.endpoint() + " (" + bound + ")");
             socket.setTcpNoDelay(true);
             socket.setSoTimeout(READ_TICK_MS);
             InputStream in = socket.getInputStream();
             OutputStream out = socket.getOutputStream();
+            // Stopped before the request: no request. close() closes the socket until the flag
+            // below is set, so a stop during this write ends it (Qodo on #270)
+            if (closed) return;
             out.write(command(CMD_START));
             streamRequested = true;
             listener.onState(false, "Waiting for the toy: asked for video on " + url.endpoint());
@@ -531,23 +530,22 @@ final class Lewei {
         }
 
         /**
-         * Ends run() from any thread, the UI thread too: no socket write here. An unconnected
-         * socket closes at once; a connected one is left to the session thread, which sends
-         * the stop command and closes it within one read tick (as Jieli does, #188). A stop
-         * that comes that late is the one risk: a new session may already have connected.
+         * Ends run() from any thread, the UI thread too: no socket write here. Before the stream
+         * was asked for the socket closes at once, which also ends a connect or the request
+         * itself; after that it is left to the session thread, which sends the stop command and
+         * closes it within one read tick (as Jieli does, #188). A stop that comes that late is
+         * the one risk: a new session may already have connected.
          */
         @Override
         public void close() {
             closed = true;
-            synchronized (lock) {
-                if (!connected) {
-                    try {
-                        socket.close();
-                    } catch (IOException e) {
-                        // Closed is closed
-                    }
-                    return;
+            if (!streamRequested) {
+                try {
+                    socket.close();
+                } catch (IOException e) {
+                    // Closed is closed
                 }
+                return;
             }
             armCloser();
         }
