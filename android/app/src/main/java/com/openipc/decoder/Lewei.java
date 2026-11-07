@@ -398,6 +398,8 @@ final class Lewei {
         private boolean connected;
         private final java.util.concurrent.CountDownLatch ended =
                 new java.util.concurrent.CountDownLatch(1);
+        private final java.util.concurrent.atomic.AtomicBoolean closerArmed =
+                new java.util.concurrent.atomic.AtomicBoolean();
         /** The stream was asked for on this connection. */
         volatile boolean streamRequested;
 
@@ -411,9 +413,10 @@ final class Lewei {
             try {
                 session(keepGoing, listener);
             } finally {
-                // A write blocked on a toy that stopped reading ends when close() closes the
-                // socket after its grace period
+                // A write blocked on a toy that stopped reading ends when the socket is closed
+                // after the grace period, on every way out, not only after close() (Qodo on #270)
                 if (streamRequested && !socket.isClosed()) {
+                    armCloser();
                     try {
                         socket.getOutputStream().write(command(CMD_STOP));
                     } catch (IOException ignored) {
@@ -546,7 +549,12 @@ final class Lewei {
                     return;
                 }
             }
-            if (ended.getCount() == 0) return;
+            armCloser();
+        }
+
+        /** Closes the socket after closeGraceMs unless run() has ended by then; once. */
+        private void armCloser() {
+            if (ended.getCount() == 0 || !closerArmed.compareAndSet(false, true)) return;
             Thread t = new Thread(() -> {
                 try {
                     if (!ended.await(closeGraceMs, java.util.concurrent.TimeUnit.MILLISECONDS)) {
