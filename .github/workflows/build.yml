@@ -32,6 +32,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # bundles/camex: the camex tunnel library (#272)
+          submodules: true
 
       - name: Switch to specified commit (keep latest workflow files)
         if: inputs.commit_hash != ''
@@ -39,6 +42,7 @@ jobs:
           git fetch --unshallow
           git checkout ${{ inputs.commit_hash }}
           git checkout ${{ github.ref_name }} -- .github/
+          git submodule update --init
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -77,6 +81,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # bundles/camex: the camex tunnel library (#272)
+          submodules: true
 
       - name: Switch to specified commit (keep latest workflow files)
         if: inputs.commit_hash != ''
@@ -84,6 +91,7 @@ jobs:
           git fetch --unshallow
           git checkout ${{ inputs.commit_hash }}
           git checkout ${{ github.ref_name }} -- .github/
+          git submodule update --init
 
       - name: Set artifact name
         id: vars
@@ -112,6 +120,11 @@ jobs:
           echo "${{ secrets.KEY }}" | base64 -d > key.jks
           # APK only while in development; the .aab (bundleRelease) is for store uploads
           ./gradlew assembleRelease
+          # The native code of the camex tunnel (#272): exactly the two ARM ABIs (ANDROID.md 10);
+          # an APK without libcamex.so fails too
+          ABIS=$(unzip -l app/build/outputs/apk/release/app-release.apk | grep -o 'lib/[^/]*/libcamex.so' | cut -d/ -f2 | sort | tr '\n' ' ')
+          echo "libcamex.so ABIs: ${ABIS:-none}"
+          [ "$ABIS" = "arm64-v8a armeabi-v7a " ] || { echo "::error::libcamex.so ABIs: ${ABIS:-none}, expected arm64-v8a armeabi-v7a"; exit 1; }
           mv app/build/outputs/apk/release/app-release.apk ../${{ steps.vars.outputs.name }}.apk
           # R8 mapping of this APK, to retrace obfuscated stack traces (#181). A build without
           # minify has none: warn instead of failing

@@ -12,6 +12,24 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.22.0 — 2026-11-17
+
+- **Network**: a tunnel to the cameras, OpenIPC camex 3.18.0 built in (#272). A row under the
+  grid in the menu holds the camex server, the client name, UDP or TCP, the server's public key,
+  the pre-shared key (stored sealed, like the camera passwords) and **On** (connect now and at
+  every start; off by default). The state is shown in the dialog and in a notification. Android's
+  VPN consent: a system dialog once, or `appops set com.openipc.decoder ACTIVATE_VPN allow` over
+  adb for a box without a person.
+- A camera reached through a VPN tunnel plays over TCP with Auto: the tunnel's MTU is below a
+  camera's RTP packets.
+- On a TV box the keyboard of a text field opens on OK, not when the remote reaches the field
+  (the Network dialog and the camera URL dialog); a phone gets it at once, as before.
+- The camex library comes as the `bundles/camex` submodule pinned to the 3.18.0 release; its
+  native code is built for arm64-v8a and armeabi-v7a (`-PdecoderAbis=x86_64` for the emulator),
+  with the NDK r27c. The APK grows from about 165 KB to about 440 KB.
+- `tests/e2e.sh [API]`: Decoder on an x86_64 emulator in Docker plays a camera through a camex
+  server and the tunnel, 13 checks (API 21 and 34).
+
 ## 2.21.2 — 2026-11-16
 
 - The APK keeps only the English, Russian and Simplified Chinese resources of its libraries,

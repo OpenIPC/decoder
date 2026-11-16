@@ -127,11 +127,18 @@ After `retrace`, the frames read `at com.openipc.decoder.DecodePlanner.step(Deco
 
 Not needed for contributing (CI builds every push), but possible: JDK 17 and the Android SDK (platform 36), with `ANDROID_HOME` or `android/local.properties`.
 
+The camex tunnel (#272) also needs the NDK r27c (27.2.12479018), CMake 3.22.1 and the submodule `bundles/camex` (`git clone --recurse-submodules`, or `git submodule update --init`).
+
 ```bash
 cd android
 ./gradlew testDebugUnitTest    # unit tests
 ./gradlew assembleDebug        # → app/build/outputs/apk/debug/app-debug.apk, no keys needed
+./gradlew -PdecoderAbis=x86_64 assembleDebug    # for the x86_64 emulator
 ```
+
+The native code is built for arm64-v8a and armeabi-v7a by default; `-PdecoderAbis` takes a list of `arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86` (an empty or unknown one fails the build).
+
+`tests/e2e.sh [API]` plays a camera through a camex server and the tunnel on an x86_64 emulator in Docker (API 21 and 34 are checked): 13 checks, from no camera with Network off to a restart of the tunnel with Network → Save. Its output is in `tests/out/` (ignored by git).
 
 A release build needs a keystore at `android/key.jks` and `KEYSTORE_PASS`, `KEY_ALIAS`, `KEY_PASS` in the environment (`./gradlew assembleRelease`). Debug and release builds are signed with different keys: to switch, uninstall first, which removes the saved camera URLs.
 

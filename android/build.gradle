@@ -1,0 +1,33 @@
+/*
+ *
+ * Copyright (c) OpenIPC  https://openipc.org  Prosperity Public License 3.0.0
+ *
+ * build.gradle — the Decoder project: the app and the camex tunnel library (#272)
+ *
+ */
+
+plugins {
+    alias(libs.plugins.android.application) apply false
+    alias(libs.plugins.android.library) apply false
+}
+
+// The ABIs of the native code (the camex tunnel's libcamex.so), for the app and the library
+// alike. Phones and TV boxes are ARM: two ABIs by default; -PdecoderAbis=x86_64 builds for the
+// x86_64 emulator. hasProperty, not ?: : Groovy takes '' as false, so -PdecoderAbis= would
+// quietly give the default. An empty list would build every ABI of the NDK, a typo would drop one.
+ext.decoderAbis = (project.hasProperty('decoderAbis') ? project.property('decoderAbis') as String
+        : 'arm64-v8a,armeabi-v7a').split(',', -1)*.trim()
+def knownAbis = ['arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86']
+if (ext.decoderAbis.isEmpty() || !knownAbis.containsAll(ext.decoderAbis))
+    throw new GradleException("-PdecoderAbis=${ext.decoderAbis.join(',')}: one or more of ${knownAbis.join(',')}")
+// the camex library builds its native code only for these (bundles/camex/docs/android-library.md)
+ext.camexTunnelAbis = ext.decoderAbis
+
+// One NDK for the app and the camex library: the library sets none, and AGP's default NDK would
+// be downloaded for it on every clean machine (CI, Docker). r27c, as in the build images.
+ext.decoderNdk = '27.2.12479018'
+subprojects {
+    pluginManager.withPlugin('com.android.library') {
+        android { ndkVersion rootProject.ext.decoderNdk }
+    }
+}

@@ -18,15 +18,23 @@ static def getGitHash() {
 android {
     namespace = 'com.openipc.decoder'
     compileSdk = 36
+    // The NDK strips the camex tunnel's libcamex.so when the APK is packed: without it the
+    // library keeps its debug sections (about 2.5 times the size)
+    ndkVersion rootProject.ext.decoderNdk
 
     defaultConfig {
         applicationId "com.openipc.decoder"
         minSdk 21
         targetSdk 36
-        versionCode 54
-        versionName "2.21.2"
+        versionCode 55
+        versionName "2.22.0"
         // Keep only these locales of the libraries' resources, as in the other OpenIPC apps
         resourceConfigurations += ['en', 'ru', 'zh-rCN']
+
+        // The ABIs of the tunnel's native code: android/build.gradle, -PdecoderAbis (#272)
+        ndk {
+            abiFilters(*rootProject.ext.decoderAbis)
+        }
 
         buildConfigField "String", "GIT_HASH", "\"${getGitHash()}\""
     }
@@ -76,9 +84,14 @@ android {
     lint {
         // Known issues are recorded in the baseline; only new ones fail the build
         baseline = file("lint-baseline.xml")
+        // arm64-v8a and armeabi-v7a by default, x86_64 only with -PdecoderAbis (the emulator);
+        // ChromeOS is not a target
+        disable 'ChromeOsAbiSupport'
     }
 }
 
 dependencies {
+    // The camex tunnel (#272), android/settings.gradle
+    implementation project(':camex-tunnel')
     testImplementation libs.junit
 }

@@ -5,3 +5,5 @@ local.properties
 /android/build
 /android/app/build
 key.jks
+/android/app/.cxx
+/tests/out
