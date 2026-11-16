@@ -2642,6 +2642,7 @@ public class Decoder extends Activity
     protected void onDestroy() {
         // The menu and the dialogs go with the activity, or Android logs them as leaked (#205)
         if (menuManager != null) menuManager.dismissAll();
+        NetworkPanel.dismiss();
         getWindow().getDecorView().removeCallbacks(hideBarsRunnable);
         super.onDestroy();
         sOpening = false;

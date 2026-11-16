@@ -57,28 +57,64 @@ final class NetworkPanel {
 
     /** The saved values, the initial ones where nothing is saved; the psk opened. */
     static Map<String, String> load(Context c) {
+        return load(c, null);
+    }
+
+    /**
+     * As {@link #load(Context)}; a secret whose sealed value cannot be opened (the Keystore key
+     * is gone or not available now) reads as its initial value (empty), and its stored value goes
+     * to {@code unreadable}, so that a Save which leaves the field as it is keeps it.
+     */
+    private static Map<String, String> load(Context c, Map<String, String> unreadable) {
         Map<String, String> v = new HashMap<>();
         CredentialStore store = null;
         for (Field f : CamexTunnel.fields()) {
-            String s = prefs(c).getString(PREFIX + f.key, null);
+            String stored = prefs(c).getString(PREFIX + f.key, null);
+            String s = stored;
             if (s != null && f.kind == Field.Kind.SECRET && !s.isEmpty()) {
                 if (store == null) store = CredentialStore.create();
                 s = store.open(s);
+                if (s == null) {
+                    Log.w(TAG, "Network: the stored " + f.key + " cannot be read, enter it again");
+                    if (unreadable != null) unreadable.put(f.key, stored);
+                }
             }
             v.put(f.key, s != null ? s : f.initial);
         }
         return v;
     }
 
-    private static void save(Context c, Map<String, String> v, boolean on) {
+    private static void save(Context c, Map<String, String> v, Map<String, String> unreadable,
+                             boolean on) {
         SharedPreferences.Editor e = prefs(c).edit();
         CredentialStore store = CredentialStore.create();
         for (Field f : CamexTunnel.fields()) {
             String s = v.get(f.key);
-            if (s != null && f.kind == Field.Kind.SECRET && !s.isEmpty()) s = store.seal(s);
+            if (f.kind == Field.Kind.SECRET) {
+                // an unreadable secret left as the form showed it (empty) is kept as it was
+                String old = unreadable.get(f.key);
+                if (s == null || s.isEmpty()) s = old != null ? old : "";
+                else s = store.seal(s);
+            }
             e.putString(PREFIX + f.key, s == null ? "" : s);
         }
         e.putBoolean(KEY_ON, on).apply();
+    }
+
+    // The open Network dialog, dismissed with its activity (Decoder.onDestroy)
+    private static java.lang.ref.WeakReference<AlertDialog> openDialog;
+
+    /** Closes the Network dialog, if it is open (the activity goes away). */
+    static void dismiss() {
+        AlertDialog d = openDialog != null ? openDialog.get() : null;
+        openDialog = null;
+        if (d != null && d.isShowing()) {
+            try {
+                d.dismiss();
+            } catch (RuntimeException e) {
+                // the window is already gone with its activity
+            }
+        }
     }
 
     static boolean isOn(Context c) {
@@ -182,7 +218,8 @@ final class NetworkPanel {
     /** The Network dialog: the fields of the tunnel, the On switch, the state. */
     @android.annotation.SuppressLint("SetTextI18n")   // the app's UI is English only, as the menu
     static void show(Activity a) {
-        Map<String, String> values = load(a);
+        Map<String, String> unreadable = new HashMap<>();
+        Map<String, String> values = load(a, unreadable);
         TextView state = new TextView(a);
         state.setTextColor(Color.WHITE);
         state.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
@@ -273,14 +310,19 @@ final class NetworkPanel {
                     if (view != null) view.requestFocus();
                     return;
                 }
-                save(a, n, on.isChecked());
+                save(a, n, unreadable, on.isChecked());
                 // on: (re)connect with the saved values (a running tunnel restarts); off: stop
                 if (on.isChecked()) connect(a);
                 else CamexTunnel.stop();
                 dialog.dismiss();
             });
         });
-        dialog.setOnDismissListener(d -> CamexTunnel.removeListener(listener));
+        dialog.setOnDismissListener(d -> {
+            CamexTunnel.removeListener(listener);
+            if (openDialog != null && openDialog.get() == dialog) openDialog = null;
+        });
+        dismiss();
+        openDialog = new java.lang.ref.WeakReference<>(dialog);
         dialog.show();
     }
 
