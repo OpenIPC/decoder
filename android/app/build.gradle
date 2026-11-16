@@ -23,8 +23,10 @@ android {
         applicationId "com.openipc.decoder"
         minSdk 21
         targetSdk 36
-        versionCode 53
-        versionName "2.21.1"
+        versionCode 54
+        versionName "2.21.2"
+        // Keep only these locales of the libraries' resources, as in the other OpenIPC apps
+        resourceConfigurations += ['en', 'ru', 'zh-rCN']
 
         buildConfigField "String", "GIT_HASH", "\"${getGitHash()}\""
     }

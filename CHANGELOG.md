@@ -12,6 +12,11 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.21.2 — 2026-11-16
+
+- The APK keeps only the English, Russian and Simplified Chinese resources of its libraries,
+  the same language set as the other OpenIPC Android apps. The app's own texts are unchanged.
+
 ## 2.21.1 — 2026-11-07
 
 - A Lewei toy (`lewei://`) now gets the stop command (3) when the slot stops, on the same
