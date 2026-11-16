@@ -87,6 +87,19 @@ A beta channel is available on [Google Play](https://play.google.com/apps/intern
 
 Every item, the remote, sharing a URL from another app and **Reset**: [Usage](docs/usage.md).
 
+## Network (a tunnel to the cameras)
+
+Decoder has a tunnel built in, [OpenIPC camex](https://github.com/OpenIPC/camex) 3.18.0: cameras that are clients of the same camex server are watched from anywhere, without a separate VPN app. **Network** in the menu (a row under the grid) holds the server (`host:port`), the client name (the box's ID on the server), UDP or TCP, the server's public key, the pre-shared key and **On**: connect now and at every start. Off by default. The server gives the address, MTU and routes; only the tunnel network and the server's routes go through it, the local network is reached as before. The state is shown in the dialog (Connecting, Connected with the address, VPN consent needed, Failed) and in a notification. A camera reached through the tunnel plays over TCP with Auto.
+
+The first connection asks Android for the VPN consent once (a system dialog). A device without a person at it gets the consent over adb while it is set up, with no dialog ever, and it survives reboots (no root needed):
+
+```sh
+adb shell appops set com.openipc.decoder ACTIVATE_VPN allow
+adb shell appops write-settings
+```
+
+Android 5.0 has no `ACTIVATE_VPN` app-op ("Unknown operation string"): there the dialog is confirmed once on the device, by a person or over adb.
+
 ## Start on boot
 
 For a box that only shows cameras, the app can open by itself after the device starts. Use the device's own autorun first, where its app list has one (the Menu key on the Decoder tile → **AUTORUN**). Otherwise turn on **Start on boot** in **Settings**; Android 10 and newer also need the permission to draw over other apps, and the app shows how to give it. Details: [Start on boot](docs/usage.md#start-on-boot).

@@ -87,6 +87,19 @@
 
 菜单各项、遥控器、从其他应用分享地址以及 **Reset** 的说明见 [Usage](docs/usage.md)（英文）。
 
+## Network（通往摄像头的隧道）
+
+Decoder 内置 [OpenIPC camex](https://github.com/OpenIPC/camex) 3.18.0 隧道：作为客户端接入同一台 camex 服务器的摄像头，可以在任何地方观看，无需另装 VPN 应用。菜单中的 **Network**（网格下方一行）包含：服务器（`host:port`）、客户端名称（设备在服务器上的 ID）、UDP 或 TCP、服务器公钥、预共享密钥，以及 **On**：立即连接并在每次启动时连接。默认关闭。地址、MTU 和路由由服务器下发；只有隧道网络和服务器的路由经过隧道，本地网络照常访问。状态显示在对话框（Connecting、Connected 及地址、VPN consent needed、Failed）和通知中。经隧道访问的摄像头在 Auto 模式下走 TCP。
+
+首次连接时 Android 会请求一次 VPN 授权（系统对话框）。无人值守的设备可在部署时通过 adb 授权，不弹对话框，重启后仍然有效（无需 root）：
+
+```sh
+adb shell appops set com.openipc.decoder ACTIVATE_VPN allow
+adb shell appops write-settings
+```
+
+Android 5.0 没有 `ACTIVATE_VPN` 操作（"Unknown operation string"）：需在设备上确认一次对话框，可由人操作或通过 adb。
+
 ## 开机自启
 
 只用来显示摄像机画面的盒子可以在开机后自动打开应用。如果设备自带的应用列表提供自启功能（在 Decoder 图标上按 Menu 键 → **AUTORUN**），请优先使用。否则在 **Settings** 中勾选 **Start on boot**；Android 10 及以上还需要"在其他应用上层显示"的权限，应用会提示如何授予。详见 [Start on boot](docs/usage.md#start-on-boot)（英文）。

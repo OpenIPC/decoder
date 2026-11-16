@@ -93,6 +93,8 @@ class MenuManager {
         /** Start on boot turned on or off in Settings (#255). */
         void onStartOnBoot(boolean on);
         void onWebUI();
+        /** The Network item: the camex tunnel (#272). */
+        void onNetwork();
     }
 
     private Listener listener;
@@ -333,10 +335,24 @@ class MenuManager {
             if (p != null) p.dismiss();
             if (listener != null) listener.onWebUI();
         });
+        // Network (#272): a row of its own as wide as the grid, the camex tunnel
+        LinearLayout netRow = gridRow(layout);
+        TextView netBtn = wordItem(netRow, "Network", 4 * cell);
+        netBtn.setOnClickListener(v -> {
+            PopupWindow p = mMenuPopup;
+            if (p != null) p.dismiss();
+            if (listener != null) listener.onNetwork();
+        });
+
         setSingleViewItems(single);
         linkRemote(camButtons,
                 new TextView[]{mSettingsBtn, mWebUiBtn, quadBtn, slidesBtn},
                 new TextView[]{exit, reset, statsBtn, udpBtn});
+        netBtn.setId(View.generateViewId());
+        for (TextView v : new TextView[]{exit, reset, statsBtn, udpBtn}) {
+            v.setNextFocusDownId(netBtn.getId());
+        }
+        netBtn.setNextFocusUpId(exit.getId());
 
         mMenuLayout = layout;
         mMenuIsCached = true;
@@ -561,9 +577,10 @@ class MenuManager {
 
         final EditText input = new EditText(activity);
         input.setText(mHosts[mActive]);
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        input.setSelectAllOnFocus(true);
-        input.setSelection(input.getText().length());
+        // The keyboard opens on OK, not by itself (a TV box's keyboard takes the
+        // remote); a phone still gets it at once, with the URL selected (TvKeyboard)
+        final int urlType = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI;
+        TvKeyboard.field(input, urlType, true);
 
         // RTP transport of the slot (#67, #69): Auto and Multicast fall back to TCP
         RadioGroup transport = new RadioGroup(activity);
@@ -635,7 +652,13 @@ class MenuManager {
         builder.setNegativeButton("Cancel", (dialog, which) -> dialog.cancel());
 
         AlertDialog dialog = builder.create();
-        dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+        // a phone edits the URL at once, with the keyboard, as before; a remote moves first and
+        // OK edits (TvKeyboard)
+        boolean touch = activity.getWindow().getDecorView().isInTouchMode();
+        TvKeyboard.editAtOnce(dialog, input, urlType, true, touch);
+        // under a remote the dialog marks itself as one without text fields as it shows
+        // (FLAG_ALT_FOCUSABLE_IM): clear it then, so that OK can open the keyboard
+        if (!touch) dialog.setOnShowListener(d -> TvKeyboard.allowKeyboard(dialog));
         track(dialog);
         dialog.show();
         input.requestFocus();

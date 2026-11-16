@@ -275,6 +275,8 @@ public class Decoder extends Activity
         rtspClient.setAudioManager(audioManager);
         menuManager = new MenuManager(this, mDensity);
         menuManager.setListener(this);
+        // the camex tunnel (#272) connects at the start while Network is on
+        NetworkPanel.autoStart(this);
 
         // --- UI setup ---
         mSurface = findViewById(R.id.video_surface);
@@ -615,6 +617,16 @@ public class Decoder extends Activity
 
     @Override
     public void onWebUI() { menuManager.startBrowser(mHost); }
+
+    // the camex tunnel (#272, NetworkPanel)
+    @Override
+    public void onNetwork() { NetworkPanel.show(this); }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == NetworkPanel.REQ_VPN) NetworkPanel.onVpnResult(this, resultCode);
+    }
 
     @Override
     public void onSaveSettings() { saveSettings(); }

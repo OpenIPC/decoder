@@ -392,6 +392,10 @@ class RtspSession {
 
             Transport.Mode m = mode;
             boolean auto = m == Transport.Mode.AUTO;
+            // #272: a camera reached through a VPN tunnel (the camex tunnel or any other) plays over TCP with Auto
+            boolean tunnelled = auto
+                    && TunnelPath.isTunnelled(s.getLocalAddress(), TunnelPath.vpnAddresses(App.context));
+            if (tunnelled) Log.i(TAG, tag + ": camera through a VPN tunnel, Auto uses TCP");
             boolean mc = m == Transport.Mode.MULTICAST && !udpFailed(m, url);
             if (mc && !UdpReceiver.multicastSupported()) {
                 Log.i(TAG, tag + ": multicast needs Android 8, using TCP");
@@ -399,7 +403,7 @@ class RtspSession {
             }
             // Auto and Multicast fall back to TCP; UDP does not
             boolean fallback = auto || m == Transport.Mode.MULTICAST;
-            if (m == Transport.Mode.UDP || (auto && !udpFailed(m, url)) || mc) {
+            if (m == Transport.Mode.UDP || (auto && !tunnelled && !udpFailed(m, url)) || mc) {
                 rx = new UdpReceiver(tag);
                 synchronized (lock) {
                     if (gen != generation) return false;

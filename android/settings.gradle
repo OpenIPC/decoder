@@ -29,3 +29,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "decoder"
 include ':app'
+// The camex tunnel (#272): the Android library of the camex release in the bundles/camex submodule
+include ':camex-tunnel'
+project(':camex-tunnel').projectDir = file('../bundles/camex/android/tunnel')
