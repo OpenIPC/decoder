@@ -12,6 +12,13 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.24.2 — 2026-11-17
+
+- The camex tunnel is built from camex 4.0.0 (was 3.19.0). The Android library is unchanged:
+  the client still uses UDP unless TCP is chosen in Network. A camex 4.0.0 server takes UDP
+  and TCP clients on the same port by default and keeps a box's address when it changes
+  transport.
+
 ## 2.24.1 — 2026-11-17
 
 - The snapshot's note in a black cell is shorter and on two lines ("black in the copy:" / "a
