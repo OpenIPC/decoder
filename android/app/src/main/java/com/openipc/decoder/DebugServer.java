@@ -32,7 +32,9 @@ import java.util.concurrent.TimeUnit;
 /**
  * Serves what the decoder knows about itself on port 8085, for a browser or curl:
  * {@code /} a page refreshing itself, {@code /stats.json} the same as JSON, {@code /log} the
- * app's recent log, {@code /report.txt} both in one file to download (#207). Always on; a client outside the local network gets 403. GET only, one
+ * app's recent log, {@code /report.txt} both in one file to download (#207). Always on; a client outside the local network gets 403. With a password set in
+ * Network, every request needs it (HTTP Basic, any user name), from the local network and the
+ * tunnel alike; without one the pages are open, as before. GET only, one
  * request per connection, short timeouts and a few workers: it must never get in the way of
  * decoding. Logins and passwords never leave the device (redacted like the log, #55).
  */
@@ -167,8 +169,14 @@ final class DebugServer {
                 reply(out, 403, "text/plain", "Forbidden: local network only\n");
                 return;
             }
-            String requestLine = readRequestHead(socket.getInputStream());
+            StringBuilder headers = new StringBuilder();
+            String requestLine = readRequestHead(socket.getInputStream(), headers);
             if (requestLine == null) return;
+            if (!authorized(headers.toString(), WebPassword.get())) {
+                reply(out, 401, "text/plain", "Password needed\n".getBytes(StandardCharsets.UTF_8),
+                        "WWW-Authenticate: Basic realm=\"OpenIPC Decoder\", charset=\"UTF-8\"\r\n");
+                return;
+            }
             String[] parts = requestLine.split(" ");
             if (parts.length < 2) {
                 reply(out, 400, "text/plain", "Bad request\n");
@@ -332,6 +340,11 @@ final class DebugServer {
 
     /** The request line; the headers are read and dropped. Null on a closed connection. */
     static String readRequestHead(InputStream in) throws IOException {
+        return readRequestHead(in, null);
+    }
+
+    /** The request line; the header lines after it go to {@code headers}, when given. */
+    static String readRequestHead(InputStream in, StringBuilder headers) throws IOException {
         ByteArrayOutputStream head = new ByteArrayOutputStream();
         int matched = 0;
         while (head.size() < MAX_HEADER_BYTES) {
@@ -348,7 +361,71 @@ final class DebugServer {
         String text = head.toString("ISO-8859-1");
         int eol = text.indexOf('\n');
         String line = (eol >= 0 ? text.substring(0, eol) : text).trim();
+        if (headers != null && eol >= 0) headers.append(text.substring(eol + 1));
         return line.isEmpty() ? null : line;
+    }
+
+    /**
+     * Whether a request with these header lines may be served: always without a password
+     * (empty), never when the stored one cannot be read (null: locked until it is entered again
+     * in Network), otherwise when its Basic credentials carry the password, whatever the user
+     * name (the browser asks for both).
+     */
+    static boolean authorized(String headers, String password) {
+        if (password == null) return false;
+        if (password.isEmpty()) return true;
+        for (String line : headers.split("\n")) {
+            int colon = line.indexOf(':');
+            if (colon < 0 || !line.substring(0, colon).trim().equalsIgnoreCase("Authorization")) {
+                continue;
+            }
+            String value = line.substring(colon + 1).trim();
+            int space = value.indexOf(' ');
+            if (space < 0 || !value.substring(0, space).equalsIgnoreCase("Basic")) return false;
+            byte[] pair = base64(value.substring(space + 1).trim());
+            if (pair == null) return false;
+            String userPass = new String(pair, StandardCharsets.UTF_8);
+            int sep = userPass.indexOf(':');
+            if (sep < 0) return false;
+            // the same time for a wrong password of any length
+            return java.security.MessageDigest.isEqual(
+                    sha256(userPass.substring(sep + 1)), sha256(password));
+        }
+        return false;
+    }
+
+    private static byte[] sha256(String s) {
+        try {
+            return java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(s.getBytes(StandardCharsets.UTF_8));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /**
+     * Standard base64 with or without padding, null when it is not base64 (java.util.Base64
+     * needs API 26, android.util.Base64 is a stub in the unit tests).
+     */
+    static byte[] base64(String s) {
+        final String abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        int end = s.length();
+        while (end > 0 && s.charAt(end - 1) == '=') end--;
+        if (s.length() - end > 2) return null;
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        int bits = 0, n = 0;
+        for (int i = 0; i < end; i++) {
+            int d = abc.indexOf(s.charAt(i));
+            if (d < 0) return null;
+            bits = (bits << 6) | d;
+            n += 6;
+            if (n >= 8) {
+                n -= 8;
+                out.write((bits >> n) & 0xFF);
+            }
+        }
+        if (n >= 6) return null;   // a lone last character carries no byte
+        return out.toByteArray();
     }
 
     private static void reply(OutputStream out, int code, String type, String body)
@@ -380,6 +457,7 @@ final class DebugServer {
         switch (code) {
             case 200: return "OK";
             case 400: return "Bad Request";
+            case 401: return "Unauthorized";
             case 403: return "Forbidden";
             case 404: return "Not Found";
             case 405: return "Method Not Allowed";

@@ -37,6 +37,8 @@ import java.util.Map;
  * The camex tunnel (the library of bundles/camex): the Network screen is built from its fields,
  * the values are kept in Decoder's settings as {@code tunnel_camex_<key>} (the psk sealed with
  * {@link CredentialStore}), and {@code tunnel_on} connects now and at every start of the app.
+ * The web port is not asked: it is always the debug page's {@link DebugServer#PORT}. The same
+ * dialog holds the password of that page ({@link WebPassword}).
  * Android's VPN consent: a person confirms the system dialog once; a box without a person gets
  * it while it is prepared: adb shell appops set com.openipc.decoder ACTIVATE_VPN allow.
  */
@@ -69,6 +71,7 @@ final class NetworkPanel {
         Map<String, String> v = new HashMap<>();
         CredentialStore store = null;
         for (Field f : CamexTunnel.fields()) {
+            if (fixed(f)) continue;
             String stored = prefs(c).getString(PREFIX + f.key, null);
             String s = stored;
             if (s != null && f.kind == Field.Kind.SECRET && !s.isEmpty()) {
@@ -81,7 +84,14 @@ final class NetworkPanel {
             }
             v.put(f.key, s != null ? s : f.initial);
         }
+        // nginx on the server reaches the box's web page there (camex 3.19.0, needs that server)
+        v.put(CamexTunnel.WEB_PORT, String.valueOf(DebugServer.PORT));
         return v;
+    }
+
+    /** A field of the library that Decoder sets itself, not shown: the web port. */
+    private static boolean fixed(Field f) {
+        return CamexTunnel.WEB_PORT.equals(f.key);
     }
 
     private static void save(Context c, Map<String, String> v, Map<String, String> unreadable,
@@ -89,6 +99,7 @@ final class NetworkPanel {
         SharedPreferences.Editor e = prefs(c).edit();
         CredentialStore store = CredentialStore.create();
         for (Field f : CamexTunnel.fields()) {
+            if (fixed(f)) continue;
             String s = v.get(f.key);
             if (f.kind == Field.Kind.SECRET) {
                 // an unreadable secret left as the form showed it (empty) is kept as it was
@@ -230,6 +241,7 @@ final class NetworkPanel {
         content.addView(state);
         Map<String, View> views = new HashMap<>();
         for (Field f : CamexTunnel.fields()) {
+            if (fixed(f)) continue;
             String v = values.get(f.key);
             View view;
             switch (f.kind) {
@@ -266,6 +278,13 @@ final class NetworkPanel {
             content.addView(view);
             views.put(f.key, view);
         }
+        // the web page on port 8085, from the local network and the tunnel alike
+        String webPassword = WebPassword.read(a);
+        final String keepWebPassword = webPassword == null ? WebPassword.stored(a) : null;
+        content.addView(label(a, "Web page password (port " + DebugServer.PORT + "; empty: open)"));
+        EditText web = field(a, webPassword != null ? webPassword : "",
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        content.addView(web);
         CheckBox on = check(a, "On: connect now and at every start", isOn(a));
         content.addView(on);
 
@@ -311,6 +330,7 @@ final class NetworkPanel {
                     return;
                 }
                 save(a, n, unreadable, on.isChecked());
+                WebPassword.save(a, web.getText().toString(), keepWebPassword);
                 // on: (re)connect with the saved values (a running tunnel restarts); off: stop
                 if (on.isChecked()) connect(a);
                 else CamexTunnel.stop();

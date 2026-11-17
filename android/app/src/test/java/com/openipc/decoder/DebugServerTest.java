@@ -289,4 +289,63 @@ public class DebugServerTest {
         assertTrue(page.contains("href=\"/report.txt\""));
         assertFalse(page.substring(page.indexOf("\r\n\r\n") + 4).contains("\n"));
     }
+
+    // ====================== Web page password ======================
+
+    private static String basic(String userPass) {
+        return "Authorization: Basic " + java.util.Base64.getEncoder()
+                .encodeToString(userPass.getBytes(StandardCharsets.UTF_8)) + "\r\n";
+    }
+
+    @Test
+    public void withoutPasswordEverythingIsOpen() {
+        assertTrue(DebugServer.authorized("Host: box\r\n", ""));
+        assertTrue(DebugServer.authorized(basic("a:b"), ""));
+    }
+
+    @Test
+    public void passwordNeedsBasicCredentials() {
+        String pw = "s3cret:with colon";
+        assertFalse(DebugServer.authorized("Host: box\r\n", pw));
+        assertTrue(DebugServer.authorized("Host: box\r\n" + basic("admin:" + pw), pw));
+        // any user name, even none
+        assertTrue(DebugServer.authorized(basic(":" + pw), pw));
+        // the header name and the scheme in any case
+        assertTrue(DebugServer.authorized(basic("anyone:" + pw)
+                .replace("Authorization: Basic", "AUTHORIZATION:  basic"), pw));
+        assertFalse(DebugServer.authorized(basic("admin:wrong"), pw));
+        assertFalse(DebugServer.authorized(basic("admin:" + pw + "x"), pw));
+        assertFalse(DebugServer.authorized(basic("no colon"), pw));
+        assertFalse(DebugServer.authorized("Authorization: Bearer abc\r\n", pw));
+        assertFalse(DebugServer.authorized("Authorization: Basic ***\r\n", pw));
+        // a non-ASCII password, as the browser sends it with charset="UTF-8"
+        assertTrue(DebugServer.authorized(basic("u:пароль"), "пароль"));
+    }
+
+    @Test
+    public void unreadablePasswordLocksThePages() {
+        assertFalse(DebugServer.authorized("Host: box\r\n", null));
+        assertFalse(DebugServer.authorized(basic("a:"), null));
+    }
+
+    @Test
+    public void base64WithAndWithoutPadding() {
+        assertEquals("a:b", new String(DebugServer.base64("YTpi"), StandardCharsets.UTF_8));
+        assertEquals("ab", new String(DebugServer.base64("YWI="), StandardCharsets.UTF_8));
+        assertEquals("ab", new String(DebugServer.base64("YWI"), StandardCharsets.UTF_8));
+        assertEquals("a", new String(DebugServer.base64("YQ=="), StandardCharsets.UTF_8));
+        assertNull(DebugServer.base64("Y"));
+        assertNull(DebugServer.base64("YQ==="));
+        assertNull(DebugServer.base64("a b"));
+    }
+
+    @Test
+    public void headerLinesAfterTheRequestLine() throws IOException {
+        StringBuilder h = new StringBuilder();
+        assertEquals("GET / HTTP/1.1", DebugServer.readRequestHead(new ByteArrayInputStream(
+                ("GET / HTTP/1.1\r\nHost: box\r\n" + basic("u:p") + "\r\n")
+                        .getBytes(StandardCharsets.ISO_8859_1)), h));
+        assertTrue(h.toString(), DebugServer.authorized(h.toString(), "p"));
+        assertFalse(DebugServer.authorized(h.toString(), "q"));
+    }
 }

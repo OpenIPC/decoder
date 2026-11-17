@@ -15,7 +15,8 @@
 #      the camera's tunnel address into Decoder's settings
 #   5. checks: with Network off the camera has no viewer and the edge does not answer; with
 #      Network on tun0 gets an address from the hub, ping through the tunnel, the camera is
-#      read from the box's tunnel address, Decoder gets the 1280x720 picture, no crash
+#      read from the box's tunnel address, Decoder gets the 1280x720 picture, the debug
+#      page through the tunnel asks for the password of Network, no crash
 #
 # Usage: tests/e2e.sh [API]        (default 25; x86_64 "default" images: 21, 23, 25, 34)
 #
@@ -168,12 +169,15 @@ $ADB shell appops set $PKG ACTIVATE_VPN allow 2>&1 | grep -q 'Unknown operation'
     $ADB shell appops set $PKG 47 allow
 [ "$API" -lt 33 ] || $ADB shell pm grant $PKG android.permission.POST_NOTIFICATIONS
 
+# the password of the debug page (Network → Web page password), plain: read as it is
+WEB_PASSWORD=e2e-pass
 # the tunnel's values as the Network screen keeps them (tunnel_<id>_<field>)
 TUNNEL_SETTINGS="<string name=\"tunnel_camex_server\">$HUB_IP:5800</string>\
 <string name=\"tunnel_camex_name\">decoder</string>\
 <string name=\"tunnel_camex_transport\">UDP</string>\
 <string name=\"tunnel_camex_pubkey\">$CAMEX_PUBKEY</string>\
-<string name=\"tunnel_camex_psk\">$KEY</string>"
+<string name=\"tunnel_camex_psk\">$KEY</string>\
+<string name=\"web_password\">$WEB_PASSWORD</string>"
 # write_settings ON: Decoder's settings with slot 1 = the camera and the camex tunnel's values
 # (tunnel_camex_<field>), on or off (debug builds allow run-as; a plain key and URL are read as
 # they are)
@@ -286,6 +290,15 @@ else
     $ADB exec-out screencap -p > "$OUT/screen.png" 2>/dev/null || true
 fi
 $ADB exec-out screencap -p > "$OUT/decoder.png" 2>/dev/null || true
+
+# the debug page through the tunnel, from the Linux client: the password set in Network is asked
+code() { docker exec "$PEER" curl -s -o /dev/null -m 10 -w '%{http_code}' "$@" "http://$TUN:8085/stats.json"; }
+c0=$(code) c1=$(code -u "x:wrong") c2=$(code -u "anyone:$WEB_PASSWORD")
+if [ "$c0" = 401 ] && [ "$c1" = 401 ] && [ "$c2" = 200 ]; then
+    ok "the debug page through the tunnel asks for the password (401, 401, 200)"
+else
+    bad "debug page through the tunnel: no password $c0, wrong $c1, right $c2 (want 401 401 200)"
+fi
 
 if [ -n "$SHOTS" ]; then
     # the README's screenshots: the picture, the menu over it (OK), the Network dialog
