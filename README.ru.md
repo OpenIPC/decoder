@@ -93,7 +93,7 @@
 
 <p align="center">
   <img src="screenshots/network.jpg" alt="Окно Network на ТВ-приставке: подключено, сервер и имя клиента" width="400">
-  <img src="screenshots/network_more.jpg" alt="Окно ниже: общий ключ, MTU, keepalive и On" width="400">
+  <img src="screenshots/network_more.jpg" alt="Конец окна: keepalive, таймаут сервера, веб-порт и On" width="400">
 </p>
 
 При первом подключении Android один раз спрашивает согласие на VPN (системное окно). Устройству без человека рядом согласие дают через adb при настройке, без окна; оно сохраняется после перезагрузки (root не нужен):

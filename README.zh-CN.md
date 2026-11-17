@@ -93,7 +93,7 @@ Decoder 内置 [OpenIPC camex](https://github.com/OpenIPC/camex) 3.19.0 隧道�
 
 <p align="center">
   <img src="screenshots/network.jpg" alt="电视盒子上的 Network 对话框：已连接、服务器和客户端名称" width="400">
-  <img src="screenshots/network_more.jpg" alt="对话框下半部分：预共享密钥、MTU、keepalive 和 On" width="400">
+  <img src="screenshots/network_more.jpg" alt="对话框末尾：keepalive、服务器超时、Web 端口和 On" width="400">
 </p>
 
 首次连接时 Android 会请求一次 VPN 授权（系统对话框）。无人值守的设备可在部署时通过 adb 授权，不弹对话框，重启后仍然有效（无需 root）：
