@@ -23,7 +23,7 @@ While the app runs it serves its debug information over HTTP on port **8085**, f
 | `/report.txt`                            | a header, `/stats.json` and `/log` in one file, downloaded as `report-YYYYMMDD-HHMMSS.txt`, see [Save report](#save-report)                                     |
 | `/jieli-frame.jpg`, `/jieli-dropped.bin` | the last JPEG of a `jieli://` slot in the single view as the toy sent it, and the last frame that could not be put together ([toys.md](toys.md#hf--jieli-toys)) |
 
-- Only clients on the local network are answered; others get `403`. The rule and what is hidden: [security.md](security.md#debug-server).
+- Only clients on the local network are answered; others get `403`. With a password set in **Network** (**Web page password**) the browser asks for it (any user name; `curl -u :<password>`). The rule and what is hidden: [security.md](security.md#debug-server).
 - `GET` only (`405` otherwise), one request per connection, `Cache-Control: no-store`.
 - Two worker threads at background priority, a short queue, a 20 s deadline per request: the server never gets in the way of decoding; a busy server drops the connection.
 - If port 8085 is taken, the server retries every 10 s; `server` in `/stats.json` says why.
@@ -60,6 +60,8 @@ The device's addresses are in `addresses` of `/stats.json`, and the [U cell](usa
 `http://<device>:8085/snapshot.jpg`
 
 A JPEG laid out like the screen, at the screen's resolution (at most 1920 wide, at least 640), made from the frames the app shows now. A cell without video is black with its status. With labels (the default) the text of each cell is drawn in; `?labels=0` gives the frames only, which is what the page uses. It is taken only when asked for and reused for 1 s, so several viewers cost one capture. `503` when there is nothing to show. Needs Android 7.0+ (PixelCopy).
+
+A device may show some cells on a hardware video plane that no copy can read (on the SberBox, Amlogic, two of four cells, which two is up to the device; `adb shell screencap` sees them black too). Such a cell, live on the screen but black in the copy, says *black in the copy: a dark picture, or video this device does not let be copied*, labels or not.
 
 ## Stream checks in the single view
 

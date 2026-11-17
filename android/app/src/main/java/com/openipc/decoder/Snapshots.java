@@ -164,13 +164,21 @@ final class Snapshots {
             int x = r.left, y = r.top, cw = r.width(), ch = r.height();
             Bitmap frame = copies[i] != null ? copies[i].await(deadline) : null;
             if (copies[i] != null && frame != null) copied++;
-            boolean shown = c.live && frame != null;
+            // A copy that came out black: a dark picture, or (more likely) video the screen
+            // shows on a hardware plane no copy can read (two of four cells on the SberBox)
+            boolean blank = c.live && frame != null && blank(frame);
+            boolean shown = c.live && frame != null && !blank;
             if (shown) {
                 canvas.drawBitmap(frame, null, dst[i], frames);
             }
             if (frame != null) frame.recycle();
+            if (blank) {
+                // the page draws its labels over the picture, but cannot know this: said always
+                drawNote(canvas, NOT_COPIED, x, y, cw, ch, text);
+            }
             if (labels) {
-                drawLabel(canvas, c, shown, x, y, cw, ch, bandH, text, band);
+                if (!blank) drawLabel(canvas, c, shown, x, y, cw, ch, bandH, text, band);
+                else drawBand(canvas, c, x, y, cw, ch, bandH, text, band);
                 canvas.drawRect(x, y, x + cw, y + 1, grid);
                 canvas.drawRect(x, y, x + 1, y + ch, grid);
                 if (c.onScreen && side > 1) {
@@ -193,6 +201,61 @@ final class Snapshots {
         Log.d(TAG, "Snapshot: " + copied + " cells copied in " + (t1 - t0) + " ms, JPEG "
                 + jpeg.size() / 1024 + " KiB in " + (t2 - t1) + " ms");
         return jpeg.toByteArray();
+    }
+
+    /** Said in a cell whose copy came out black. */
+    static final String NOT_COPIED =
+            "black in the copy: a dark picture, or video this device does not let be copied";
+
+    /**
+     * Whether a copied frame is black all over: at least 98 % of a sample of its pixels darker
+     * than 9 of 255 in every channel. A camera's picture, even at night, stays far below that
+     * (at most about 20 % on the lab's cameras); a copy of a hardware video plane is 99.5 %.
+     */
+    static boolean blank(Bitmap b) {
+        int w = b.getWidth(), h = b.getHeight();
+        if (w <= 0 || h <= 0) return false;
+        int stepX = Math.max(1, w / 64), stepY = Math.max(1, h / 64);
+        int n = 0, dark = 0;
+        for (int y = stepY / 2; y < h; y += stepY) {
+            for (int x = stepX / 2; x < w; x += stepX) {
+                n++;
+                if (dark(b.getPixel(x, y))) dark++;
+            }
+        }
+        return blank(dark, n);
+    }
+
+    /** {@code dark} of {@code n} sampled pixels make a black frame. */
+    static boolean blank(int dark, int n) {
+        return n > 0 && dark * 100L >= n * 98L;
+    }
+
+    /** Darker than 9 of 255 in every channel. */
+    static boolean dark(int argb) {
+        return ((argb >> 16) & 0xFF) <= 8 && ((argb >> 8) & 0xFF) <= 8 && (argb & 0xFF) <= 8;
+    }
+
+    private static void drawNote(Canvas canvas, String note, int x, int y, int cw, int ch,
+                                 TextPaint text) {
+        float size = text.getTextSize();
+        text.setTextSize(Math.max(12, size * 0.6f));   // a sentence, not a label
+        String line = TextUtils.ellipsize(note, text, cw - 8, TextUtils.TruncateAt.END).toString();
+        text.setColor(0xFFB0B0B0);
+        float w = text.measureText(line);
+        canvas.drawText(line, x + Math.max(4, (cw - w) / 2), y + (ch + text.getTextSize()) / 2f,
+                text);
+        text.setTextSize(size);
+    }
+
+    /** The cell's own label in the band at its bottom. */
+    private static void drawBand(Canvas canvas, Cell c, int x, int y, int cw, int ch, int bandH,
+                                 TextPaint text, Paint band) {
+        String full = (c.slot > 0 ? c.slot + " \u00b7 " : "") + (c.label != null ? c.label : "");
+        String label = TextUtils.ellipsize(full, text, cw - 8, TextUtils.TruncateAt.END).toString();
+        canvas.drawRect(x, y + ch - bandH, x + cw, y + ch, band);
+        text.setColor(Color.WHITE);
+        canvas.drawText(label, x + 4, y + ch - 6, text);
     }
 
     private static void drawLabel(Canvas canvas, Cell c, boolean shown, int x, int y, int cw,

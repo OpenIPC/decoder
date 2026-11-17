@@ -89,11 +89,11 @@ Every item, the remote, sharing a URL from another app and **Reset**: [Usage](do
 
 ## Network (a tunnel to the cameras)
 
-Decoder has a tunnel built in, [OpenIPC camex](https://github.com/OpenIPC/camex) 3.19.0: cameras that are clients of the same camex server are watched from anywhere, without a separate VPN app. **Network** in the menu (a row under the grid) holds the server (`host:port`), the client name (the box's ID on the server), UDP or TCP, the server's public key, the pre-shared key, the server timeout, the web port for nginx on the server (a camex server 3.19.0 or later) and **On**: connect now and at every start. Off by default. The server gives the address, MTU and routes; only the tunnel network and the server's routes (none wider than a /8) go through it, the local network is reached as before. The state is shown in the dialog (Connecting, Connected with the address, VPN consent needed, Failed) and in a notification. A camera reached through the tunnel plays over TCP with Auto.
+Decoder has a tunnel built in, [OpenIPC camex](https://github.com/OpenIPC/camex) 3.19.0: cameras that are clients of the same camex server are watched from anywhere, without a separate VPN app. **Network** in the menu (a row under the grid) holds the server (`host:port`), the client name (the box's ID on the server), UDP or TCP, the server's public key, the pre-shared key, the server timeout, the password of the debug page and **On**: connect now and at every start. Off by default. The server gives the address, MTU and routes; only the tunnel network and the server's routes (none wider than a /8) go through it, the local network is reached as before. The state is shown in the dialog (Connecting, Connected with the address, VPN consent needed, Failed) and in a notification. A camera reached through the tunnel plays over TCP with Auto. Decoder tells the server its web page is on port 8085 (for nginx there; a camex server 3.19.0 or later). The password, when set, guards that page from the local network and through the tunnel alike; empty (the default), the page is open.
 
 <p align="center">
   <img src="screenshots/network.jpg" alt="The Network dialog on a TV box: connected, the server and the client name" width="400">
-  <img src="screenshots/network_more.jpg" alt="The end of the dialog: keepalive, server timeout, web port and On" width="400">
+  <img src="screenshots/network_more.jpg" alt="The end of the dialog: keepalive, server timeout, web port and On (2.23.0)" width="400">
 </p>
 
 The first connection asks Android for the VPN consent once (a system dialog). A device without a person at it gets the consent over adb while it is set up, with no dialog ever, and it survives reboots (no root needed):

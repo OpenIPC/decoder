@@ -138,7 +138,7 @@ cd android
 
 The native code is built for arm64-v8a and armeabi-v7a by default; `-PdecoderAbis` takes a list of `arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86` (an empty or unknown one fails the build).
 
-`tests/e2e.sh [API]` plays a camera through a camex server and the tunnel on an x86_64 emulator in Docker (API 21 and 34 are checked): 13 checks, from no camera with Network off to a restart of the tunnel with Network → Save. Its output is in `tests/out/` (ignored by git).
+`tests/e2e.sh [API]` plays a camera through a camex server and the tunnel on an x86_64 emulator in Docker (API 21 and 34 are checked): 14 checks, from no camera with Network off to the password of the debug page through the tunnel and a restart of the tunnel with Network → Save. Its output is in `tests/out/` (ignored by git).
 
 A release build needs a keystore at `android/key.jks` and `KEYSTORE_PASS`, `KEY_ALIAS`, `KEY_PASS` in the environment (`./gradlew assembleRelease`). Debug and release builds are signed with different keys: to switch, uninstall first, which removes the saved camera URLs.
 

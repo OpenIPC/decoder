@@ -8,6 +8,8 @@
 package com.openipc.decoder;
 
 import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
@@ -33,5 +35,20 @@ public class SnapshotsTest {
     public void fitPutsBarsAboveAndBelowAWiderPicture() {
         // 32:9 in a 16:9 cell
         assertArrayEquals(new int[] {0, 90, 640, 270}, Snapshots.fit(0, 0, 640, 360, 32f / 9));
+    }
+
+    @Test
+    public void aBlackCopyIsTold() {
+        // 99.5 % dark: a hardware video plane copied on the SberBox
+        assertTrue(Snapshots.blank(4076, 4096));
+        assertTrue(Snapshots.blank(98, 100));
+        // a camera at night: about 18 % dark
+        assertFalse(Snapshots.blank(737, 4096));
+        assertFalse(Snapshots.blank(97, 100));
+        assertFalse(Snapshots.blank(0, 0));
+        assertTrue(Snapshots.dark(0xFF000000));
+        assertTrue(Snapshots.dark(0xFF080808));
+        assertFalse(Snapshots.dark(0xFF000009));
+        assertFalse(Snapshots.dark(0xFF102030));
     }
 }
