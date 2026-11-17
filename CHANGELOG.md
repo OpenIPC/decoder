@@ -12,6 +12,15 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.23.0 — 2026-11-17
+
+- **Network** takes camex 3.19.0 (`bundles/camex` moves to the 3.19.0 release): two optional
+  fields, **Server timeout** (5 to 3600 seconds, empty: 20; seconds without an answer before the
+  tunnel reconnects) and **Web port** (1 to 65535, empty: none; the port of the box's web page
+  for nginx on the server, needs a camex server 3.19.0 or later). The tunnel no longer takes a
+  route or a subnet wider than a /8 from the server, so a server cannot send all of the box's
+  traffic through it: the tunnel only reaches the cameras.
+
 ## 2.22.0 — 2026-11-17
 
 - **Network**: a tunnel to the cameras, OpenIPC camex 3.18.0 built in (#272). A row under the
