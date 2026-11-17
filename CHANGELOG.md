@@ -12,6 +12,12 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.24.1 — 2026-11-17
+
+- The snapshot's note in a black cell is shorter and on two lines ("black in the copy:" / "a
+  dark picture, or video this device cannot copy"): in 2.24.0 one line was cut off in a 2×2
+  grid.
+
 ## 2.24.0 — 2026-11-17
 
 - **Network** has a **Web page password** (the last field, empty by default): when set, the page
