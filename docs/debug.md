@@ -61,7 +61,7 @@ The device's addresses are in `addresses` of `/stats.json`, and the [U cell](usa
 
 A JPEG laid out like the screen, at the screen's resolution (at most 1920 wide, at least 640), made from the frames the app shows now. A cell without video is black with its status. With labels (the default) the text of each cell is drawn in; `?labels=0` gives the frames only, which is what the page uses. It is taken only when asked for and reused for 1 s, so several viewers cost one capture. `503` when there is nothing to show. Needs Android 7.0+ (PixelCopy).
 
-A device may show some cells on a hardware video plane that no copy can read (on the SberBox, Amlogic, two of four cells, which two is up to the device; `adb shell screencap` sees them black too). Such a cell, live on the screen but black in the copy, says *video on screen, this device does not let it be copied*, labels or not.
+A device may show some cells on a hardware video plane that no copy can read (on the SberBox, Amlogic, two of four cells, which two is up to the device; `adb shell screencap` sees them black too). Such a cell, live on the screen but black in the copy, says *black in the copy: a dark picture, or video this device does not let be copied*, labels or not.
 
 ## Stream checks in the single view
 

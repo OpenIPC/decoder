@@ -281,10 +281,17 @@ final class NetworkPanel {
         // the web page on port 8085, from the local network and the tunnel alike
         String webPassword = WebPassword.read(a);
         final String keepWebPassword = webPassword == null ? WebPassword.stored(a) : null;
-        content.addView(label(a, "Web page password (port " + DebugServer.PORT + "; empty: open)"));
+        content.addView(label(a, webPassword != null
+                ? "Web page password (port " + DebugServer.PORT + "; empty: open)"
+                : "Web page password: the stored one cannot be read, the page is locked;"
+                        + " enter it again or a new one"));
         EditText web = field(a, webPassword != null ? webPassword : "",
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         content.addView(web);
+        // only then: a way back to an open page (an empty field keeps the unreadable one)
+        CheckBox removeWeb = keepWebPassword != null
+                ? check(a, "Remove the stored password: the page is open", false) : null;
+        if (removeWeb != null) content.addView(removeWeb);
         CheckBox on = check(a, "On: connect now and at every start", isOn(a));
         content.addView(on);
 
@@ -330,7 +337,8 @@ final class NetworkPanel {
                     return;
                 }
                 save(a, n, unreadable, on.isChecked());
-                WebPassword.save(a, web.getText().toString(), keepWebPassword);
+                WebPassword.save(a, web.getText().toString(),
+                        removeWeb != null && removeWeb.isChecked() ? null : keepWebPassword);
                 // on: (re)connect with the saved values (a running tunnel restarts); off: stop
                 if (on.isChecked()) connect(a);
                 else CamexTunnel.stop();

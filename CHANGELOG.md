@@ -17,12 +17,13 @@ were released.
 - **Network** has a **Web page password** (the last field, empty by default): when set, the page
   on port 8085 and everything under it (`/stats.json`, `/snapshot.jpg`, `/log`, `/report.txt`)
   asks for it (HTTP Basic, any user name), from the local network and through the tunnel alike.
-  Kept sealed, like the camera URLs; a stored password that cannot be read keeps the pages
-  locked until it is entered again.
+  A wrong one is answered after a second. Kept sealed, like the camera URLs (Android 6.0+); a
+  stored password that cannot be read keeps the pages locked until it can be read again, is
+  entered again or is removed in Network.
 - The **Web port** field is gone: Decoder always tells the camex server its page is on 8085 (it
   needs a camex server 3.19.0 or later).
-- The debug page's snapshot says "video on screen, this device does not let it be copied" in a
-  cell whose copy comes out black, instead of a black cell: on the SberBox (Amlogic) the screen
+- The debug page's snapshot says "black in the copy: a dark picture, or video this device does
+  not let be copied" in a live cell whose copy comes out black, instead of a black cell: on the SberBox (Amlogic) the screen
   shows two of four cells on hardware video planes, which neither the snapshot nor `screencap`
   can read; which two is up to the device.
 

@@ -164,8 +164,8 @@ final class Snapshots {
             int x = r.left, y = r.top, cw = r.width(), ch = r.height();
             Bitmap frame = copies[i] != null ? copies[i].await(deadline) : null;
             if (copies[i] != null && frame != null) copied++;
-            // A copy that came out black: the screen shows the video on a hardware video
-            // plane the copy cannot read (two of four cells on the SberBox's Amlogic)
+            // A copy that came out black: a dark picture, or (more likely) video the screen
+            // shows on a hardware plane no copy can read (two of four cells on the SberBox)
             boolean blank = c.live && frame != null && blank(frame);
             boolean shown = c.live && frame != null && !blank;
             if (shown) {
@@ -204,7 +204,8 @@ final class Snapshots {
     }
 
     /** Said in a cell whose copy came out black. */
-    static final String NOT_COPIED = "video on screen, this device does not let it be copied";
+    static final String NOT_COPIED =
+            "black in the copy: a dark picture, or video this device does not let be copied";
 
     /**
      * Whether a copied frame is black all over: at least 98 % of a sample of its pixels darker

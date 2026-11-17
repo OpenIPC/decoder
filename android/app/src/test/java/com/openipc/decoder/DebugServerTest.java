@@ -323,6 +323,13 @@ public class DebugServerTest {
     }
 
     @Test
+    public void onlyAWrongPasswordIsSlowedDown() {
+        assertFalse(DebugServer.hasAuthorization("Host: box\r\nAccept: */*\r\n"));
+        assertTrue(DebugServer.hasAuthorization("Host: box\r\n" + basic("u:p")));
+        assertTrue(DebugServer.hasAuthorization("authorization: Basic xx\r\n"));
+    }
+
+    @Test
     public void unreadablePasswordLocksThePages() {
         assertFalse(DebugServer.authorized("Host: box\r\n", null));
         assertFalse(DebugServer.authorized(basic("a:"), null));

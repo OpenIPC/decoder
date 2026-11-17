@@ -54,6 +54,8 @@ final class DebugServer {
     private static final long REBIND_DELAY_MS = 10_000;
     /** A snapshot this young is served again: several viewers cost one capture (#98). */
     private static final long SNAPSHOT_REUSE_MS = 1000;
+    /** The answer to a wrong password waits this long: about two guesses a second at most. */
+    private static final long WRONG_PASSWORD_DELAY_MS = 1000;
 
     /** What the server reports; called on a server thread. */
     interface Source {
@@ -173,6 +175,16 @@ final class DebugServer {
             String requestLine = readRequestHead(socket.getInputStream(), headers);
             if (requestLine == null) return;
             if (!authorized(headers.toString(), WebPassword.get())) {
+                // a wrong password (not the browser's first try without one) costs a second:
+                // guessing goes slowly
+                if (hasAuthorization(headers.toString())) {
+                    try {
+                        Thread.sleep(WRONG_PASSWORD_DELAY_MS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
                 reply(out, 401, "text/plain", "Password needed\n".getBytes(StandardCharsets.UTF_8),
                         "WWW-Authenticate: Basic realm=\"OpenIPC Decoder\", charset=\"UTF-8\"\r\n");
                 return;
@@ -390,6 +402,17 @@ final class DebugServer {
             // the same time for a wrong password of any length
             return java.security.MessageDigest.isEqual(
                     sha256(userPass.substring(sep + 1)), sha256(password));
+        }
+        return false;
+    }
+
+    /** Whether the request carries an Authorization header. */
+    static boolean hasAuthorization(String headers) {
+        for (String line : headers.split("\n")) {
+            int colon = line.indexOf(':');
+            if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("Authorization")) {
+                return true;
+            }
         }
         return false;
     }

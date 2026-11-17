@@ -14,8 +14,8 @@ import android.util.Log;
 /**
  * The password {@link DebugServer} asks for, the same from the local network and the tunnel.
  * Empty (the default): the pages are open. Kept sealed with {@link CredentialStore}, like the
- * camera URLs and the psk. Read by the server itself, so it holds from the first request, before
- * any activity has started.
+ * camera URLs and the psk (Android 6.0+; on 5.x, as those, it is stored as it is). Read by
+ * the server itself, so it holds from the first request, before any activity has started.
  */
 final class WebPassword {
     private static final String TAG = "OpenIPCDecoder";
@@ -24,6 +24,9 @@ final class WebPassword {
 
     private static final Object lock = new Object();
     private static boolean loaded;
+    /** When an unreadable password was last tried: tried again after a while, not each time. */
+    private static long triedMs;
+    private static final long RETRY_MS = 5000;
     /** "" none, null stored but unreadable (the pages stay locked until it is entered again). */
     private static String cached;
 
@@ -37,11 +40,14 @@ final class WebPassword {
     /** The password the server checks: "" none, null stored but unreadable. */
     static String get() {
         synchronized (lock) {
-            if (!loaded) {
+            long now = android.os.SystemClock.elapsedRealtime();
+            // unreadable may be for now only (the Keystore early after a boot): tried again
+            if (!loaded || (cached == null && now - triedMs >= RETRY_MS)) {
                 Context c = App.context;
                 if (c == null) return null;   // too early to know: nothing is served
                 cached = read(c);
                 loaded = true;
+                triedMs = now;
             }
             return cached;
         }
@@ -63,7 +69,7 @@ final class WebPassword {
 
     /**
      * Saves {@code password} ("" removes it); {@code keepStored}: an unreadable stored value
-     * the form left empty, kept as it is.
+     * the form left empty, kept as it is (null with {@code password} empty: removed).
      */
     static void save(Context c, String password, String keepStored) {
         String value;
