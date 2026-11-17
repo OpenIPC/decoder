@@ -91,6 +91,11 @@ Every item, the remote, sharing a URL from another app and **Reset**: [Usage](do
 
 Decoder has a tunnel built in, [OpenIPC camex](https://github.com/OpenIPC/camex) 3.18.0: cameras that are clients of the same camex server are watched from anywhere, without a separate VPN app. **Network** in the menu (a row under the grid) holds the server (`host:port`), the client name (the box's ID on the server), UDP or TCP, the server's public key, the pre-shared key and **On**: connect now and at every start. Off by default. The server gives the address, MTU and routes; only the tunnel network and the server's routes go through it, the local network is reached as before. The state is shown in the dialog (Connecting, Connected with the address, VPN consent needed, Failed) and in a notification. A camera reached through the tunnel plays over TCP with Auto.
 
+<p align="center">
+  <img src="screenshots/network.jpg" alt="The Network dialog on a TV box: connected, the server and the client name" width="400">
+  <img src="screenshots/network_more.jpg" alt="The rest of the dialog: the pre-shared key, MTU, keepalive and On" width="400">
+</p>
+
 The first connection asks Android for the VPN consent once (a system dialog). A device without a person at it gets the consent over adb while it is set up, with no dialog ever, and it survives reboots (no root needed):
 
 ```sh

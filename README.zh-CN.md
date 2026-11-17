@@ -91,6 +91,11 @@
 
 Decoder 内置 [OpenIPC camex](https://github.com/OpenIPC/camex) 3.18.0 隧道：作为客户端接入同一台 camex 服务器的摄像头，可以在任何地方观看，无需另装 VPN 应用。菜单中的 **Network**（网格下方一行）包含：服务器（`host:port`）、客户端名称（设备在服务器上的 ID）、UDP 或 TCP、服务器公钥、预共享密钥，以及 **On**：立即连接并在每次启动时连接。默认关闭。地址、MTU 和路由由服务器下发；只有隧道网络和服务器的路由经过隧道，本地网络照常访问。状态显示在对话框（Connecting、Connected 及地址、VPN consent needed、Failed）和通知中。经隧道访问的摄像头在 Auto 模式下走 TCP。
 
+<p align="center">
+  <img src="screenshots/network.jpg" alt="电视盒子上的 Network 对话框：已连接、服务器和客户端名称" width="400">
+  <img src="screenshots/network_more.jpg" alt="对话框下半部分：预共享密钥、MTU、keepalive 和 On" width="400">
+</p>
+
 首次连接时 Android 会请求一次 VPN 授权（系统对话框）。无人值守的设备可在部署时通过 adb 授权，不弹对话框，重启后仍然有效（无需 root）：
 
 ```sh
