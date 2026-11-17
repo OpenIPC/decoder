@@ -204,8 +204,8 @@ final class Snapshots {
     }
 
     /** Said in a cell whose copy came out black. */
-    static final String NOT_COPIED =
-            "black in the copy: a dark picture, or video this device does not let be copied";
+    static final String[] NOT_COPIED = {
+            "black in the copy:", "a dark picture, or video this device cannot copy"};
 
     /**
      * Whether a copied frame is black all over: at least 98 % of a sample of its pixels darker
@@ -236,15 +236,20 @@ final class Snapshots {
         return ((argb >> 16) & 0xFF) <= 8 && ((argb >> 8) & 0xFF) <= 8 && (argb & 0xFF) <= 8;
     }
 
-    private static void drawNote(Canvas canvas, String note, int x, int y, int cw, int ch,
+    /** Lines centred in the cell, smaller than a label (a sentence), each cut to the cell. */
+    private static void drawNote(Canvas canvas, String[] note, int x, int y, int cw, int ch,
                                  TextPaint text) {
         float size = text.getTextSize();
-        text.setTextSize(Math.max(12, size * 0.6f));   // a sentence, not a label
-        String line = TextUtils.ellipsize(note, text, cw - 8, TextUtils.TruncateAt.END).toString();
+        text.setTextSize(Math.max(12, size * 0.6f));
         text.setColor(0xFFB0B0B0);
-        float w = text.measureText(line);
-        canvas.drawText(line, x + Math.max(4, (cw - w) / 2), y + (ch + text.getTextSize()) / 2f,
-                text);
+        float lineH = text.getTextSize() * 1.3f;
+        float top = y + (ch - lineH * note.length) / 2f + text.getTextSize();
+        for (int i = 0; i < note.length; i++) {
+            String line = TextUtils.ellipsize(note[i], text, cw - 8,
+                    TextUtils.TruncateAt.END).toString();
+            float w = text.measureText(line);
+            canvas.drawText(line, x + Math.max(4, (cw - w) / 2), top + i * lineH, text);
+        }
         text.setTextSize(size);
     }
 
