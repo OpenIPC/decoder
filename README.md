@@ -93,7 +93,7 @@ Decoder has a tunnel built in, [OpenIPC camex](https://github.com/OpenIPC/camex)
 
 <p align="center">
   <img src="screenshots/network.jpg" alt="The Network dialog on a TV box: connected, the server and the client name" width="400">
-  <img src="screenshots/network_more.jpg" alt="The end of the dialog: keepalive, server timeout, web port and On (2.23.0)" width="400">
+  <img src="screenshots/network_more.jpg" alt="The end of the dialog: keepalive, server timeout, the web page password and On" width="400">
 </p>
 
 The first connection asks Android for the VPN consent once (a system dialog). A device without a person at it gets the consent over adb while it is set up, with no dialog ever, and it survives reboots (no root needed):
