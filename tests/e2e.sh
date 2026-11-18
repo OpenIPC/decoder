@@ -30,6 +30,10 @@
 #                   (default ~/.cache/compot/toolchains/android-emulator)
 #   GRADLE_CACHE    Gradle cache                        (default ~/.gradle)
 #   KVM_GROUP       group id of /dev/kvm on the Docker host (default 992)
+#   DELAY_MS        one-way netem delay on the links of the emulator, the hub and the Linux edge
+#                   (default 30: 60 ms between the box and the hub, as camex's throughput test;
+#                   0: none); a TCP tunnel that crawls (camex#180) looks fast without it (#281)
+#   NETEM_IMAGE     image with tc, built from tests/netem when missing (default decoder-netem)
 #   TRANSPORT       the tunnel's transport in Network: UDP or TCP (default UDP); the hub takes
 #                   both on one port, the Linux edge stays on UDP
 #   SHOTS           1: slot 1 over TCP, a lighter camera stream and screenshots in tests/out/shots
@@ -53,6 +57,8 @@ GRADLE_CACHE=${GRADLE_CACHE:-$HOME/.gradle}
 KVM_GROUP=${KVM_GROUP:-992}
 SHOTS=${SHOTS:-}
 TRANSPORT=${TRANSPORT:-UDP}
+DELAY_MS=${DELAY_MS:-30}
+NETEM_IMAGE=${NETEM_IMAGE:-decoder-netem}
 case $TRANSPORT in UDP|TCP) ;; *) echo "TRANSPORT must be UDP or TCP"; exit 2 ;; esac
 TUNNEL=camex
 RESTART_MARK="Tunnel initialized"   # camex's log line of each new run (bundles/camex/src/camex.c)
@@ -79,6 +85,9 @@ trap cleanup EXIT INT TERM
 
 mkdir -p "$OUT/w"
 rm -rf "$OUT/w/.emu"
+
+[ "$DELAY_MS" -eq 0 ] || docker image inspect "$NETEM_IMAGE" >/dev/null 2>&1 ||
+    docker build -q -t "$NETEM_IMAGE" "$ROOT/tests/netem" >/dev/null
 
 echo "== debug APK (x86_64, $TUNNEL)"
 docker run --rm --pull never -u "$UID_GID" -v "$ROOT:/src" -v "$GRADLE_CACHE:/cache/gradle" \
@@ -146,7 +155,15 @@ until LINUX_IP=$(docker exec "$PEER" cat /proc/net/fib_trie 2>/dev/null |
     i=$((i + 1)); [ $i -lt 30 ] || { echo "the camex client got no address"; exit 1; }
     sleep 1
 done
-echo "hub ($TUNNEL, Decoder on $TRANSPORT): $HUB_IP:$HUB_PORT, Linux client: $LINUX_IP"
+# a real round trip: DELAY_MS on what each container sends (box to hub and hub to edge: twice)
+delay() {
+    docker run --rm --pull never --net "container:$1" --cap-add NET_ADMIN "$NETEM_IMAGE" \
+        tc qdisc add dev eth0 root netem delay "${DELAY_MS}ms"
+}
+if [ "$DELAY_MS" -gt 0 ]; then
+    for c in "$NAME" "$HUB" "$PEER"; do delay "$c" || { echo "no netem delay on $c"; exit 1; }; done
+fi
+echo "hub ($TUNNEL, Decoder on $TRANSPORT, delay ${DELAY_MS} ms each way): $HUB_IP:$HUB_PORT, Linux client: $LINUX_IP"
 
 # the camera: an RTSP server in the Linux edge's network namespace, a 1280x720 test picture
 # (screenshots: a lighter stream, the emulator's software decoder keeps up with it)
@@ -305,8 +322,8 @@ if [ "$TRANSPORT" = TCP ]; then
         ok "the tunnel runs over TCP to the hub"
     else bad "no TCP connection to the hub's port $HUB_PORT"; fi
 fi
-# the video keeps coming through the tunnel, hub to box; the Docker network has no real round
-# trip, so this does not catch camex#180 (TCP at ~10 KB/s with 60 ms RTT; camex has its own test)
+# the video keeps coming through the tunnel, hub to box: with the delay (DELAY_MS) camex 4.0.0
+# over TCP stays far below this (camex#180, ~10 KB/s), 4.0.1 passes (#281)
 rx() { $ADB shell cat /proc/net/dev | awk -F'[: ]+' '$2 == "tun0" { print $3 }'; }
 r1=$(rx); sleep 10; r2=$(rx)
 RATE_KB=$(( (${r2:-0} - ${r1:-0}) / 10240 ))
