@@ -30,6 +30,8 @@
 #                   (default ~/.cache/compot/toolchains/android-emulator)
 #   GRADLE_CACHE    Gradle cache                        (default ~/.gradle)
 #   KVM_GROUP       group id of /dev/kvm on the Docker host (default 992)
+#   TRANSPORT       the tunnel's transport in Network: UDP or TCP (default UDP); the hub takes
+#                   both on one port, the Linux edge stays on UDP
 #   SHOTS           1: slot 1 over TCP, a lighter camera stream and screenshots in tests/out/shots
 #                   (the picture through the tunnel, the menu, the Network dialog); the emulator's
 #                   software decoder still drops some frames: README pictures come from a TV box
@@ -50,6 +52,8 @@ EMULATOR_DIR=${EMULATOR_DIR:-$HOME/.cache/compot/toolchains/android-emulator}
 GRADLE_CACHE=${GRADLE_CACHE:-$HOME/.gradle}
 KVM_GROUP=${KVM_GROUP:-992}
 SHOTS=${SHOTS:-}
+TRANSPORT=${TRANSPORT:-UDP}
+case $TRANSPORT in UDP|TCP) ;; *) echo "TRANSPORT must be UDP or TCP"; exit 2 ;; esac
 TUNNEL=camex
 RESTART_MARK="Tunnel initialized"   # camex's log line of each new run (bundles/camex/src/camex.c)
 NAME=decoder-e2e-$$
@@ -142,7 +146,7 @@ until LINUX_IP=$(docker exec "$PEER" cat /proc/net/fib_trie 2>/dev/null |
     i=$((i + 1)); [ $i -lt 30 ] || { echo "the camex client got no address"; exit 1; }
     sleep 1
 done
-echo "hub ($TUNNEL): $HUB_IP:$HUB_PORT, Linux client: $LINUX_IP"
+echo "hub ($TUNNEL, Decoder on $TRANSPORT): $HUB_IP:$HUB_PORT, Linux client: $LINUX_IP"
 
 # the camera: an RTSP server in the Linux edge's network namespace, a 1280x720 test picture
 # (screenshots: a lighter stream, the emulator's software decoder keeps up with it)
@@ -174,7 +178,7 @@ WEB_PASSWORD=e2e-pass
 # the tunnel's values as the Network screen keeps them (tunnel_<id>_<field>)
 TUNNEL_SETTINGS="<string name=\"tunnel_camex_server\">$HUB_IP:5800</string>\
 <string name=\"tunnel_camex_name\">decoder</string>\
-<string name=\"tunnel_camex_transport\">UDP</string>\
+<string name=\"tunnel_camex_transport\">$TRANSPORT</string>\
 <string name=\"tunnel_camex_pubkey\">$CAMEX_PUBKEY</string>\
 <string name=\"tunnel_camex_psk\">$KEY</string>\
 <string name=\"web_password\">$WEB_PASSWORD</string>"
@@ -245,7 +249,10 @@ fi
 # a few rounds: the edges find each other through the hub first (slow on Android 5)
 pinged=""
 for _ in 1 2 3 4 5; do
-    if $ADB shell ping -c 3 -W 2 "$LINUX_IP" | grep -q ' [123] received'; then pinged=1; break; fi
+    P=$($ADB shell ping -c 3 -W 2 "$LINUX_IP" || true)
+    if printf '%s\n' "$P" | grep -q ' [123] received'; then
+        pinged=1; printf '%s\n' "$P" | grep 'min/avg' || true; break
+    fi
 done
 if [ -n "$pinged" ]; then ok "ping through the tunnel to $LINUX_IP"; else bad "no ping to $LINUX_IP"; fi
 
@@ -290,6 +297,21 @@ else
     $ADB exec-out screencap -p > "$OUT/screen.png" 2>/dev/null || true
 fi
 $ADB exec-out screencap -p > "$OUT/decoder.png" 2>/dev/null || true
+
+# the tunnel's transport: on TCP the app keeps a connection to the hub's port (state 01)
+if [ "$TRANSPORT" = TCP ]; then
+    if $ADB shell cat /proc/net/tcp /proc/net/tcp6 2>/dev/null |
+            awk -v p=":$(printf '%04X' $HUB_PORT)" '$3 ~ p "$" && $4 == "01" { f = 1 } END { exit !f }'; then
+        ok "the tunnel runs over TCP to the hub"
+    else bad "no TCP connection to the hub's port $HUB_PORT"; fi
+fi
+# the video keeps coming through the tunnel, hub to box; the Docker network has no real round
+# trip, so this does not catch camex#180 (TCP at ~10 KB/s with 60 ms RTT; camex has its own test)
+rx() { $ADB shell cat /proc/net/dev | awk -F'[: ]+' '$2 == "tun0" { print $3 }'; }
+r1=$(rx); sleep 10; r2=$(rx)
+RATE_KB=$(( (${r2:-0} - ${r1:-0}) / 10240 ))
+if [ "$RATE_KB" -ge 100 ]; then ok "video through the tunnel at $RATE_KB KB/s"; else
+    bad "video through the tunnel at $RATE_KB KB/s (want 100 or more)"; fi
 
 # the debug page through the tunnel, from the Linux client: the password set in Network is asked
 code() { docker exec "$PEER" curl -s -o /dev/null -m 10 -w '%{http_code}' "$@" "http://$TUN:8085/stats.json"; }

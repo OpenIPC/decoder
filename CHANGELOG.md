@@ -12,6 +12,14 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.24.3 — 2026-11-18
+
+- The camex tunnel is built from camex 4.0.1 (was 4.0.0), which fixes the tunnel over TCP:
+  a frame body read in pieces lost its first piece, so traffic from the server to the box
+  stalled at about 10 KB/s (OpenIPC/camex#180). The client library had the bug too, so a
+  TCP tunnel needs this build as well as a 4.0.1 server. UDP is unaffected.
+- `tests/e2e.sh` takes `TRANSPORT=TCP` and checks the video rate through the tunnel.
+
 ## 2.24.2 — 2026-11-17
 
 - The camex tunnel is built from camex 4.0.0 (was 3.19.0). The Android library is unchanged:
