@@ -12,6 +12,20 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.25.0 — 2026-11-18
+
+- The web (debug) page's port is set in **Network** → **Web page port** (default 8085, as
+  before; empty: 8085). When the port is taken, for example by another of our apps on the same
+  device, the page takes the next free one (up to 8094 by default), logs which port and why,
+  and shows the real address in `/stats.json`, the debug text and the Network dialog (#284).
+- The camex tunnel is told the port the page really got and restarts when it changes, so the
+  server's nginx reaches Decoder's own page.
+- The camex tunnel is built from camex 4.1.2 (was 4.0.1): from the tunnel, the library lets in
+  only connections to the app's own web port, held by the app itself; anything else is refused
+  at once, so the server shows an error rather than another app's page (OpenIPC/camex#187).
+- `tests/e2e.sh` checks a taken port: the page moves to 8086, through the tunnel too, and 8085
+  through the tunnel is refused.
+
 ## 2.24.3 — 2026-11-18
 
 - The camex tunnel is built from camex 4.0.1 (was 4.0.0), which fixes the tunnel over TCP:

@@ -480,7 +480,7 @@ public class Decoder extends Activity
                 : "Debug text off", Toast.LENGTH_SHORT).show();
     }
 
-    /** One line http://<address>:8085/ per device address while the debug text is on. */
+    /** One line http://<address>:<port>/ per device address while the debug text is on (#284: the real port). */
     private void updateDebugUrls() {
         if (debugUrls == null) return;
         if (!showStats) {
@@ -488,9 +488,10 @@ public class Decoder extends Activity
             return;
         }
         StringBuilder sb = new StringBuilder();
+        int port = DebugServer.get().port();
         for (String ip : NetInfo.addresses()) {
             if (sb.length() > 0) sb.append('\n');
-            sb.append("http://").append(ip).append(':').append(DebugServer.PORT).append('/');
+            sb.append("http://").append(ip).append(':').append(port).append('/');
         }
         if (sb.length() == 0) sb.append("Debug page: no network");
         if (!sb.toString().contentEquals(debugUrls.getText())) debugUrls.setText(sb);
@@ -1642,7 +1643,8 @@ public class Decoder extends Activity
         m.put("screen", getResources().getDisplayMetrics().widthPixels + "x"
                 + getResources().getDisplayMetrics().heightPixels);
         List<String> urls = new ArrayList<>();
-        for (String ip : NetInfo.addresses()) urls.add("http://" + ip + ":" + DebugServer.PORT + "/");
+        int port = DebugServer.get().port();
+        for (String ip : NetInfo.addresses()) urls.add("http://" + ip + ":" + port + "/");
         m.put("addresses", urls);
         m.put("server", DebugServer.get().state());
         // The video decoders and what they can do: instances, adaptive playback (#88)

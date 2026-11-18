@@ -282,7 +282,8 @@ else ok "the VPN leaves IPv6 alone (no ::/0 on tun0)"; fi
 
 # Decoder retries the camera on its own: wait for a viewer from the tunnel address
 i=0
-until [ -n "${TUN:-}" ] && docker logs "$CAM" 2>&1 | grep -q "created by $TUN:"; do
+# (and for it to read: with the round trip the RTSP setup takes a few seconds after "created")
+until [ -n "${TUN:-}" ] && docker logs "$CAM" 2>&1 | grep -q "created by $TUN:" && [ "$(readers)" -ge 1 ]; do
     i=$((i + 1)); [ $i -lt 60 ] || break
     sleep 1
 done
@@ -444,6 +445,45 @@ if [ -z "$SHOTS" ]; then
     else
         bad "no tunnel after Network → Save (tests/out/logcat-restart.txt)"
     fi
+fi
+
+# the web page's port taken by another program (adbd's reverse forward listens on 8085): Decoder
+# takes the next free one, tells the tunnel, and the hub's side reaches the page there; 8085
+# through the tunnel is refused, not served by the other program (#284, camex#187)
+if [ -z "$SHOTS" ]; then
+    $ADB shell am force-stop $PKG
+    sleep 2
+    $ADB reverse tcp:8085 tcp:9 >/dev/null
+    # listeners on 8085 (1F95), state 0A: who holds it before Decoder starts
+    held() { $ADB shell cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | awk '$2 ~ /:1F95$/ && $4 == "0A" { print $2, "uid", $8 }'; }
+    { echo "before:"; held; } > "$OUT/port-8085.txt"
+    $ADB logcat -c 2>/dev/null || true
+    $ADB shell am start -n $ACTIVITY >/dev/null
+    # (curl exits non-zero on a refused connection; its code is then 000)
+    page() { docker exec "$PEER" curl -s -o /dev/null -m 5 -w '%{http_code}' "$@" || true; }
+    moved=""
+    for n in $(seq 1 45); do
+        # Android 5 at times does not start the app right after force-stop: start it again
+        if [ $((n % 10)) -eq 0 ] && ! $ADB shell ps | grep -q "$PKG"; then
+            $ADB shell am start -n $ACTIVITY >/dev/null
+        fi
+        TUN=$($ADB shell 'ip addr show tun0 2>/dev/null' | sed -n 's/.*inet \([0-9.]*\).*/\1/p')
+        if [ -n "$TUN" ] && [ "$(page "http://$TUN:8086/stats.json")" = 401 ]; then moved=1; break; fi
+        sleep 2
+    done
+    $ADB logcat -d > "$OUT/logcat-port.txt" 2>&1 || true
+    { echo "after:"; held; } >> "$OUT/port-8085.txt"
+    if [ -n "$moved" ] && grep -q 'Debug HTTP server on port 8086: port 8085 is taken' "$OUT/logcat-port.txt" &&
+            page -u "anyone:$WEB_PASSWORD" "http://$TUN:8086/stats.json" | grep -q 200 &&
+            docker exec "$PEER" curl -s -m 5 -u "anyone:$WEB_PASSWORD" "http://$TUN:8086/stats.json" | grep -q ':8086/'; then
+        ok "8085 taken: the page is on 8086, through the tunnel too, and says so"
+    else
+        bad "8085 taken: no page on 8086 through the tunnel (tests/out/logcat-port.txt)"
+    fi
+    c=$(page "http://${TUN:-0}:8085/")
+    if [ "$c" = 000 ]; then ok "8085 through the tunnel is refused (the other program's port)"; else
+        bad "8085 through the tunnel answered $c: another program's page"; fi
+    $ADB reverse --remove tcp:8085 >/dev/null 2>&1 || true
 fi
 
 $ADB logcat -d -b crash > "$OUT/crash.log" 2>&1 || true

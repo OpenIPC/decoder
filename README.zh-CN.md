@@ -15,7 +15,7 @@
 - **音频：** AAC、Opus、G.711、L16
 - **显示：** 单路画面，或多画面模式：最多 8 路摄像机外加一路主动推送 RTP 的摄像机，解码方式根据设备能力自动调整
 - **网络：** RTSP over TCP、UDP（Auto 模式会回退到 TCP）或组播，接收摄像机主动推送的 RTP（Majestic `outgoing`），支持 Basic 和 Digest 认证，断线自动重连
-- **其他：** 支持 Android TV 遥控器、缩放、摄像机网页界面，地址加密保存，端口 8085 上的调试页面
+- **其他：** 支持 Android TV 遥控器、缩放、摄像机网页界面，地址加密保存，端口 8085（可更改）上的调试页面
 
 <p align="center">
   <img src="screenshots/quad_menu.jpg" alt="多画面模式：八路摄像机与菜单" width="640">
@@ -89,7 +89,7 @@
 
 ## Network（通往摄像头的隧道）
 
-Decoder 内置 [OpenIPC camex](https://github.com/OpenIPC/camex) 4.0.1 隧道：作为客户端接入同一台 camex 服务器的摄像头，可以在任何地方观看，无需另装 VPN 应用。菜单中的 **Network**（网格下方一行）包含：服务器（`host:port`）、客户端名称（设备在服务器上的 ID）、UDP 或 TCP、服务器公钥、预共享密钥、服务器超时、调试页面密码，以及 **On**：立即连接并在每次启动时连接。默认关闭。地址、MTU 和路由由服务器下发；只有隧道网络和服务器的路由（不宽于 /8）经过隧道，本地网络照常访问。状态显示在对话框（Connecting、Connected 及地址、VPN consent needed、Failed）和通知中。经隧道访问的摄像头在 Auto 模式下走 TCP。Decoder 告知服务器其网页位于 8085 端口（供服务器上的 nginx 使用；需 camex 服务器 3.19.0 或更新版本）。设置密码后，无论从本地网络还是经隧道访问，该页面都需要密码；为空（默认）时页面开放。
+Decoder 内置 [OpenIPC camex](https://github.com/OpenIPC/camex) 4.1.2 隧道：作为客户端接入同一台 camex 服务器的摄像头，可以在任何地方观看，无需另装 VPN 应用。菜单中的 **Network**（网格下方一行）包含：服务器（`host:port`）、客户端名称（设备在服务器上的 ID）、UDP 或 TCP、服务器公钥、预共享密钥、服务器超时、调试页面端口和密码，以及 **On**：立即连接并在每次启动时连接。默认关闭。地址、MTU 和路由由服务器下发；只有隧道网络和服务器的路由（不宽于 /8）经过隧道，本地网络照常访问。状态显示在对话框（Connecting、Connected 及地址、VPN consent needed、Failed）和通知中。经隧道访问的摄像头在 Auto 模式下走 TCP。调试页面默认位于 8085 端口，可在 Network 中更改；若该端口被占用（设备上另一个应用的页面在用），Decoder 会使用下一个空闲端口（8086、8087……）并显示实际地址。Decoder 告知服务器页面实际所在的端口（供服务器上的 nginx 使用；需 camex 服务器 3.19.0 或更新版本），隧道只放行 Decoder 自身页面的这个端口：无法经隧道访问其他应用的页面。设置密码后，无论从本地网络还是经隧道访问，该页面都需要密码；为空（默认）时页面开放。
 
 <p align="center">
   <img src="screenshots/network.jpg" alt="电视盒子上的 Network 对话框：已连接、服务器和客户端名称" width="400">

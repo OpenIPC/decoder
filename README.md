@@ -15,7 +15,7 @@ A small Android app for watching RTSP streams from IP cameras, with hardware H.2
 - **Audio:** AAC, Opus, G.711, L16
 - **Views:** one camera, or multi-view with up to 8 cameras plus a camera that pushes RTP, decoding adapted to what the device can do
 - **Network:** RTSP over TCP, UDP (Auto falls back to TCP) or multicast, RTP pushed by the camera (Majestic `outgoing`), Basic and Digest authentication, automatic reconnection
-- **More:** Android TV remote, zoom, camera web interface, URLs stored encrypted, a debug page on port 8085
+- **More:** Android TV remote, zoom, camera web interface, URLs stored encrypted, a debug page on port 8085 (settable)
 
 <p align="center">
   <img src="screenshots/quad_menu.jpg" alt="Multi-view with eight cameras and the menu" width="640">
@@ -89,7 +89,7 @@ Every item, the remote, sharing a URL from another app and **Reset**: [Usage](do
 
 ## Network (a tunnel to the cameras)
 
-Decoder has a tunnel built in, [OpenIPC camex](https://github.com/OpenIPC/camex) 4.0.1: cameras that are clients of the same camex server are watched from anywhere, without a separate VPN app. **Network** in the menu (a row under the grid) holds the server (`host:port`), the client name (the box's ID on the server), UDP or TCP, the server's public key, the pre-shared key, the server timeout, the password of the debug page and **On**: connect now and at every start. Off by default. The server gives the address, MTU and routes; only the tunnel network and the server's routes (none wider than a /8) go through it, the local network is reached as before. The state is shown in the dialog (Connecting, Connected with the address, VPN consent needed, Failed) and in a notification. A camera reached through the tunnel plays over TCP with Auto. Decoder tells the server its web page is on port 8085 (for nginx there; a camex server 3.19.0 or later). The password, when set, guards that page from the local network and through the tunnel alike; empty (the default), the page is open.
+Decoder has a tunnel built in, [OpenIPC camex](https://github.com/OpenIPC/camex) 4.1.2: cameras that are clients of the same camex server are watched from anywhere, without a separate VPN app. **Network** in the menu (a row under the grid) holds the server (`host:port`), the client name (the box's ID on the server), UDP or TCP, the server's public key, the pre-shared key, the server timeout, the port and the password of the debug page and **On**: connect now and at every start. Off by default. The server gives the address, MTU and routes; only the tunnel network and the server's routes (none wider than a /8) go through it, the local network is reached as before. The state is shown in the dialog (Connecting, Connected with the address, VPN consent needed, Failed) and in a notification. A camera reached through the tunnel plays over TCP with Auto. The debug page is on port 8085 unless Network sets another; when that port is taken (another app on the device serves its page there), Decoder takes the next free one (8086, 8087, …) and shows the real address. Decoder tells the server the port its page really is on (for nginx there; a camex server 3.19.0 or later), and the tunnel lets in only that port of Decoder's own page: another app's page is not reached through it. The password, when set, guards that page from the local network and through the tunnel alike; empty (the default), the page is open.
 
 <p align="center">
   <img src="screenshots/network.jpg" alt="The Network dialog on a TV box: connected, the server and the client name" width="400">
