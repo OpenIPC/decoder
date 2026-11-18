@@ -1,7 +1,7 @@
 /*
  * Copyright (c) OpenIPC  https://openipc.org  Prosperity Public License 3.0.0
  *
- * WebPassword.java — the password of the web page on port 8085, set in Network
+ * WebPassword.java — the password of the web page, set in Network
  *
  */
 

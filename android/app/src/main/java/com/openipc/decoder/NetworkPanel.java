@@ -15,6 +15,8 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.InputType;
 import android.util.Log;
 import android.util.TypedValue;
@@ -37,8 +39,10 @@ import java.util.Map;
  * The camex tunnel (the library of bundles/camex): the Network screen is built from its fields,
  * the values are kept in Decoder's settings as {@code tunnel_camex_<key>} (the psk sealed with
  * {@link CredentialStore}), and {@code tunnel_on} connects now and at every start of the app.
- * The web port is not asked: it is always the debug page's {@link DebugServer#PORT}. The same
- * dialog holds the password of that page ({@link WebPassword}).
+ * The library's web port is not asked: it is the port the debug page really listens on
+ * ({@link DebugServer#port()}: the one of {@link WebPort} or, when that is taken, the next free
+ * one), and the tunnel restarts when that changes (#284). The same dialog holds the page's port
+ * and password ({@link WebPassword}).
  * Android's VPN consent: a person confirms the system dialog once; a box without a person gets
  * it while it is prepared: adb shell appops set com.openipc.decoder ACTIVATE_VPN allow.
  */
@@ -84,8 +88,9 @@ final class NetworkPanel {
             }
             v.put(f.key, s != null ? s : f.initial);
         }
-        // nginx on the server reaches the box's web page there (camex 3.19.0, needs that server)
-        v.put(CamexTunnel.WEB_PORT, String.valueOf(DebugServer.PORT));
+        // nginx on the server reaches the box's web page there (camex 3.19.0, needs that server);
+        // camex 4.1.2 lets in from the tunnel only this port, held by this app (camex#187)
+        v.put(CamexTunnel.WEB_PORT, String.valueOf(DebugServer.get().port()));
         return v;
     }
 
@@ -179,7 +184,46 @@ final class NetworkPanel {
         start(a, askAfterConsent);
     }
 
+    /** The web port the running tunnel was given; 0 before the first start. */
+    private static volatile int announcedPort;
+
+    /** A start that waits for the debug page's port (see {@link #start}); main thread only. */
+    private static Runnable pendingStart;
+
+    /**
+     * The debug page tried its port: it got this one (at the start, or another one after a
+     * change in Network or when the set one is taken), or none was free and this is the one
+     * asked for. A start that waited for it goes on now; a running tunnel given another port
+     * restarts with this one, so the server's nginx and camex's gate point at the page (#284).
+     * Any thread.
+     */
+    static void webPortSettled(int port) {
+        Handler main = new Handler(Looper.getMainLooper());
+        main.post(() -> {
+            Runnable r = pendingStart;
+            pendingStart = null;
+            if (r != null) r.run();
+        });
+        Context c = App.context;
+        if (c == null || port == announcedPort || !CamexTunnel.running() || !isOn(c)) return;
+        main.post(() -> {
+            if (port == announcedPort || !CamexTunnel.running()) return;
+            Map<String, String> v = load(c);
+            if (CamexTunnel.check(v) != null) return;
+            Log.i(TAG, "Network: the web page is on port " + port + " now, the tunnel restarts");
+            announcedPort = port;
+            CamexTunnel.start(c.getApplicationContext(), v);
+        });
+    }
+
     private static void start(Activity a, boolean askNotifications) {
+        // the tunnel tells the server the page's port: right after the app's start the page may
+        // not have it yet (8085 taken: 8086); wait for it rather than restart the tunnel then
+        if (!DebugServer.get().settled()) {
+            pendingStart = () -> start(a, askNotifications);
+            return;
+        }
+        pendingStart = null;
         Map<String, String> v = load(a);
         if (CamexTunnel.check(v) != null) {
             Log.w(TAG, "Network is on, but its settings are not complete");
@@ -192,6 +236,7 @@ final class NetworkPanel {
             a.requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, REQ_NOTIFY);
         }
         CamexTunnel.setNotificationLook("Decoder", R.drawable.ic_launcher_foreground);
+        announcedPort = Integer.parseInt(v.get(CamexTunnel.WEB_PORT));
         CamexTunnel.start(a.getApplicationContext(), v);
     }
 
@@ -278,11 +323,17 @@ final class NetworkPanel {
             content.addView(view);
             views.put(f.key, view);
         }
-        // the web page on port 8085, from the local network and the tunnel alike
+        // the web page: its port (8085 unless set; the next free one when taken) and password,
+        // from the local network and the tunnel alike
+        int webPort = DebugServer.get().port();
+        content.addView(label(a, "Web page port (empty: " + WebPort.DEFAULT + "; taken: the next free"
+                + (webPort != WebPort.get(a) ? "; now " + webPort : "") + ")"));
+        EditText port = field(a, WebPort.text(a), InputType.TYPE_CLASS_NUMBER);
+        content.addView(port);
         String webPassword = WebPassword.read(a);
         final String keepWebPassword = webPassword == null ? WebPassword.stored(a) : null;
         content.addView(label(a, webPassword != null
-                ? "Web page password (port " + DebugServer.PORT + "; empty: open)"
+                ? "Web page password (empty: open)"
                 : "Web page password: the stored one cannot be read, the page is locked;"
                         + " enter it again or a new one"));
         EditText web = field(a, webPassword != null ? webPassword : "",
@@ -329,6 +380,12 @@ final class NetworkPanel {
                         n.put(f.key, ((EditText) view).getText().toString());
                     }
                 }
+                String badPort = WebPort.check(port.getText().toString());
+                if (badPort != null) {
+                    port.setError(badPort);
+                    port.requestFocus();
+                    return;
+                }
                 String[] problem = on.isChecked() ? CamexTunnel.check(n) : null;
                 if (problem != null) {
                     View view = views.get(problem[0]);
@@ -337,6 +394,8 @@ final class NetworkPanel {
                     return;
                 }
                 save(a, n, unreadable, on.isChecked());
+                // a new port: the page moves there now (and a running tunnel is told it below)
+                if (WebPort.save(a, port.getText().toString())) DebugServer.get().rebind();
                 WebPassword.save(a, web.getText().toString(),
                         removeWeb != null && removeWeb.isChecked() ? null : keepWebPassword);
                 // on: (re)connect with the saved values (a running tunnel restarts); off: stop

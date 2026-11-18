@@ -12,7 +12,7 @@
 
 ## Debug server
 
-While the app runs it serves its debug information over HTTP on port **8085**, for a browser or `curl` on the same network. It is always on and read-only.
+While the app runs it serves its debug information over HTTP on port **8085**, for a browser or `curl` on the same network. **Network** → **Web page port** sets another port (1024 to 65535; empty: 8085). It is always on and read-only.
 
 | Path                                     | Content                                                                                                                                                         |
 |------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -26,7 +26,7 @@ While the app runs it serves its debug information over HTTP on port **8085**, f
 - Only clients on the local network are answered; others get `403`. With a password set in **Network** (**Web page password**) the browser asks for it (any user name; `curl -u :<password>`). The rule and what is hidden: [security.md](security.md#debug-server).
 - `GET` only (`405` otherwise), one request per connection, `Cache-Control: no-store`.
 - Two worker threads at background priority, a short queue, a 20 s deadline per request: the server never gets in the way of decoding; a busy server drops the connection.
-- If port 8085 is taken, the server retries every 10 s; `server` in `/stats.json` says why.
+- If the port is taken (another app on the device serves its page there), the server takes the next free one, up to nine ports on (8086 … 8094), and logs which one and why; `addresses` in `/stats.json`, the Network dialog and the debug text show the real port. With none of them free it retries every 10 s, and `server` in `/stats.json` says why. The camex tunnel is told the port the page really got, and restarts when it changes.
 - On a phone that is only on a camera's or toy's Wi‑Fi, open the pages on the phone itself: `http://127.0.0.1:8085/`.
 
 The device's addresses are in `addresses` of `/stats.json`, and the [U cell](usage.md#the-u-cell) shows them while it waits for a stream.
@@ -90,7 +90,7 @@ In the single view (and the U view) the page and the snapshot still show the who
 | `android`       | string              | release and SDK level, e.g. `10 (SDK 29)`                                                                                                                          |
 | `screen`        | string              | display size in pixels, `WxH`                                                                                                                                      |
 | `addresses`     | list                | `http://<ip>:8085/` for every address of the device                                                                                                                |
-| `server`        | string              | `listening`, or why port 8085 could not be opened                                                                                                                  |
+| `server`        | string              | `listening`, or why no port could be opened                                                                                                                        |
 | `decoders`      | list or `"loading"` | the device's video decoders, see [decoders](#decoders)                                                                                                             |
 | `ui_thread`     | string              | `ok`, or `not responding within 1000 ms` (then only the fields above are present)                                                                                  |
 | `mode`          | string              | `single`, `multi-view`, `slides` (multi-view with Slides on), `udp` (U cell full-screen), `paused` (app in background); `no activity` when no activity is attached |

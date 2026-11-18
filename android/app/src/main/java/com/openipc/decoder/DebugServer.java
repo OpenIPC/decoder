@@ -30,7 +30,8 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Serves what the decoder knows about itself on port 8085, for a browser or curl:
+ * Serves what the decoder knows about itself on the port of {@link WebPort} (8085 unless Network
+ * sets another; the next free one when it is taken, #284), for a browser or curl:
  * {@code /} a page refreshing itself, {@code /stats.json} the same as JSON, {@code /log} the
  * app's recent log, {@code /report.txt} both in one file to download (#207). Always on; a client outside the local network gets 403. With a password set in
  * Network, every request needs it (HTTP Basic, any user name), from the local network and the
@@ -40,7 +41,6 @@ import java.util.concurrent.TimeUnit;
  */
 final class DebugServer {
     private static final String TAG = "OpenIPCDecoder";
-    static final int PORT = 8085;
     /** Lines of the app's log served by /log. */
     static final int LOG_LINES = 500;
     private static final int SOCKET_TIMEOUT_MS = 3000;
@@ -77,6 +77,12 @@ final class DebugServer {
     private volatile Source source;
     /** "listening" or why the port could not be opened, for the debug text. */
     private volatile String state = "starting";
+    /** The port the server listens on, 0 while it has none. */
+    private volatile int port;
+    /** True once the first port was tried: the tunnel waits for it, so it starts with that port. */
+    private volatile boolean settled;
+    /** The open socket, closed by {@link #rebind()} to take the port set in Network now. */
+    private volatile ServerSocket server;
     private final ThreadPoolExecutor workers = new ThreadPoolExecutor(2, 2, 30, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(4), r -> {
                 // Background priority: on a box busy decoding, a request waits, not the video
@@ -133,24 +139,96 @@ final class DebugServer {
 
     String state() { return state; }
 
-    private void acceptLoop() {
-        while (true) {
-            try (ServerSocket server = new ServerSocket()) {
-                server.setReuseAddress(true);
-                server.bind(new InetSocketAddress(PORT));
-                state = "listening";
-                Log.i(TAG, "Debug HTTP server on port " + PORT);
-                while (true) {
-                    Socket s = server.accept();
+    /** The port the page is on: the one listened on, else the one asked for. */
+    int port() {
+        int p = port;
+        return p != 0 ? p : WebPort.get(App.context);
+    }
+
+    /** Whether the server has tried its port since the start (it listens, or none was free). */
+    boolean settled() {
+        return settled;
+    }
+
+    /** Takes the port now set in Network: the open socket is closed and the next one opened. */
+    void rebind() {
+        ServerSocket s = server;
+        if (s == null) return;
+        port = 0;   // until the new one is open, port() is the one now set
+        try {
+            s.close();
+        } catch (IOException ignored) {
+            // closed already
+        }
+    }
+
+    /**
+     * The set port or, when it is taken, the next free one of {@link WebPort#TRIES}; null when
+     * none is free. The reason the set port is taken goes to {@code why[0]}.
+     */
+    private static ServerSocket open(int wanted, String[] why) {
+        for (int p = wanted; p < wanted + WebPort.TRIES && p <= WebPort.MAX; p++) {
+            ServerSocket s = null;
+            try {
+                s = new ServerSocket();
+                s.setReuseAddress(true);
+                s.bind(new InetSocketAddress(p));
+                return s;
+            } catch (IOException e) {
+                if (p == wanted) why[0] = e.getMessage();
+                if (s != null) {
                     try {
-                        workers.execute(() -> handle(s));
-                    } catch (RejectedExecutionException busy) {
-                        closeQuietly(s);
+                        s.close();
+                    } catch (IOException ignored) {
+                        // not open
                     }
                 }
-            } catch (IOException e) {
-                state = "port " + PORT + " unavailable: " + e.getMessage();
+            }
+        }
+        return null;
+    }
+
+    private void acceptLoop() {
+        while (true) {
+            int wanted = WebPort.get(App.context);
+            String[] why = new String[1];
+            ServerSocket opened = open(wanted, why);
+            if (opened == null) {
+                port = 0;
+                int last = Math.min(wanted + WebPort.TRIES - 1, WebPort.MAX);
+                state = "ports " + wanted + " to " + last + " unavailable: " + why[0];
                 Log.w(TAG, "Debug HTTP server: " + state + ", retrying");
+                settled = true;
+                NetworkPanel.webPortSettled(wanted);
+            } else {
+                try (ServerSocket s = opened) {
+                    server = s;
+                    port = s.getLocalPort();
+                    state = "listening";
+                    if (port == wanted) {
+                        Log.i(TAG, "Debug HTTP server on port " + port);
+                    } else {
+                        Log.w(TAG, "Debug HTTP server on port " + port + ": port " + wanted
+                                + " is taken (" + why[0] + ")");
+                    }
+                    settled = true;
+                    NetworkPanel.webPortSettled(port);
+                    while (true) {
+                        Socket c = s.accept();
+                        try {
+                            workers.execute(() -> handle(c));
+                        } catch (RejectedExecutionException busy) {
+                            closeQuietly(c);
+                        }
+                    }
+                } catch (IOException e) {
+                    server = null;
+                    // closed by rebind(): the port set in Network now, at once
+                    if (WebPort.get(App.context) != wanted) continue;
+                    port = 0;
+                    state = "port closed: " + e.getMessage();
+                    Log.w(TAG, "Debug HTTP server: " + state + ", retrying");
+                }
             }
             try {
                 Thread.sleep(REBIND_DELAY_MS);

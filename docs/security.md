@@ -33,7 +33,7 @@ Use the app on trusted networks only, or inside a secure channel of your own (a 
 
 ## Debug server
 
-The [debug server](debug.md) on port 8085 has no encryption, and no password unless one is set in **Network** (**Web page password**). It is always on while the app runs, and:
+The [debug server](debug.md) on port 8085 (or the one set in **Network**) has no encryption, and no password unless one is set in **Network** (**Web page password**). It is always on while the app runs, and:
 
 - answers only local-network clients: loopback, link-local (169.254/16, fe80::/10), the IPv4 private ranges 10/8, 172.16/12, 192.168/16, and IPv6 unique-local fc00::/7. Every other address gets `403 Forbidden: local network only`;
 - with a password set, asks every request for it (HTTP Basic, any user name), from the local network and through the camex tunnel alike; a wrong one is answered after a second (about two guesses a second at most), so a long password is worth it; it is kept sealed like the camera URLs (Android 6.0+; on 5.x, as those, it is stored as it is), and one that cannot be read keeps the pages locked until it can be read again, is entered again or is removed in Network. Over the local network the password travels as plain HTTP, through the tunnel encrypted by camex;
