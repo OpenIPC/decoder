@@ -218,6 +218,7 @@ final class NetworkPanel {
             if (r != null && App.context != null && isOn(App.context)) r.run();
             Runnable shown = onWebPort;
             if (shown != null) shown.run();
+            WebService.refresh();   // after an update: its notification tells the real port
         });
         Context c = App.context;
         if (c == null || port == announcedPort || !CamexTunnel.running() || !isOn(c)) return;

@@ -12,6 +12,17 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.27.0 — 2026-11-19
+
+- After an update of the app (a new APK installed over it) the web page comes back by itself,
+  and nothing else: no camera is played, no camex tunnel, the app's screen stays shut (#288).
+  Android tells the updated app (`MY_PACKAGE_REPLACED`); a small foreground service with a
+  quiet notification ("Web page on port N") keeps the page until the app is opened. Only with
+  Settings → Allow remote access on, and not after a force stop (Android then tells the app
+  nothing until it is opened).
+- `tests/e2e.sh` checks it: the same APK installed again, the page answers, no camera is read,
+  no tunnel, no screen.
+
 ## 2.26.0 — 2026-11-18
 
 - Decoder takes the "brass" look of our apps (#286, brass 1.3.0 of the brand project); the app

@@ -10,6 +10,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Android 10+ lets an app start an activity from a boot receiver only with this (#255) -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- After an update the web page alone, kept by a foreground service (#288) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
@@ -63,12 +66,25 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
-        <!-- Start on boot (#255); BOOT_COMPLETED is a protected broadcast: only the system sends it -->
+        <!-- Start on boot (#255); BOOT_COMPLETED is a protected broadcast: only the system sends it.
+             MY_PACKAGE_REPLACED (#288): sent to this app only, after it was updated -->
         <receiver android:name="BootReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
         </receiver>
+        <!-- The web page alone after an update, until the app is opened (#288) -->
+        <service
+            android:name="WebService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="The app's own read-only web page on the local network, kept after an update until the app is opened" />
+        </service>
     </application>
 
 </manifest>

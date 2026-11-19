@@ -486,6 +486,34 @@ if [ -z "$SHOTS" ]; then
     $ADB reverse --remove tcp:8085 >/dev/null 2>&1 || true
 fi
 
+# an update (the same APK again): the web page comes back by itself, nothing else — no camera
+# is read, no tunnel, the app's screen stays shut (#288)
+# (over the running app, as an update comes: a force-stopped app is in the "stopped" state and
+# Android delivers it no broadcast, MY_PACKAGE_REPLACED included)
+if [ -z "$SHOTS" ]; then
+    $ADB logcat -c 2>/dev/null || true
+    before=$(readers)   # before the update: a camera started by it is counted (Qodo on #289)
+    $ADB install -r /w/decoder.apk >/dev/null
+    $ADB forward tcp:18085 tcp:8085 >/dev/null
+    up=""
+    for _ in $(seq 1 30); do
+        c=$(docker exec "$NAME" curl -s -o /dev/null -m 3 -w '%{http_code}' -u "x:$WEB_PASSWORD" \
+            http://127.0.0.1:18085/stats.json || true)
+        if [ "$c" = 200 ]; then up=1; break; fi
+        sleep 2
+    done
+    $ADB logcat -d > "$OUT/logcat-update.txt" 2>&1 || true
+    if [ -n "$up" ] && grep -q 'Updated: the web page is back' "$OUT/logcat-update.txt"; then
+        ok "after an update the web page is back by itself"
+    else bad "no web page after an update (tests/out/logcat-update.txt)"; fi
+    sleep 5
+    if [ "$(readers)" -le "$before" ] && ! $ADB shell 'ip addr show tun0 2>/dev/null' | grep -q 'inet ' &&
+            ! $ADB shell dumpsys activity activities | grep -q "Resumed.*$PKG"; then
+        ok "after an update: no camera read, no tunnel, no screen"
+    else bad "after an update something more than the page started"; fi
+    $ADB forward --remove tcp:18085 >/dev/null 2>&1 || true
+fi
+
 $ADB logcat -d -b crash > "$OUT/crash.log" 2>&1 || true
 if grep -q "$PKG" "$OUT/crash.log"; then bad "crash in logcat (tests/out/crash.log)"; else ok "no crash"; fi
 
