@@ -51,6 +51,30 @@ public final class WebService extends Service {
         }
     }
 
+    /** The running service, to show the page's real port in its notification. */
+    private static volatile WebService running;
+
+    /**
+     * The page settled its port (taken: the next free one): the notification tells that one,
+     * not the one set (Qodo on #289). Main thread.
+     */
+    static void refresh() {
+        WebService s = running;
+        if (s == null) return;
+        NotificationManager nm = (NotificationManager) s.getSystemService(NOTIFICATION_SERVICE);
+        try {
+            nm.notify(NOTIFICATION_ID, s.notification());
+        } catch (RuntimeException e) {
+            // no permission to post: the service runs on without it
+        }
+    }
+
+    @Override
+    public void onDestroy() {
+        running = null;
+        super.onDestroy();
+    }
+
     /** The app's screen is open: its own process keeps the page from now on. */
     static void stop(Context c) {
         try {
@@ -72,9 +96,19 @@ public final class WebService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
-        DebugServer.get();   // binds its port on a thread of its own
+        running = this;
+        DebugServer.get();   // binds its port on a thread of its own; refresh() follows it
         // killed by the system: not brought back (the next update or the app's start will)
         return START_NOT_STICKY;
+    }
+
+    private String text() {
+        DebugServer d = DebugServer.get();
+        if (!d.settled()) return "Web page starting (updated; open to play)";
+        int p = d.port();
+        return p > 0 && "listening".equals(d.state())
+                ? "Web page on port " + p + " (updated; open to play)"
+                : "Web page: " + d.state();
     }
 
     @Override
@@ -99,7 +133,7 @@ public final class WebService extends Service {
                         | PendingIntent.FLAG_UPDATE_CURRENT));
         return b.setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentTitle("Decoder")
-                .setContentText("Web page on port " + WebPort.get(this) + " (updated; open to play)")
+                .setContentText(text())
                 .setOngoing(true)
                 .build();
     }

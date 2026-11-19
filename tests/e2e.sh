@@ -492,8 +492,8 @@ fi
 # Android delivers it no broadcast, MY_PACKAGE_REPLACED included)
 if [ -z "$SHOTS" ]; then
     $ADB logcat -c 2>/dev/null || true
+    before=$(readers)   # before the update: a camera started by it is counted (Qodo on #289)
     $ADB install -r /w/decoder.apk >/dev/null
-    before=$(readers)
     $ADB forward tcp:18085 tcp:8085 >/dev/null
     up=""
     for _ in $(seq 1 30); do
