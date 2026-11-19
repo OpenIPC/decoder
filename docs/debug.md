@@ -12,7 +12,7 @@
 
 ## Debug server
 
-While the app runs it serves its debug information over HTTP on port **8085**, for a browser or `curl` on the same network. **Network** (the **Settings** dialog, section **Decoder**) → **Port** sets another port (1024 to 65535; empty: 8085). It is always on and read-only.
+While the app runs it serves its debug information over HTTP on port **8085**, for a browser or `curl` on the same network. **Network** (the **Settings** dialog, section **Decoder**) → **Port** sets another port (1024 to 65535; empty: 8085). It is read-only, and on unless **Settings** → **Decoder** → **Allow remote access** is off: then the app opens no port at all.
 
 | Path                                     | Content                                                                                                                                                         |
 |------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|

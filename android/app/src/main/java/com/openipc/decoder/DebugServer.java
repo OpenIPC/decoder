@@ -33,7 +33,7 @@ import java.util.concurrent.TimeUnit;
  * Serves what the decoder knows about itself on the port of {@link WebPort} (8085 unless Network
  * sets another; the next free one when it is taken, #284), for a browser or curl:
  * {@code /} a page refreshing itself, {@code /stats.json} the same as JSON, {@code /log} the
- * app's recent log, {@code /report.txt} both in one file to download (#207). Always on; a client outside the local network gets 403. With a password set in
+ * app's recent log, {@code /report.txt} both in one file to download (#207). On unless Settings → Allow remote access is off (#286); a client outside the local network gets 403. With a password set in
  * Network, every request needs it (HTTP Basic, any user name), from the local network and the
  * tunnel alike; without one the pages are open, as before. GET only, one
  * request per connection, short timeouts and a few workers: it must never get in the way of
@@ -79,6 +79,7 @@ final class DebugServer {
     private volatile String state = "starting";
     /** The port the server listens on, 0 while it has none. */
     private volatile int port;
+    private static final String OFF = "off (Allow remote access)";
     /** True once the first port was tried: the tunnel waits for it, so it starts with that port. */
     private volatile boolean settled;
     /** The open socket, closed by {@link #rebind()} to take the port set in Network now. */
@@ -224,15 +225,15 @@ final class DebugServer {
         while (true) {
             final int gen = generation;
             if (!WebPort.allowed(App.context)) {
-                // Settings → Allow remote access off: no port at all, until it is on again
+                // Settings → Allow remote access off: no port at all, until it is on again; each
+                // wake (a Save) settles again, so a tunnel start waiting for it goes on (Qodo on
+                // #287)
                 port = 0;
-                state = "off (Allow remote access)";
-                Log.i(TAG, "Debug HTTP server: off, remote access is not allowed");
+                if (!OFF.equals(state)) Log.i(TAG, "Debug HTTP server: off, remote access is not allowed");
+                state = OFF;
                 settled = true;
                 NetworkPanel.webPortSettled(0);
-                while (!WebPort.allowed(App.context)) {
-                    if (!sleep(REBIND_DELAY_MS)) return;
-                }
+                if (!sleep(REBIND_DELAY_MS)) return;
                 continue;
             }
             int wanted = WebPort.get(App.context);
@@ -289,6 +290,8 @@ final class DebugServer {
         ScheduledFuture<?> deadline = deadlines.schedule(() -> closeQuietly(s),
                 REQUEST_DEADLINE_MS, TimeUnit.MILLISECONDS);
         try (Socket socket = s) {
+            // accepted just before Allow remote access went off: not served (Qodo on #287)
+            if (!WebPort.allowed(App.context)) return;
             socket.setSoTimeout(SOCKET_TIMEOUT_MS);
             OutputStream out = socket.getOutputStream();
             if (!NetInfo.isLocalClient(socket.getInetAddress())) {
@@ -865,7 +868,9 @@ final class DebugServer {
             + "{'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]})}"
             // The wall keeps 16:9 (the snapshot's shape) and fills the space left; on a narrow
             // screen it takes the full width and the cells are listed below it
-            + "function fit(){var m=$('main'),w=m.clientWidth,h=w*9/16+1,small=w<720;"
+            // the wall fits the window's height below the board too (Qodo on #287)
+            + "function fit(){var m=$('main'),w=m.clientWidth,wall=$('wall'),"
+            + "h=Math.max(180,innerHeight-(wall.getBoundingClientRect().top+scrollY)-70),small=w<720;"
             + "document.body.classList.toggle('small',small);"
             + "if(!small&&w*9/16>h)w=h*16/9;$('wall').style.width=Math.floor(w)+'px';"
             + "$('wall').style.height=Math.floor(w*9/16)+'px'}"
@@ -911,11 +916,15 @@ final class DebugServer {
             + "tuck?'bad':ui||none?'warn':'ok';worst(dc);"
             + "rows.push(brow(dc,'Decoder',stuck?'video decoder not responding \u2014 restart the device'"
             + ":ui?'UI '+s.ui_thread:none?(s.mode||'no data'):'running \u00b7 up '+up(s.uptime_s)));"
-            + "var cs=s.slots||s.cells||(s.single?[s.single]:[]),conf=0,live=0;cs.forEach(function(c){if("
+            + "var cs=s.slots||s.cells||(s.single?[s.single]:[]),conf=0,live=0,bad=0;cs.forEach(function(c){if("
             + "!c||c.slot===''||c.slot==null||c.text==='" + StreamProbes.NOT_CONFIGURED + "')return;if(!c"
-            + ".url&&!c.video)return;conf++;if(c.video||ok(c))live++});"
-            + "var cc=!conf?'dim':live<conf?'warn':'ok';worst(cc);rows.push(brow(cc,'Cameras',!conf?'none"
-            + " configured':live+' of '+conf+' live'+(live<conf?' \u00b7 '+(conf-live)+' no answer':'')))"
+            // no answer: a failed check, or a cell of the grid without video; a camera not
+            // checked now (UDP push, checks on hold) is told apart (Qodo on #287)
+            + ".url&&!c.video)return;conf++;if(c.video||ok(c))live++;else if(!c.probe||c.probe.state==="
+            + "'error')bad++});var unk=conf-live-bad;"
+            + "var cc=!conf?'dim':bad?'warn':'ok';worst(cc);rows.push(brow(cc,'Cameras',!conf?'none"
+            + " configured':live+' of '+conf+' live'+(bad?' \u00b7 '+bad+' no answer':'')+(unk?' \u00b7 '"
+            + "+unk+' not checked':'')))"
             + ";"
             + "var n=(s.cells||[]).length,side=n>4?3:2,m=s.mode;rows.push(brow('','Screen',m==='paused'?'"
             + "app in background':m==='udp'?'U view':m==='single'?'camera '+s.active_slot+' on screen':m="

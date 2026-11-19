@@ -230,7 +230,9 @@ class MenuManager {
         int cell = wordCellWidth();
         // Never wider than the screen allows (4 cells and the popup's margins): a large font
         // or a narrow screen shortens the labels with an ellipsis instead (Qodo on #178)
-        int avail = activity.getResources().getDisplayMetrics().widthPixels - 2 * dp(12);
+        // the popup's margins and the brass panel's padding and frame (Qodo on #287)
+        int avail = activity.getResources().getDisplayMetrics().widthPixels - 2 * dp(12)
+                - 2 * dp(14) - 2 * dp(3);
         if (avail > 0) cell = Math.min(cell, avail / 4);
         int half = cell / 2;
         cell = half * 2;
