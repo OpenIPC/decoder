@@ -369,7 +369,7 @@ fi
 shown() { $ADB shell dumpsys input_method | grep -o 'mInputShown=[a-z]*' | head -1; }
 bounds() {
     $ADB shell uiautomator dump /data/local/tmp/ui.xml >/dev/null 2>&1 || true
-    $ADB shell cat /data/local/tmp/ui.xml 2>/dev/null | grep -o "text=\"$1\"[^>]*bounds=\"[^\"]*\"" |
+    $ADB shell cat /data/local/tmp/ui.xml 2>/dev/null | grep -io "text=\"$1\"[^>]*bounds=\"[^\"]*\"" |
         sed -n 's/.*\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\].*/\1 \2 \3 \4/p' | head -1
 }
 tap_text() {

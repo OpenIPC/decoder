@@ -12,6 +12,28 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.26.0 — 2026-11-18
+
+- Decoder takes the "brass" look of our apps (#286, brass 1.3.0 of the brand project); the app
+  icon and the TV banner stay blue and white:
+  - the menu over the video is a brass panel of brass keys with serif labels; an item that is
+    on is pressed brass with an amber glow (was an orange fill), the remote's focus an amber
+    frame (was light blue), a slot without a camera has dim text; the version stays on Exit;
+  - the status line over the video is amber monospace capitals on a dark plate;
+  - the dialogs (camera, Start on boot, Reset) are brass panels with a serif title, dark text
+    fields, amber radio buttons and check boxes with the amber focus ring, brass buttons;
+  - **Network** opens one **Settings** dialog: a **Decoder** section with **Allow remote
+    access** (new; off, the debug page is closed and the app opens no port), the page's port
+    and password, and a **Camex** section with **Join a camex server** (was "On: connect now
+    and at every start"), the tunnel's state and the library's fields;
+  - the web page: the title **Decoder** with the version, "Elegant video player", a panel with
+    rivets and the plate **Video wall**, a board of rows with lamps (Decoder, Cameras, Screen,
+    Camex), brass JSON, Log, Report and switches, the wall in a frame, the camera on screen in
+    amber; the tab's title and icon show the worst lamp. `/stats.json` has `camex`.
+- The web page's port (Qodo on #285): a Save while the socket was opening is no longer lost; a
+  new port is tried at once after all ports failed; the address on screen follows a move; a
+  tunnel start waits for the new port after a Save; Network saved off cancels a waiting start.
+
 ## 2.25.0 — 2026-11-18
 
 - The web (debug) page's port is set in **Network** → **Web page port** (default 8085, as

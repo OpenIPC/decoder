@@ -9,16 +9,22 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- Status indicator overlay -->
+    <!-- Status indicator overlay: amber monospace capitals on a dark plate (#286, brass) -->
     <TextView
         android:id="@+id/status_text"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top|center_horizontal"
         android:layout_marginTop="16dp"
-        android:padding="8dp"
-        android:background="#80000000"
-        android:textColor="#FFFFFF"
+        android:paddingLeft="14dp"
+        android:paddingRight="14dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:background="@drawable/status_plate"
+        android:textColor="@color/amber"
+        android:fontFamily="monospace"
+        android:textAllCaps="true"
+        android:letterSpacing="0.15"
         android:textSize="14sp"
         android:visibility="gone" />
 
