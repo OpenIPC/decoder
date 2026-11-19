@@ -73,7 +73,7 @@ final class NetworkPanel {
     private static Map<String, String> load(Context c, Map<String, String> unreadable) {
         Map<String, String> v = new HashMap<>();
         CredentialStore store = null;
-        for (Field f : CamexTunnel.fields()) {
+        for (Field f : fields(c)) {
             if (fixed(f)) continue;
             String stored = prefs(c).getString(PREFIX + f.key, null);
             String s = stored;
@@ -85,13 +85,23 @@ final class NetworkPanel {
                     if (unreadable != null) unreadable.put(f.key, stored);
                 }
             }
-            v.put(f.key, s != null ? s : f.initial);
+            // an empty client name (saved by an older version) takes the default one too
+            if (s == null || (s.isEmpty() && CamexTunnel.NAME.equals(f.key))) s = f.initial;
+            v.put(f.key, s);
         }
         // nginx on the server reaches the box's web page there (camex 3.19.0, needs that server);
         // camex 4.1.2 lets in from the tunnel only this port, held by this app (camex#187)
         int web = DebugServer.get().port();
         v.put(CamexTunnel.WEB_PORT, web > 0 ? String.valueOf(web) : "");   // off: none (#286)
         return v;
+    }
+
+    /**
+     * The library's fields (camex 4.2.0, #286): their order, labels, hints and the default client
+     * name, decoder-<the last 4 of ANDROID_ID>.
+     */
+    private static java.util.List<Field> fields(Context c) {
+        return CamexTunnel.fields(c, "decoder");
     }
 
     /** A field of the library that Decoder sets itself, not shown: the web port. */
@@ -103,7 +113,7 @@ final class NetworkPanel {
                              boolean on) {
         SharedPreferences.Editor e = prefs(c).edit();
         CredentialStore store = CredentialStore.create();
-        for (Field f : CamexTunnel.fields()) {
+        for (Field f : fields(c)) {
             if (fixed(f)) continue;
             String s = v.get(f.key);
             if (f.kind == Field.Kind.SECRET) {
@@ -324,7 +334,7 @@ final class NetworkPanel {
         content.addView(on);
         content.addView(state);
         Map<String, View> views = new HashMap<>();
-        for (Field f : CamexTunnel.fields()) {
+        for (Field f : fields(a)) {
             if (fixed(f)) continue;
             String v = values.get(f.key);
             View view;
@@ -361,6 +371,22 @@ final class NetworkPanel {
             }
             content.addView(view);
             views.put(f.key, view);
+            if (view instanceof EditText && f.hint != null && !f.hint.isEmpty()) {
+                ((EditText) view).setHint(f.hint);
+            }
+            // a key is hidden, with "Show the key" under it (the dots, not the input type: the
+            // field's type is TvKeyboard's)
+            if (f.kind == Field.Kind.SECRET && view instanceof EditText) {
+                EditText key = (EditText) view;
+                CheckBox show = check(a, Field.SHOW_SECRET, false);
+                show.setOnCheckedChangeListener((b, shown) -> {
+                    int at = key.getSelectionEnd();
+                    key.setTransformationMethod(shown ? null
+                            : android.text.method.PasswordTransformationMethod.getInstance());
+                    if (at >= 0) key.setSelection(Math.min(at, key.length()));
+                });
+                content.addView(show);
+            }
         }
 
         // at most about half the screen: a taller view pushes the dialog's buttons off a TV
@@ -385,7 +411,7 @@ final class NetworkPanel {
             CamexTunnel.addListener(listener);
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(x -> {
                 Map<String, String> n = new HashMap<>();
-                for (Field f : CamexTunnel.fields()) {
+                for (Field f : fields(a)) {
                     View view = views.get(f.key);
                     if (view instanceof CheckBox) {
                         n.put(f.key, String.valueOf(((CheckBox) view).isChecked()));

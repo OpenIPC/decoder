@@ -26,6 +26,9 @@ were released.
     access** (new; off, the debug page is closed and the app opens no port), the page's port
     and password, and a **Camex** section with **Join a camex server** (was "On: connect now
     and at every start"), the tunnel's state and the library's fields;
+  - the camex fields come from the camex 4.2.0 library (was 4.1.2): its labels (**Proto**
+    for the transport), the hints of empty fields, the key hidden with **Show the key** under
+    it, the client name `decoder-<the last four of ANDROID_ID>` by default;
   - the web page: the title **Decoder** with the version, "Elegant video player", a panel with
     rivets and the plate **Video wall**, a board of rows with lamps (Decoder, Cameras, Screen,
     Camex), brass JSON, Log, Report and switches, the wall in a frame, the camera on screen in
