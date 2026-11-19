@@ -353,6 +353,10 @@ if [ -n "$SHOTS" ]; then
     $ADB shell input keyevent 23
     sleep 3
     $ADB exec-out screencap -p > "$OUT/shots/tunnel_network.png"
+    # the remote's focus on a check box (Allow remote access, on): on or off must read (#290)
+    $ADB shell input keyevent 20
+    sleep 1
+    $ADB exec-out screencap -p > "$OUT/shots/tunnel_network_check.png"
     # down to the On switch: the dialog scrolls to the cipher, TCP, multicast and On
     for _ in 1 2 3 4 5 6 7; do $ADB shell input keyevent 20; sleep 0.4; done
     sleep 1

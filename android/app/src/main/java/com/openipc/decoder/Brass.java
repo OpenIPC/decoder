@@ -9,7 +9,6 @@ package com.openipc.decoder;
 
 import android.app.AlertDialog;
 import android.content.Context;
-import android.content.res.ColorStateList;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
@@ -196,7 +195,13 @@ final class Brass {
         } else if (v instanceof CompoundButton) {
             CompoundButton b = (CompoundButton) v;
             b.setTextColor(color(c, R.color.ink));
-            b.setButtonTintList(ColorStateList.valueOf(color(c, R.color.amber)));
+            // the app's own box and ring, untinted: on and off read under the focus too (#290)
+            b.setButtonTintList(null);
+            b.setButtonDrawable(b instanceof android.widget.RadioButton
+                    ? R.drawable.brass_radio : R.drawable.brass_check);
+            int pad = Math.round(6 * dp(c));
+            b.setPadding(Math.max(b.getPaddingLeft(), pad), b.getPaddingTop(), b.getPaddingRight(),
+                    b.getPaddingBottom());
             // the remote's focus (focus_ring.xml): views made with the activity's context miss
             // the dialog theme's checkboxStyle
             b.setBackgroundResource(R.drawable.focus_ring);
