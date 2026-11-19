@@ -2722,6 +2722,8 @@ public class Decoder extends Activity
         sOpening = false;
         sShown = true;
         hideSystemBars();
+        // the page after an update had its own service: the app's screen keeps it now (#288)
+        WebService.stop(this);
         startStreams();
         // the page moved (a taken port, Settings): its address on screen follows (Qodo on #285)
         NetworkPanel.onWebPort = this::updateDebugUrls;

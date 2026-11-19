@@ -62,6 +62,11 @@ public class BootReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
+        // after an update: the web page alone, nothing that plays or draws traffic (#288)
+        if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(intent.getAction())) {
+            WebService.startAfterUpdate(context);
+            return;
+        }
         if (!Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) return;
         if (!enabled(context)) return;
         // A firmware autorun opened it already: another start would pause and resume it,
