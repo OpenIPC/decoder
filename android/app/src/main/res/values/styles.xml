@@ -18,10 +18,16 @@
         <item name="android:checkboxStyle">@style/BrassCheck</item>
         <item name="android:radioButtonStyle">@style/BrassRadio</item>
     </style>
+    <!-- the box and the ring are the app's own (#290): the system ones, tinted amber, showed
+         no tick or dot under the remote's focus -->
     <style name="BrassCheck" parent="android:Widget.Material.CompoundButton.CheckBox">
         <item name="android:background">@drawable/focus_ring</item>
+        <item name="android:button">@drawable/brass_check</item>
+        <item name="android:buttonTint">@null</item>
     </style>
     <style name="BrassRadio" parent="android:Widget.Material.CompoundButton.RadioButton">
         <item name="android:background">@drawable/focus_ring</item>
+        <item name="android:button">@drawable/brass_radio</item>
+        <item name="android:buttonTint">@null</item>
     </style>
 </resources>

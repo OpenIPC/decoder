@@ -12,6 +12,14 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.27.1 — 2026-11-19
+
+- Check boxes and radio buttons of the brass dialogs show on and off under the remote's focus
+  too (#290): the system ones, tinted amber, became a solid amber box or circle with no tick or
+  dot when focused (seen on a SberBox). They are the app's own drawables now — checked: an
+  amber box with a dark tick, an amber ring with an amber dot; unchecked: an empty dark box or
+  ring with a dim frame; the amber focus frame stays around the row.
+
 ## 2.27.0 — 2026-11-19
 
 - After an update of the app (a new APK installed over it) the web page comes back by itself,
