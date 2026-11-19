@@ -4,4 +4,24 @@
         <item name="android:windowFullscreen">true</item>
         <item name="android:windowBackground">@android:color/black</item>
     </style>
+
+    <!-- The brass dialogs (#286, brand brass 1.3.0): dark Material, amber accents, the remote's
+         focus on check boxes and radio buttons as focus_ring.xml; Brass.style paints the panel,
+         the title, the buttons and the fields -->
+    <style name="BrassDialog" parent="android:Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">@color/amber</item>
+        <item name="android:colorControlActivated">@color/amber</item>
+        <item name="android:colorControlNormal">@color/dim</item>
+        <item name="android:textColorPrimary">@color/ink</item>
+        <item name="android:textColorSecondary">@color/dim</item>
+        <item name="android:textColorHint">@color/dim</item>
+        <item name="android:checkboxStyle">@style/BrassCheck</item>
+        <item name="android:radioButtonStyle">@style/BrassRadio</item>
+    </style>
+    <style name="BrassCheck" parent="android:Widget.Material.CompoundButton.CheckBox">
+        <item name="android:background">@drawable/focus_ring</item>
+    </style>
+    <style name="BrassRadio" parent="android:Widget.Material.CompoundButton.RadioButton">
+        <item name="android:background">@drawable/focus_ring</item>
+    </style>
 </resources>

@@ -13,7 +13,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.graphics.Color;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -74,7 +73,7 @@ final class NetworkPanel {
     private static Map<String, String> load(Context c, Map<String, String> unreadable) {
         Map<String, String> v = new HashMap<>();
         CredentialStore store = null;
-        for (Field f : CamexTunnel.fields()) {
+        for (Field f : fields(c)) {
             if (fixed(f)) continue;
             String stored = prefs(c).getString(PREFIX + f.key, null);
             String s = stored;
@@ -86,12 +85,23 @@ final class NetworkPanel {
                     if (unreadable != null) unreadable.put(f.key, stored);
                 }
             }
-            v.put(f.key, s != null ? s : f.initial);
+            // an empty client name (saved by an older version) takes the default one too
+            if (s == null || (s.isEmpty() && CamexTunnel.NAME.equals(f.key))) s = f.initial;
+            v.put(f.key, s);
         }
         // nginx on the server reaches the box's web page there (camex 3.19.0, needs that server);
         // camex 4.1.2 lets in from the tunnel only this port, held by this app (camex#187)
-        v.put(CamexTunnel.WEB_PORT, String.valueOf(DebugServer.get().port()));
+        int web = DebugServer.get().port();
+        v.put(CamexTunnel.WEB_PORT, web > 0 ? String.valueOf(web) : "");   // off: none (#286)
         return v;
+    }
+
+    /**
+     * The library's fields (camex 4.2.0, #286): their order, labels, hints and the default client
+     * name, decoder-<the last 4 of ANDROID_ID>.
+     */
+    private static java.util.List<Field> fields(Context c) {
+        return CamexTunnel.fields(c, "decoder");
     }
 
     /** A field of the library that Decoder sets itself, not shown: the web port. */
@@ -103,7 +113,7 @@ final class NetworkPanel {
                              boolean on) {
         SharedPreferences.Editor e = prefs(c).edit();
         CredentialStore store = CredentialStore.create();
-        for (Field f : CamexTunnel.fields()) {
+        for (Field f : fields(c)) {
             if (fixed(f)) continue;
             String s = v.get(f.key);
             if (f.kind == Field.Kind.SECRET) {
@@ -189,6 +199,8 @@ final class NetworkPanel {
 
     /** A start that waits for the debug page's port (see {@link #start}); main thread only. */
     private static Runnable pendingStart;
+    /** The activity's refresh of the page's address on screen; main thread only (Qodo on #285). */
+    static Runnable onWebPort;
 
     /**
      * The debug page tried its port: it got this one (at the start, or another one after a
@@ -202,7 +214,10 @@ final class NetworkPanel {
         main.post(() -> {
             Runnable r = pendingStart;
             pendingStart = null;
-            if (r != null) r.run();
+            // not if Network was saved off meanwhile (Qodo on #285)
+            if (r != null && App.context != null && isOn(App.context)) r.run();
+            Runnable shown = onWebPort;
+            if (shown != null) shown.run();
         });
         Context c = App.context;
         if (c == null || port == announcedPort || !CamexTunnel.running() || !isOn(c)) return;
@@ -236,7 +251,8 @@ final class NetworkPanel {
             a.requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, REQ_NOTIFY);
         }
         CamexTunnel.setNotificationLook("Decoder", R.drawable.ic_launcher_foreground);
-        announcedPort = Integer.parseInt(v.get(CamexTunnel.WEB_PORT));
+        String web = v.get(CamexTunnel.WEB_PORT);
+        announcedPort = web == null || web.isEmpty() ? 0 : Integer.parseInt(web);
         CamexTunnel.start(a.getApplicationContext(), v);
     }
 
@@ -277,15 +293,48 @@ final class NetworkPanel {
         Map<String, String> unreadable = new HashMap<>();
         Map<String, String> values = load(a, unreadable);
         TextView state = new TextView(a);
-        state.setTextColor(Color.WHITE);
+        // the tunnel's state under Join, amber monospace as a display line (#286)
+        state.setTextColor(Brass.color(a, R.color.amber));
+        state.setTypeface(android.graphics.Typeface.MONOSPACE);
+        state.setTag(R.id.brass_keep, true);
         state.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
 
         LinearLayout content = new LinearLayout(a);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(a, 16), dp(a, 8), dp(a, 16), 0);
+        // one SETTINGS dialog, as in our other apps (#286): DECODER, then CAMEX
+        content.addView(Brass.band(a, "Decoder", false));
+        CheckBox remote = check(a, "Allow remote access", WebPort.allowed(a));
+        content.addView(remote);
+        // the web page: its port (8085 unless set; the next free one when taken) and password,
+        // from the local network and the tunnel alike
+        int webPort = DebugServer.get().port();
+        content.addView(label(a, "Port" + (webPort != 0 && webPort != WebPort.get(a)
+                ? " (taken: now " + webPort + ")" : "")));
+        EditText port = field(a, WebPort.text(a), InputType.TYPE_CLASS_NUMBER);
+        port.setHint("empty: " + WebPort.DEFAULT + "; taken: the next free");
+        content.addView(port);
+        String webPassword = WebPassword.read(a);
+        final String keepWebPassword = webPassword == null ? WebPassword.stored(a) : null;
+        content.addView(label(a, webPassword != null
+                ? "Web page password"
+                : "Web page password: the stored one cannot be read, the page is locked;"
+                        + " enter it again or a new one"));
+        EditText web = field(a, webPassword != null ? webPassword : "",
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        web.setHint("empty: the page is open");
+        content.addView(web);
+        // only then: a way back to an open page (an empty field keeps the unreadable one)
+        CheckBox removeWeb = keepWebPassword != null
+                ? check(a, "Remove the stored password: the page is open", false) : null;
+        if (removeWeb != null) content.addView(removeWeb);
+
+        content.addView(Brass.band(a, "Camex", true));
+        CheckBox on = check(a, "Join a camex server", isOn(a));
+        content.addView(on);
         content.addView(state);
         Map<String, View> views = new HashMap<>();
-        for (Field f : CamexTunnel.fields()) {
+        for (Field f : fields(a)) {
             if (fixed(f)) continue;
             String v = values.get(f.key);
             View view;
@@ -322,29 +371,23 @@ final class NetworkPanel {
             }
             content.addView(view);
             views.put(f.key, view);
+            if (view instanceof EditText && f.hint != null && !f.hint.isEmpty()) {
+                ((EditText) view).setHint(f.hint);
+            }
+            // a key is hidden, with "Show the key" under it (the dots, not the input type: the
+            // field's type is TvKeyboard's)
+            if (f.kind == Field.Kind.SECRET && view instanceof EditText) {
+                EditText key = (EditText) view;
+                CheckBox show = check(a, Field.SHOW_SECRET, false);
+                show.setOnCheckedChangeListener((b, shown) -> {
+                    int at = key.getSelectionEnd();
+                    key.setTransformationMethod(shown ? null
+                            : android.text.method.PasswordTransformationMethod.getInstance());
+                    if (at >= 0) key.setSelection(Math.min(at, key.length()));
+                });
+                content.addView(show);
+            }
         }
-        // the web page: its port (8085 unless set; the next free one when taken) and password,
-        // from the local network and the tunnel alike
-        int webPort = DebugServer.get().port();
-        content.addView(label(a, "Web page port (empty: " + WebPort.DEFAULT + "; taken: the next free"
-                + (webPort != WebPort.get(a) ? "; now " + webPort : "") + ")"));
-        EditText port = field(a, WebPort.text(a), InputType.TYPE_CLASS_NUMBER);
-        content.addView(port);
-        String webPassword = WebPassword.read(a);
-        final String keepWebPassword = webPassword == null ? WebPassword.stored(a) : null;
-        content.addView(label(a, webPassword != null
-                ? "Web page password (empty: open)"
-                : "Web page password: the stored one cannot be read, the page is locked;"
-                        + " enter it again or a new one"));
-        EditText web = field(a, webPassword != null ? webPassword : "",
-                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        content.addView(web);
-        // only then: a way back to an open page (an empty field keeps the unreadable one)
-        CheckBox removeWeb = keepWebPassword != null
-                ? check(a, "Remove the stored password: the page is open", false) : null;
-        if (removeWeb != null) content.addView(removeWeb);
-        CheckBox on = check(a, "On: connect now and at every start", isOn(a));
-        content.addView(on);
 
         // at most about half the screen: a taller view pushes the dialog's buttons off a TV
         final int maxHeight = a.getResources().getDisplayMetrics().heightPixels * 55 / 100;
@@ -357,8 +400,8 @@ final class NetworkPanel {
         scroll.addView(content);
 
         CamexTunnel.Listener listener = (s, address, error) -> state.setText(stateText(s, address, error));
-        AlertDialog dialog = new AlertDialog.Builder(a)
-                .setTitle(a.getString(R.string.network_title))
+        AlertDialog dialog = Brass.dialog(a)
+                .setTitle("Settings")
                 .setView(scroll)
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Save", null)
@@ -368,7 +411,7 @@ final class NetworkPanel {
             CamexTunnel.addListener(listener);
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(x -> {
                 Map<String, String> n = new HashMap<>();
-                for (Field f : CamexTunnel.fields()) {
+                for (Field f : fields(a)) {
                     View view = views.get(f.key);
                     if (view instanceof CheckBox) {
                         n.put(f.key, String.valueOf(((CheckBox) view).isChecked()));
@@ -394,13 +437,19 @@ final class NetworkPanel {
                     return;
                 }
                 save(a, n, unreadable, on.isChecked());
-                // a new port: the page moves there now (and a running tunnel is told it below)
-                if (WebPort.save(a, port.getText().toString())) DebugServer.get().rebind();
+                // a new port, or the page turned on or off: it moves now (and a running tunnel is
+                // told it below)
+                boolean moved = WebPort.setAllowed(a, remote.isChecked());
+                if (WebPort.save(a, port.getText().toString())) moved = true;
+                if (moved) DebugServer.get().rebind();
                 WebPassword.save(a, web.getText().toString(),
                         removeWeb != null && removeWeb.isChecked() ? null : keepWebPassword);
                 // on: (re)connect with the saved values (a running tunnel restarts); off: stop
                 if (on.isChecked()) connect(a);
-                else CamexTunnel.stop();
+                else {
+                    pendingStart = null;
+                    CamexTunnel.stop();
+                }
                 dialog.dismiss();
             });
         });
@@ -410,7 +459,9 @@ final class NetworkPanel {
         });
         dismiss();
         openDialog = new java.lang.ref.WeakReference<>(dialog);
+        Brass.frame(dialog);
         dialog.show();
+        Brass.style(dialog);
     }
 
     /** The state line of the Network screen. */

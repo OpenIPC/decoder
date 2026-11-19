@@ -23,6 +23,8 @@ final class WebPort {
     static final int MAX = 65535;
     private static final String PREFS = "settings";
     static final String KEY = "web_port";
+    /** Settings → DECODER → Allow remote access (#286): off, the app opens no port at all. */
+    static final String KEY_ALLOWED = "web_allowed";
 
     private WebPort() {
     }
@@ -32,6 +34,19 @@ final class WebPort {
         if (c == null) return DEFAULT;
         Integer p = parse(c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, ""));
         return p != null ? p : DEFAULT;
+    }
+
+    /** Whether the web page is served at all: on unless turned off in Settings. */
+    static boolean allowed(Context c) {
+        return c == null || c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_ALLOWED, true);
+    }
+
+    /** Saves Allow remote access; returns true when it changed. */
+    static boolean setAllowed(Context c, boolean on) {
+        if (allowed(c) == on) return false;
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ALLOWED, on).apply();
+        return true;
     }
 
     /** As the Network field shows it: empty for the default. */

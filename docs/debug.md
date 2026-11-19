@@ -12,7 +12,7 @@
 
 ## Debug server
 
-While the app runs it serves its debug information over HTTP on port **8085**, for a browser or `curl` on the same network. **Network** → **Web page port** sets another port (1024 to 65535; empty: 8085). It is always on and read-only.
+While the app runs it serves its debug information over HTTP on port **8085**, for a browser or `curl` on the same network. **Network** (the **Settings** dialog, section **Decoder**) → **Port** sets another port (1024 to 65535; empty: 8085). It is read-only, and on unless **Settings** → **Decoder** → **Allow remote access** is off: then the app opens no port at all.
 
 | Path                                     | Content                                                                                                                                                         |
 |------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -41,19 +41,28 @@ The device's addresses are in `addresses` of `/stats.json`, and the [U cell](usa
 
 `http://<device>:8085/`
 
-- The snapshot fills the page, laid out like the screen, with each cell's slot, camera host, transport, size, fps and losses (in red) drawn over it. A decoded rate below 90 % of the received one is shown in orange.
-- The header shows a status dot, the version and git hash, the device time and the uptime, and links to **JSON**, **Log** and **Save report** (`/report.txt`).
+- The page has the "brass" look of our apps' pages: the title **Decoder** with the version, a panel with the plate **Video wall**, the links **JSON**, **Log** and **Report** (`/report.txt`), the switches **Info** and **Snapshot**, a board of rows with lamps and the wall of frames below it.
+- The snapshot is laid out like the screen, with each cell's slot, camera host, transport, size, fps and losses (in red) drawn over it. A decoded rate below 90 % of the received one is shown in amber. The camera on screen has an amber frame.
 - **Info On / Off** hides the text over the cells (and the list below them on a narrow screen), leaving only the picture. It is **Off** until switched on; the choice is remembered in the browser.
 - **Snapshot 3 s / 5 s / 10 s**: how often the picture is refreshed (default 5 s). `/stats.json` is fetched every 1.5 s. Both only while the tab is visible.
-- On a screen narrower than 720 px the snapshot takes the full width and the cells are listed below it.
+- On a screen narrower than 720 px the cells are listed below the snapshot.
+- The tab's title and icon show the worst lamp of the board: `Running` (green), `Attention` (amber), `Error` (red).
 
-| Status dot / header note                                 | Meaning                                                                                                                           |
-|----------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
-| green                                                    | the app answers                                                                                                                   |
-| orange, `UI not responding within 1000 ms`               | the UI thread is stuck (an ANR); only the device facts are reported                                                               |
-| orange, `no activity` / `App in background`              | no activity behind the server, or the app is paused                                                                               |
-| red, `video decoder not responding — restart the device` | `decoder_stuck`: frames arrive in several cells, none is decoded for 20 s ([#145](https://github.com/OpenIPC/decoder/issues/145)) |
-| red, `offline`                                           | the page cannot reach the app                                                                                                     |
+| Board row   | Lamp and text                                            | Meaning                                                                                                                           |
+|-------------|----------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| **Decoder** | green, `running · up …`                                  | the app answers                                                                                                                   |
+|             | amber, `UI not responding within 1000 ms`                | the UI thread is stuck (an ANR); only the device facts are reported                                                               |
+|             | amber, `no activity` / `paused`                          | no activity behind the server, or the app is paused                                                                               |
+|             | red, `video decoder not responding — restart the device` | `decoder_stuck`: frames arrive in several cells, none is decoded for 20 s ([#145](https://github.com/OpenIPC/decoder/issues/145)) |
+|             | red, `no answer`                                         | the page cannot reach the app                                                                                                     |
+| **Cameras** | green, `N of M live`                                     | every configured camera plays or answers a check                                                                                  |
+|             | amber, `… · K no answer`                                 | some configured cameras do not answer                                                                                             |
+|             | dim, `none configured`                                   | no slot has a camera                                                                                                              |
+| **Screen**  | no lamp                                                  | what the screen shows: a camera, the grid, Slides, the U view, or the app in the background                                       |
+| **Camex**   | dim, `off`                                               | Settings → **Join a camex server** is off                                                                                         |
+|             | green, `connected · <address>`                           | the tunnel is up, with the box's address                                                                                          |
+|             | amber, `connecting` / `VPN consent needed`               | the tunnel is starting, or Android's consent is missing                                                                           |
+|             | red, `failed · <error>`                                  | the tunnel failed                                                                                                                 |
 
 ## Snapshot
 
@@ -91,6 +100,7 @@ In the single view (and the U view) the page and the snapshot still show the who
 | `screen`        | string              | display size in pixels, `WxH`                                                                                                                                      |
 | `addresses`     | list                | `http://<ip>:8085/` for every address of the device                                                                                                                |
 | `server`        | string              | `listening`, or why no port could be opened                                                                                                                        |
+| `camex`         | object              | the tunnel: `on` (Settings → Join a camex server), `state` (`stopped`, `connecting`, `connected`, `needs_consent`, `failed`), `address`, `error`                   |
 | `decoders`      | list or `"loading"` | the device's video decoders, see [decoders](#decoders)                                                                                                             |
 | `ui_thread`     | string              | `ok`, or `not responding within 1000 ms` (then only the fields above are present)                                                                                  |
 | `mode`          | string              | `single`, `multi-view`, `slides` (multi-view with Slides on), `udp` (U cell full-screen), `paused` (app in background); `no activity` when no activity is attached |

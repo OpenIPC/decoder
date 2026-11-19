@@ -7,5 +7,4 @@
     <string name="status_unconfigured">No camera configured</string>
     <string name="quad_audio_badge">AUDIO</string>
     <!-- the Network item of the menu: the camex tunnel (#272) -->
-    <string name="network_title">Network</string>
 </resources>

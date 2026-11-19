@@ -12,7 +12,6 @@ import android.app.AlertDialog;
 import android.app.Dialog;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
-import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.text.InputType;
@@ -72,7 +71,7 @@ class MenuManager {
     private Dialog mBrowserDialog;
     /** The URL editor or the Reset confirmation while it is shown (#205). */
     private Dialog mDialog;
-    private int mActiveQualityColor = Color.WHITE;
+    private int mActiveQualityColor = Brass.INK_DARK;
 
     interface Listener {
         void onSwitchCamera(int slot);
@@ -108,14 +107,15 @@ class MenuManager {
 
     /** Update quality color (called from RtspClient callback). */
     void updateQuality(int latency) {
+        // dark tones that read on a brass key (#286)
         if (latency < 0) {
-            mActiveQualityColor = Color.WHITE;
+            mActiveQualityColor = Brass.INK_DARK;
         } else if (latency < 100) {
-            mActiveQualityColor = 0xFF00FF00;
+            mActiveQualityColor = Brass.INK_OK;
         } else if (latency < 300) {
-            mActiveQualityColor = 0xFFFFFF00;
+            mActiveQualityColor = Brass.INK_WARN;
         } else {
-            mActiveQualityColor = 0xFFFF0000;
+            mActiveQualityColor = Brass.INK_BAD;
         }
     }
 
@@ -167,12 +167,15 @@ class MenuManager {
 
     /**
      * A focusable popup that closes on Back. Below Android 6 a popup takes Back only with a
-     * background of its own (#265), so it gets a transparent one.
+     * background of its own (#265), so it gets a transparent one; the brass panel with its
+     * frame is the content's own (#286).
      */
     private PopupWindow menuPopup(View content) {
         PopupWindow popup = new PopupWindow(content, LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, true);
         popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        content.setBackground(Brass.panel(activity));
+        content.setPadding(dp(14), dp(14), dp(14), dp(14));
         return popup;
     }
 
@@ -227,7 +230,9 @@ class MenuManager {
         int cell = wordCellWidth();
         // Never wider than the screen allows (4 cells and the popup's margins): a large font
         // or a narrow screen shortens the labels with an ellipsis instead (Qodo on #178)
-        int avail = activity.getResources().getDisplayMetrics().widthPixels - 2 * dp(12);
+        // the popup's margins and the brass panel's padding and frame (Qodo on #287)
+        int avail = activity.getResources().getDisplayMetrics().widthPixels - 2 * dp(12)
+                - 2 * dp(14) - 2 * dp(3);
         if (avail > 0) cell = Math.min(cell, avail / 4);
         int half = cell / 2;
         cell = half * 2;
@@ -478,7 +483,7 @@ class MenuManager {
             if (item == null) continue;
             item.setEnabled(single);
             item.setFocusable(single);
-            item.setTextColor(single ? Color.WHITE : 0xFF555555);
+            item.setTextColor(single ? Brass.INK_DARK : Brass.INK_OFF);
         }
     }
 
@@ -504,7 +509,8 @@ class MenuManager {
         TextView text = new TextView(activity);
         text.setText(title);
         text.setPadding(dp(8), dp(6), dp(8), dp(6));
-        text.setTextColor(Color.WHITE);
+        text.setTextColor(Brass.INK_DARK);
+        text.setTypeface(android.graphics.Typeface.SERIF);
         text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
         // Reachable with a remote (#91); not only by the clickable default of newer Androids
         text.setFocusable(true);
@@ -513,12 +519,10 @@ class MenuManager {
     }
 
     /**
-     * One cue per state (#143): on / active (D on, Q, S, U, the active slot) is the fill, an
-     * orange button like a pressed key; the focus is the frame only, thick and light blue. A
-     * coloured border for both read as the same selector on a phone (#114).
+     * One cue per state (#143): on / active (D on, Q, S, U, the active slot) is a "pressed" brass
+     * key with an amber glow; the focus is the frame only, thick and amber (#286). A coloured
+     * border for both read as the same selector on a phone (#114).
      */
-    private static final int ACTIVE_FILL = 0xFFB85C00;
-    private static final int FOCUS_BORDER = 0xFF40C4FF;
     private final Set<View> activeItems = new HashSet<>();
 
     private void highlightItem(TextView item) {
@@ -527,32 +531,27 @@ class MenuManager {
     }
 
     private void resetItem(TextView item) {
-        item.setTextColor(Color.WHITE);
+        item.setTextColor(Brass.INK_DARK);
         activeItems.remove(item);
         paintItem(item, item.hasFocus());
     }
 
     /**
-     * Active items are filled orange, the focused item has a thick light blue frame; an item
-     * that is both keeps the orange fill inside the blue frame, so neither state hides.
+     * Active items are pressed brass with an amber glow, the focused item has a thick amber
+     * frame; an item that is both keeps the pressed brass inside the frame, so neither hides.
      */
     private void paintItem(View item, boolean focused) {
-        boolean active = activeItems.contains(item);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(active ? ACTIVE_FILL : Color.BLACK);
-        if (focused) bg.setStroke(dp(3), FOCUS_BORDER);
-        else bg.setStroke(1, Color.GRAY);
-        item.setBackground(bg);
+        item.setBackground(Brass.key(activity, activeItems.contains(item), focused));
     }
 
     private void applyQualityColor(TextView btn, int slot, boolean quadEnabled,
                                     int mActive, String[] mHosts) {
         if (mHosts[slot] == null || mHosts[slot].isEmpty() || mHosts[slot].equals(DEFAULT_URL)) {
-            btn.setTextColor(0xFF666666);
+            btn.setTextColor(Brass.INK_OFF);
         } else if (slot == mActive && !quadEnabled) {
             btn.setTextColor(mActiveQualityColor);
         } else {
-            btn.setTextColor(Color.WHITE);
+            btn.setTextColor(Brass.INK_DARK);
         }
     }
 
@@ -572,7 +571,7 @@ class MenuManager {
 
     void showUrlEditor(int mActive, String[] mHosts, Transport.Mode[] mTransports,
             int[] mRotates, boolean[] mMirrors, boolean startOnBoot) {
-        AlertDialog.Builder builder = new AlertDialog.Builder(activity);
+        AlertDialog.Builder builder = Brass.dialog(activity);
         builder.setTitle("Camera " + (mActive + 1) + " URL");
 
         final EditText input = new EditText(activity);
@@ -660,7 +659,9 @@ class MenuManager {
         // (FLAG_ALT_FOCUSABLE_IM): clear it then, so that OK can open the keyboard
         if (!touch) dialog.setOnShowListener(d -> TvKeyboard.allowKeyboard(dialog));
         track(dialog);
+        Brass.frame(dialog);
         dialog.show();
+        Brass.style(dialog);
         input.requestFocus();
     }
 
@@ -669,7 +670,7 @@ class MenuManager {
      * screen to allow it: the adb command that does.
      */
     void showBootPermissionHint(String packageName) {
-        AlertDialog dialog = new AlertDialog.Builder(activity)
+        AlertDialog dialog = Brass.dialog(activity)
                 .setTitle("Start on boot")
                 .setMessage("Android opens the app after a reboot only if it may draw over other "
                         + "apps, and this device has no screen to allow it. Allow it over adb "
@@ -680,7 +681,9 @@ class MenuManager {
                 .setPositiveButton("OK", null)
                 .create();
         track(dialog);
+        Brass.frame(dialog);
         dialog.show();
+        Brass.style(dialog);
     }
 
     /**
@@ -688,7 +691,7 @@ class MenuManager {
      * closes the dialog without deleting anything.
      */
     private void confirmReset() {
-        AlertDialog dialog = new AlertDialog.Builder(activity)
+        AlertDialog dialog = Brass.dialog(activity)
                 .setTitle("Start with a clean slate?")
                 .setMessage("This clears all camera slots, their transports and the other "
                         + "settings, so you can set the app up again from scratch. The app "
@@ -704,7 +707,9 @@ class MenuManager {
             if (cancel != null) cancel.requestFocus();
         });
         track(dialog);
+        Brass.frame(dialog);
         dialog.show();
+        Brass.style(dialog);
     }
 
     private void focusChange(View item) {

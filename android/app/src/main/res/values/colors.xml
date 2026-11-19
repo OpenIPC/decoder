@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Copyright (c) OpenIPC  https://openipc.org  MIT License
+
+  colors.xml — the "brass" theme palette for Android apps (res/values/colors.xml)
+
+  Version: 1.3.0
+  Date:    2026-11-18
+
+  The colours Decoder uses, from the brand's master copy (brass/colors.xml, the same tokens as
+  brass.css; rules are in brass/README.md); Brass.java has the dark inks of keys and displays.
+  The app icon and the TV banner stay blue and white (android/brand.py).
+-->
+<resources>
+    <color name="panel">#2c2119</color>
+    <color name="panel2">#3d2d22</color>
+    <color name="brass">#c9a24d</color>
+    <color name="brass2">#8c6a2a</color>
+    <color name="amber">#ffb347</color>
+    <color name="ink">#e8d9b8</color>
+    <color name="dim">#b09873</color>
+</resources>

@@ -489,7 +489,8 @@ public class Decoder extends Activity
         }
         StringBuilder sb = new StringBuilder();
         int port = DebugServer.get().port();
-        for (String ip : NetInfo.addresses()) {
+        if (port == 0) sb.append("Web page: remote access off (Settings)");
+        else for (String ip : NetInfo.addresses()) {
             if (sb.length() > 0) sb.append('\n');
             sb.append("http://").append(ip).append(':').append(port).append('/');
         }
@@ -1647,6 +1648,16 @@ public class Decoder extends Activity
         for (String ip : NetInfo.addresses()) urls.add("http://" + ip + ":" + port + "/");
         m.put("addresses", urls);
         m.put("server", DebugServer.get().state());
+        // the camex tunnel, for the CAMEX row of the page's board (#286): off unless Join is on
+        Map<String, Object> camex = new LinkedHashMap<>();
+        org.openipc.camex.tunnel.CamexTunnel.State ts = org.openipc.camex.tunnel.CamexTunnel.state();
+        camex.put("on", NetworkPanel.isOn(this));
+        camex.put("state", ts.name().toLowerCase(Locale.US));
+        String ta = org.openipc.camex.tunnel.CamexTunnel.address();
+        if (ta != null && !ta.isEmpty()) camex.put("address", ta);
+        String te = org.openipc.camex.tunnel.CamexTunnel.lastError();
+        if (te != null && !te.isEmpty()) camex.put("error", te);
+        m.put("camex", camex);
         // The video decoders and what they can do: instances, adaptive playback (#88)
         List<Map<String, Object>> decoders = CodecInfo.videoDecodersIfReady();
         m.put("decoders", decoders != null ? decoders : "loading");
@@ -2548,6 +2559,7 @@ public class Decoder extends Activity
         super.onPause();
         mResumed = false;
         sShown = false;
+        NetworkPanel.onWebPort = null;
         streamProbes.stopAll();
         menuManager.onPauseDismissBrowser();
         // The UDP view is not a saved mode: after a resume the slot or grid comes back
@@ -2711,6 +2723,8 @@ public class Decoder extends Activity
         sShown = true;
         hideSystemBars();
         startStreams();
+        // the page moved (a taken port, Settings): its address on screen follows (Qodo on #285)
+        NetworkPanel.onWebPort = this::updateDebugUrls;
         updateDebugUrls();
     }
 
