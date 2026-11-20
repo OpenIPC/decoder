@@ -12,6 +12,14 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.27.2 — 2026-11-20
+
+- The Settings dialog follows two brass rules it missed (#292): Cancel on the left and Save on
+  the right, two equal halves across the window (they were small, pressed to the left and in the
+  order Save, Cancel on Android TV); check boxes and radio buttons get 6dp after their text too,
+  so the Proto UDP text no longer touches the TCP ring and the focus frame of TCP no longer
+  lies on its last letter.
+
 ## 2.27.1 — 2026-11-19
 
 - Check boxes and radio buttons of the brass dialogs show on and off under the remote's focus
