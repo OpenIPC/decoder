@@ -12,6 +12,13 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.27.3 — 2026-11-20
+
+- Cancel and Save in every window follow the brass rule now (#294), not only in Settings: the
+  camera URL dialog and the Reset confirmation (Cancel / Clear settings) have Cancel on the left
+  and the other on the right, two equal halves across the window; on Android TV they were small,
+  pressed to the left and in the order Save, Cancel. Cancel keeps the first focus in Reset.
+
 ## 2.27.2 — 2026-11-20
 
 - The Settings dialog follows two brass rules it missed (#292): Cancel on the left and Save on
