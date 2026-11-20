@@ -463,7 +463,6 @@ final class NetworkPanel {
         Brass.frame(dialog);
         dialog.show();
         Brass.style(dialog);
-        Brass.halves(dialog);
     }
 
     /** The state line of the Network screen. */

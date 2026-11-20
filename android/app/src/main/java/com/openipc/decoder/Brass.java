@@ -165,20 +165,23 @@ final class Brass {
             Button b = dialog.getButton(which);
             if (b != null) key(c, b);
         }
+        halves(dialog);
     }
 
     /**
-     * The buttons of a settings window (brass, 2026-11-20, as camex 4.3.1): Cancel on the left,
-     * Save on the right, two equal halves across the window with 6dp around each. The dialog's
-     * own button bar is reused; on Android TV it puts the positive button first and packs the
-     * buttons to the left, so it is reordered here. Call after {@link #style}.
+     * Cancel and Save of every window (brass, 2026-11-20, as camex 4.3.1): Cancel on the left,
+     * Save on the right, two equal halves across the window with 6dp around each (#292, #294).
+     * The dialog's own button bar is reused; on Android TV it puts the positive button first and
+     * packs the buttons to the left, so it is reordered here. A dialog with only one of the two
+     * (OK) keeps its bar. The button with the focus keeps it.
      */
-    static void halves(AlertDialog dialog) {
+    private static void halves(AlertDialog dialog) {
         Button cancel = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
         Button save = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
         if (cancel == null || save == null || cancel.getParent() != save.getParent()
                 || !(save.getParent() instanceof LinearLayout)) return;
         LinearLayout bar = (LinearLayout) save.getParent();
+        View focused = bar.findFocus();
         for (int i = 0; i < bar.getChildCount(); i++) {
             View v = bar.getChildAt(i);
             if (v != cancel && v != save) v.setVisibility(View.GONE);
@@ -198,6 +201,7 @@ final class Brass {
             lp.setMargins(m, m, m, m);
             bar.addView(b, lp);
         }
+        if (focused != null) focused.requestFocus();
     }
 
     /** A dialog button as a brass key: serif capitals in dark ink, a little apart. */
