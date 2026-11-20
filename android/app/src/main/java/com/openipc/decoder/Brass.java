@@ -167,6 +167,39 @@ final class Brass {
         }
     }
 
+    /**
+     * The buttons of a settings window (brass, 2026-11-20, as camex 4.3.1): Cancel on the left,
+     * Save on the right, two equal halves across the window with 6dp around each. The dialog's
+     * own button bar is reused; on Android TV it puts the positive button first and packs the
+     * buttons to the left, so it is reordered here. Call after {@link #style}.
+     */
+    static void halves(AlertDialog dialog) {
+        Button cancel = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
+        Button save = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        if (cancel == null || save == null || cancel.getParent() != save.getParent()
+                || !(save.getParent() instanceof LinearLayout)) return;
+        LinearLayout bar = (LinearLayout) save.getParent();
+        for (int i = 0; i < bar.getChildCount(); i++) {
+            View v = bar.getChildAt(i);
+            if (v != cancel && v != save) v.setVisibility(View.GONE);
+        }
+        bar.removeView(cancel);
+        bar.removeView(save);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        ViewGroup.LayoutParams blp = bar.getLayoutParams();
+        if (blp != null) {
+            blp.width = ViewGroup.LayoutParams.MATCH_PARENT;
+            bar.setLayoutParams(blp);
+        }
+        int m = Math.round(6 * dp(dialog.getContext()));
+        for (Button b : new Button[]{cancel, save}) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+            lp.setMargins(m, m, m, m);
+            bar.addView(b, lp);
+        }
+    }
+
     /** A dialog button as a brass key: serif capitals in dark ink, a little apart. */
     private static void key(Context c, Button b) {
         b.setBackground(keyStates(c));
@@ -200,8 +233,10 @@ final class Brass {
             b.setButtonDrawable(b instanceof android.widget.RadioButton
                     ? R.drawable.brass_radio : R.drawable.brass_check);
             int pad = Math.round(6 * dp(c));
-            b.setPadding(Math.max(b.getPaddingLeft(), pad), b.getPaddingTop(), b.getPaddingRight(),
-                    b.getPaddingBottom());
+            // 6dp before the text and 6dp after it: the focus ring of a box as wide as its text
+            // would lie on its last letter, and a radio's text would touch the next ring (#292)
+            b.setPadding(Math.max(b.getPaddingLeft(), pad), b.getPaddingTop(),
+                    Math.max(b.getPaddingRight(), pad), b.getPaddingBottom());
             // the remote's focus (focus_ring.xml): views made with the activity's context miss
             // the dialog theme's checkboxStyle
             b.setBackgroundResource(R.drawable.focus_ring);
