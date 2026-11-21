@@ -157,17 +157,16 @@ final class NetworkPanel {
         if (!isOn(a) || CamexTunnel.running() || CamexTunnel.state() == CamexTunnel.State.WAITING) {
             return;
         }
-        boolean other;
-        try {
-            other = CamexTunnel.otherVpnActive(a);
-        } catch (RuntimeException e) {
-            Log.e(TAG, "VPN of another app", e);
-            other = true;   // as the library does: wait rather than take a VPN not seen
-        }
-        // with the consent given, consentIntent() takes the VPN at once (camex 4.4.0)
-        if (other) start(a, false);
-        else connect(a, false);
+        // not connect(): with the consent given, consentIntent() takes the VPN at once (camex
+        // 4.4.0), and another app's VPN may come up between a check of ours and that call
+        // (Qodo on #297). startWhenFree() checks and starts in one; only a missing consent,
+        // when nothing can be taken, shows the dialog (see start)
+        consentAskedAtStart = false;
+        start(a, false);
     }
+
+    /** The app's start asked for the consent once already: no second dialog if it was refused. */
+    private static boolean consentAskedAtStart;
 
     /** Save with Network on: asks for the VPN consent once (the system dialog), then starts. */
     static void connect(Activity a) {
@@ -269,8 +268,15 @@ final class NetworkPanel {
         String web = v.get(CamexTunnel.WEB_PORT);
         announcedPort = web == null || web.isEmpty() ? 0 : Integer.parseInt(web);
         // the user's Save takes the VPN; the app's own start waits for another app's VPN (#296)
-        if (askNotifications) CamexTunnel.start(a.getApplicationContext(), v);
-        else CamexTunnel.startWhenFree(a.getApplicationContext(), v);
+        if (askNotifications) {
+            CamexTunnel.start(a.getApplicationContext(), v);
+        } else if (!CamexTunnel.startWhenFree(a.getApplicationContext(), v)
+                && CamexTunnel.state() == CamexTunnel.State.NEEDS_CONSENT && !consentAskedAtStart) {
+            // no consent yet (a box set up for the first time; Android 5.0 has no appops for
+            // it): the dialog, once; without the consent prepare() takes no VPN
+            consentAskedAtStart = true;
+            connect(a, false);
+        }
     }
 
     private static int dp(Context c, int v) {
