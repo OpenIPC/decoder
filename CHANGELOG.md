@@ -12,6 +12,15 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.27.4 — 2026-11-21
+
+- camex 4.4.1 in the tunnel (#296): Decoder no longer takes the device's one VPN from another
+  app (vectis, microsnander, the camex app) by itself. The start of the tunnel at the app's
+  start and its restart for a new web page port wait while another app's VPN is up (`Waiting
+  for the VPN` in Settings, `waiting` in `/stats.json` and on the web page) and connect when
+  that VPN ends; a tunnel whose VPN another app takes waits the same way instead of asking for
+  the consent. Save with Join a camex server on takes the VPN now, as before.
+
 ## 2.27.3 — 2026-11-20
 
 - Cancel and Save in every window follow the brass rule now (#294), not only in Settings: the
