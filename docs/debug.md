@@ -101,7 +101,7 @@ In the single view (and the U view) the page and the snapshot still show the who
 | `screen`        | string              | display size in pixels, `WxH`                                                                                                                                      |
 | `addresses`     | list                | `http://<ip>:8085/` for every address of the device                                                                                                                |
 | `server`        | string              | `listening`, or why no port could be opened                                                                                                                        |
-| `camex`         | object              | the tunnel: `on` (Settings → Join a camex server), `state` (`stopped`, `connecting`, `connected`, `needs_consent`, `failed`), `address`, `error`                   |
+| `camex`         | object              | the tunnel: `on` (Settings → Join a camex server), `state` (`stopped`, `connecting`, `connected`, `needs_consent`, `failed`, `waiting`), `address`, `error`        |
 | `decoders`      | list or `"loading"` | the device's video decoders, see [decoders](#decoders)                                                                                                             |
 | `ui_thread`     | string              | `ok`, or `not responding within 1000 ms` (then only the fields above are present)                                                                                  |
 | `mode`          | string              | `single`, `multi-view`, `slides` (multi-view with Slides on), `udp` (U cell full-screen), `paused` (app in background); `no activity` when no activity is attached |

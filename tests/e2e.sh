@@ -251,8 +251,12 @@ if $ADB shell dumpsys activity activities | grep -q 'vpndialogs/.ConfirmDialog';
     fi
 fi
 
+# the tunnel's address: its interface is tun0 at the first start; camex 4.4.0 keeps the old TUN
+# until the new one is up, so after a restart it is tun1 (#296)
+tunip() { $ADB shell 'ip addr 2>/dev/null' | tr -d '\r' | sed -n 's/.*inet \([0-9.]*\)\/.* tun[0-9]*$/\1/p' | head -1; }
+
 i=0
-until TUN=$($ADB shell 'ip addr show tun0 2>/dev/null' | sed -n 's/.*inet \([0-9.]*\).*/\1/p') && [ -n "$TUN" ]; do
+until TUN=$(tunip) && [ -n "$TUN" ]; do
     i=$((i + 1)); [ $i -lt 90 ] || break   # Android 5 on the emulator takes its time
     sleep 1
 done
@@ -422,7 +426,7 @@ if [ -z "$SHOTS" ]; then
 fi
 
 # the tunnel restarts in the same process: Network → Save stops it and starts it again with the
-# saved values (a second run of the tunnel's native code in one process); tun0 comes back and the
+# saved values (a second run of the tunnel's native code in one process); the TUN comes back and the
 # camera's address answers again
 if [ -z "$SHOTS" ]; then
     $ADB logcat -c 2>/dev/null || true
@@ -439,7 +443,7 @@ if [ -z "$SHOTS" ]; then
     $ADB exec-out screencap -p > "$OUT/restart-saved.png" 2>/dev/null || true
     again=""
     for _ in $(seq 1 30); do
-        if $ADB shell 'ip addr show tun0 2>/dev/null' | grep -q 'inet ' &&
+        if [ -n "$(tunip)" ] &&
                 $ADB shell ping -c 2 -W 2 "$LINUX_IP" | grep -q ' [12] received'; then again=1; break; fi
         sleep 2
     done
@@ -471,7 +475,7 @@ if [ -z "$SHOTS" ]; then
         if [ $((n % 10)) -eq 0 ] && ! $ADB shell ps | grep -q "$PKG"; then
             $ADB shell am start -n $ACTIVITY >/dev/null
         fi
-        TUN=$($ADB shell 'ip addr show tun0 2>/dev/null' | sed -n 's/.*inet \([0-9.]*\).*/\1/p')
+        TUN=$(tunip)
         if [ -n "$TUN" ] && [ "$(page "http://$TUN:8086/stats.json")" = 401 ]; then moved=1; break; fi
         sleep 2
     done
@@ -511,7 +515,7 @@ if [ -z "$SHOTS" ]; then
         ok "after an update the web page is back by itself"
     else bad "no web page after an update (tests/out/logcat-update.txt)"; fi
     sleep 5
-    if [ "$(readers)" -le "$before" ] && ! $ADB shell 'ip addr show tun0 2>/dev/null' | grep -q 'inet ' &&
+    if [ "$(readers)" -le "$before" ] && [ -z "$(tunip)" ] &&
             ! $ADB shell dumpsys activity activities | grep -q "Resumed.*$PKG"; then
         ok "after an update: no camera read, no tunnel, no screen"
     else bad "after an update something more than the page started"; fi

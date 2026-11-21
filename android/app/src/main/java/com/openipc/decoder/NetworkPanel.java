@@ -150,10 +150,23 @@ final class NetworkPanel {
     /**
      * At the start of the app: connects when Network is on. Without the consent the system
      * dialog shows here too: Android 5.0 has no appops for it, so a box is set up by confirming
-     * this dialog once.
+     * this dialog once. A start by itself never takes the VPN of another app (vectis, the
+     * camex app): while that app's VPN is up the tunnel waits and starts when it ends (#296).
      */
     static void autoStart(Activity a) {
-        if (isOn(a) && !CamexTunnel.running()) connect(a, false);
+        if (!isOn(a) || CamexTunnel.running() || CamexTunnel.state() == CamexTunnel.State.WAITING) {
+            return;
+        }
+        boolean other;
+        try {
+            other = CamexTunnel.otherVpnActive(a);
+        } catch (RuntimeException e) {
+            Log.e(TAG, "VPN of another app", e);
+            other = true;   // as the library does: wait rather than take a VPN not seen
+        }
+        // with the consent given, consentIntent() takes the VPN at once (camex 4.4.0)
+        if (other) start(a, false);
+        else connect(a, false);
     }
 
     /** Save with Network on: asks for the VPN consent once (the system dialog), then starts. */
@@ -162,7 +175,8 @@ final class NetworkPanel {
     }
 
     // askNotifications: a person turned Network on (Save), so the notification permission of
-    // Android 13+ is asked; not at every start of the app (a box may have no one to ask)
+    // Android 13+ is asked and the tunnel takes the VPN from another app (start()); not at
+    // every start of the app (a box may have no one to ask; startWhenFree(), #296)
     private static boolean askAfterConsent;
 
     private static void connect(Activity a, boolean askNotifications) {
@@ -228,7 +242,7 @@ final class NetworkPanel {
             if (CamexTunnel.check(v) != null) return;
             Log.i(TAG, "Network: the web page is on port " + port + " now, the tunnel restarts");
             announcedPort = port;
-            CamexTunnel.start(c.getApplicationContext(), v);
+            CamexTunnel.startWhenFree(c.getApplicationContext(), v);   // a restart by itself (#296)
         });
     }
 
@@ -254,7 +268,9 @@ final class NetworkPanel {
         CamexTunnel.setNotificationLook("Decoder", R.drawable.ic_launcher_foreground);
         String web = v.get(CamexTunnel.WEB_PORT);
         announcedPort = web == null || web.isEmpty() ? 0 : Integer.parseInt(web);
-        CamexTunnel.start(a.getApplicationContext(), v);
+        // the user's Save takes the VPN; the app's own start waits for another app's VPN (#296)
+        if (askNotifications) CamexTunnel.start(a.getApplicationContext(), v);
+        else CamexTunnel.startWhenFree(a.getApplicationContext(), v);
     }
 
     private static int dp(Context c, int v) {
@@ -476,6 +492,8 @@ final class NetworkPanel {
                 return "Connected" + (hasAddress ? " · " + address : "");
             case NEEDS_CONSENT:
                 return "VPN consent needed: Save asks again";
+            case WAITING:
+                return "Waiting for the VPN: another app holds it; Save takes it";
             case FAILED:
                 return "Failed" + (hasError ? " · " + error : "");
             default:
