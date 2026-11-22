@@ -26,8 +26,8 @@ android {
         applicationId "com.openipc.decoder"
         minSdk 21
         targetSdk 36
-        versionCode 67
-        versionName "2.27.4"
+        versionCode 68
+        versionName "2.28.0"
         // Keep only these locales of the libraries' resources, as in the other OpenIPC apps
         resourceConfigurations += ['en', 'ru', 'zh-rCN']
 

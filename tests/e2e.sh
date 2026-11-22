@@ -61,7 +61,7 @@ DELAY_MS=${DELAY_MS:-30}
 NETEM_IMAGE=${NETEM_IMAGE:-decoder-netem}
 case $TRANSPORT in UDP|TCP) ;; *) echo "TRANSPORT must be UDP or TCP"; exit 2 ;; esac
 TUNNEL=camex
-RESTART_MARK="Tunnel initialized"   # camex's log line of each new run (bundles/camex/src/camex.c)
+RESTART_MARK="Tunnel up:"   # camex's log line of each new run (bundles/camex/src/camex.c; "Tunnel initialized" before camex 5)
 NAME=decoder-e2e-$$
 PEER=$NAME-edge
 HUB=$NAME-hub
