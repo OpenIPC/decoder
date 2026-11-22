@@ -12,6 +12,13 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.28.1 — 2026-11-22
+
+- camex 6.0.0 in the tunnel (#300). With a network name and no server key, the tunnel no
+  longer trusts a server on first contact: a server that does not answer CPace is asked
+  again, and Decoder joins only a network the server already knows (it creates none). A
+  loaded server's cookie is answered by the library. Settings is unchanged.
+
 ## 2.28.0 — 2026-11-22
 
 - camex 5.2.1 in the tunnel (#298). Settings has a new **Network name** field (hidden, with
