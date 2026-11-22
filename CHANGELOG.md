@@ -12,6 +12,14 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.28.0 — 2026-11-22
+
+- camex 5.2.1 in the tunnel (#298). Settings has a new **Network name** field (hidden, with
+  **Show the key**): with a network name the server's public key and the pre-shared key may
+  stay empty, the server is checked by the name. An empty MTU is now 1420 over UDP and 1500
+  over TCP (an explicit MTU and the server's still win). The library is camex's client
+  profile, without the server. The protocol stays compatible with camex 4.x servers.
+
 ## 2.27.4 — 2026-11-21
 
 - camex 4.4.1 in the tunnel (#296): Decoder no longer takes the device's one VPN from another

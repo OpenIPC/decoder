@@ -19,8 +19,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A camera reached through a VPN tunnel (camex or any other): Auto then plays it over TCP. The
- * tunnel's MTU is below a camera's RTP packets (about 1440 bytes), so over UDP
+ * A camera reached through a VPN tunnel (camex or any other): Auto then plays it over TCP. A
+ * tunnel's MTU is often below a camera's RTP packets (about 1440 bytes; camex over UDP has 1420
+ * by default), so over UDP
  * each packet travels in two IP fragments and a lost fragment loses it; over TCP the stream fits
  * the MTU, and a path too slow for the stream costs whole frames, not broken ones.
  */
