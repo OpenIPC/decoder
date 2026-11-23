@@ -12,6 +12,13 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.29.0 — 2026-11-23
+
+- camex 6.2.0 in the tunnel (#302). Settings has a new optional **Network selector** field
+  after Network name, needed only when the server's network sets a selector (the server then
+  answers only for that network); a connect link fills it from `e=`. Empty, nothing changes.
+  It is accepted only with a network name and without a psk.
+
 ## 2.28.1 — 2026-11-22
 
 - camex 6.0.0 in the tunnel (#300). With a network name and no server key, the tunnel no
