@@ -290,6 +290,60 @@ public class DebugServerTest {
         assertFalse(page.substring(page.indexOf("\r\n\r\n") + 4).contains("\n"));
     }
 
+    // ====================== Fonts (#304) ======================
+
+    private static byte[] file(String path) throws IOException {
+        return java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path));
+    }
+
+    @Test
+    public void fontsAreServedFromTheAssetsWithAYearInTheCache() throws IOException {
+        DebugServer.Assets was = DebugServer.assets;
+        DebugServer.assets = name -> new java.io.FileInputStream("src/main/assets/" + name);
+        try {
+            for (String name : DebugServer.FONTS) {
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                new DebugServer().serve(out, "/fonts/" + name, "v=1");
+                byte[] all = out.toByteArray();
+                String text = new String(all, StandardCharsets.ISO_8859_1);
+                int body = text.indexOf("\r\n\r\n") + 4;
+                String head = text.substring(0, body);
+                assertTrue(head, head.startsWith("HTTP/1.1 200 "));
+                assertTrue(head, head.contains("Content-Type: font/woff2\r\n"));
+                assertTrue(head, head.contains("Cache-Control: max-age=31536000, immutable\r\n"));
+                assertTrue(name, Arrays.equals(file("src/main/assets/fonts/" + name),
+                        Arrays.copyOfRange(all, body, all.length)));
+            }
+            for (String other : new String[] {"/fonts/OFL.txt", "/fonts/../fonts/BrassMono-Bold.woff2",
+                    "/fonts/", "/fonts/x.woff2"}) {
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                new DebugServer().serve(out, other, "");
+                assertTrue(other, out.toString("UTF-8").startsWith("HTTP/1.1 404 "));
+            }
+        } finally {
+            DebugServer.assets = was;
+        }
+    }
+
+    @Test
+    public void pageUsesTheBrassFontsOnlyThroughTheTokens() throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        new DebugServer().serve(out, "/", "");
+        String page = out.toString("UTF-8");
+        for (String name : DebugServer.FONTS) {
+            assertTrue(name, page.contains("url(fonts/" + name + "?v=" + BuildConfig.VERSION_NAME + ")"));
+        }
+        assertTrue(page.contains("--serif:'Brass Serif',Georgia,'Times New Roman',serif;"));
+        assertTrue(page.contains("--mono:'Brass Mono','Courier New',monospace;"));
+        String rest = page.replace("--serif:'Brass Serif',Georgia,'Times New Roman',serif;", "")
+                .replace("--mono:'Brass Mono','Courier New',monospace;", "");
+        for (String literal : new String[] {"Georgia", "Courier", "Times New Roman", "system-ui",
+                "sans-serif"}) {
+            assertFalse(literal, rest.contains(literal));
+        }
+        assertTrue(page.contains(".brass h1,.brass h2,.brass h3{font-family:var(--serif)}"));
+    }
+
     // ====================== Web page password ======================
 
     private static String basic(String userPass) {

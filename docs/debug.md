@@ -22,6 +22,7 @@ While the app runs it serves its debug information over HTTP on port **8085**, f
 | `/log`                                   | the last 500 lines of the app's log, see [Log](#log)                                                                                                            |
 | `/report.txt`                            | a header, `/stats.json` and `/log` in one file, downloaded as `report-YYYYMMDD-HHMMSS.txt`, see [Save report](#save-report)                                     |
 | `/jieli-frame.jpg`, `/jieli-dropped.bin` | the last JPEG of a `jieli://` slot in the single view as the toy sent it, and the last frame that could not be put together ([toys.md](toys.md#hf--jieli-toys)) |
+| `/fonts/<file>.woff2`                    | the page's fonts (brass 1.5.0: Brass Serif and Brass Mono), cached for a year; only these three files                                                           |
 
 - Only clients on the local network are answered; others get `403`. With a password set in **Network** (**Web page password**) the browser asks for it (any user name; `curl -u :<password>`). The rule and what is hidden: [security.md](security.md#debug-server).
 - `GET` only (`405` otherwise), one request per connection, `Cache-Control: no-store`.
@@ -42,7 +43,7 @@ The device's addresses are in `addresses` of `/stats.json`, and the [U cell](usa
 
 `http://<device>:8085/`
 
-- The page has the "brass" look of our apps' pages: the title **Decoder** with the version, a panel with the plate **Video wall**, the links **JSON**, **Log** and **Report** (`/report.txt`), the switches **Info** and **Snapshot**, a board of rows with lamps and the wall of frames below it.
+- The page has the "brass" look of our apps' pages, in the brass fonts (headings and buttons in Brass Serif, the rest in Brass Mono, served by the app itself): the title **Decoder** with the version, a panel with the plate **Video wall**, the links **JSON**, **Log** and **Report** (`/report.txt`), the switches **Info** and **Snapshot**, a board of rows with lamps and the wall of frames below it.
 - The snapshot is laid out like the screen, with each cell's slot, camera host, transport, size, fps and losses (in red) drawn over it. A decoded rate below 90 % of the received one is shown in amber. The camera on screen has an amber frame.
 - **Info On / Off** hides the text over the cells (and the list below them on a narrow screen), leaving only the picture. It is **Off** until switched on; the choice is remembered in the browser.
 - **Snapshot 3 s / 5 s / 10 s**: how often the picture is refreshed (default 5 s). `/stats.json` is fetched every 1.5 s. Both only while the tab is visible.
