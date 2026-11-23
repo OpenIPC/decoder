@@ -18,11 +18,13 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -383,7 +385,49 @@ final class DebugServer {
                                 + "\"\r\n");
                 break;
             default:
-                reply(out, 404, "text/plain", "Not found\n");
+                // the page's fonts (brass 1.5.0, #304): a year in the cache, the page asks
+                // with ?v=<version>, so a new version of the app gets them again
+                byte[] font = path.startsWith("/fonts/") ? font(path.substring(7)) : null;
+                if (font != null) {
+                    reply(out, 200, "font/woff2", font, "", FONT_CACHE);
+                } else {
+                    reply(out, 404, "text/plain", "Not found\n");
+                }
+        }
+    }
+
+    // ====================== Fonts (#304) ======================
+
+    /** The fonts the page asks for, from the brand's brass 1.5.0: nothing else is served. */
+    static final String[] FONTS = {"BrassSerif-Bold.woff2", "BrassMono-Regular.woff2",
+            "BrassMono-Bold.woff2"};
+
+    static final String FONT_CACHE = "max-age=31536000, immutable";
+
+    /** Opens a file of the app's assets; the tests read the files of the source tree. */
+    interface Assets {
+        InputStream open(String name) throws IOException;
+    }
+
+    static Assets assets = name -> App.context.getAssets().open(name);
+
+    private static final Map<String, byte[]> fontCache = new ConcurrentHashMap<>();
+
+    /** A font of {@link #FONTS} from assets/fonts/, read once; null for any other name. */
+    static byte[] font(String name) {
+        if (!Arrays.asList(FONTS).contains(name)) return null;
+        byte[] cached = fontCache.get(name);
+        if (cached != null) return cached;
+        try (InputStream in = assets.open("fonts/" + name)) {
+            ByteArrayOutputStream b = new ByteArrayOutputStream(32 * 1024);
+            byte[] buf = new byte[8192];
+            for (int n; (n = in.read(buf)) > 0; ) b.write(buf, 0, n);
+            byte[] data = b.toByteArray();
+            fontCache.put(name, data);
+            return data;
+        } catch (IOException | RuntimeException e) {
+            Log.w(TAG, "Font " + name + " not readable", e);
+            return null;
         }
     }
 
@@ -591,10 +635,15 @@ final class DebugServer {
     /** {@code extra}: more header lines, each ending with \r\n. */
     private static void reply(OutputStream out, int code, String type, byte[] data, String extra)
             throws IOException {
+        reply(out, code, type, data, extra, "no-store");
+    }
+
+    private static void reply(OutputStream out, int code, String type, byte[] data, String extra,
+            String cache) throws IOException {
         String head = "HTTP/1.1 " + code + " " + reason(code) + "\r\n"
                 + "Content-Type: " + type + "\r\n"
                 + "Content-Length: " + data.length + "\r\n"
-                + "Cache-Control: no-store\r\n"
+                + "Cache-Control: " + cache + "\r\n"
                 + (code == 405 ? "Allow: GET\r\n" : "")
                 + extra
                 + "Connection: close\r\n\r\n";
@@ -734,7 +783,7 @@ final class DebugServer {
             + "<style>"
             + "html,body{height:100%;margin:0}"
             + "body{display:flex;flex-direction:column;background:#111;color:#ddd;font:14px/1.35"
-            + " system-ui,sans-serif}"
+            + " var(--mono)}"
             + "header{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;padding:8px"
             + " 12px;background:#181818;border-bottom:1px solid #262626}"
             + ".brand{display:flex;align-items:center;gap:8px;white-space:nowrap}"
@@ -783,63 +832,70 @@ final class DebugServer {
             // Info off (#141): the snapshot's cells alone, no text over them, no list below
             + "body.clean .cell>*,body.clean #list{display:none!important}"
             + "body.clean .cell{border-color:transparent}"
-            // brass 1.3.0 of the brand project (#286): the shared look of our apps' pages
-            + ":root{--panel:#2c2119;--panel2:#3d2d22;--brass:#c9a24d;--brass2:#8c6a2a;--amber:#ffb347;"
-            + "--ink:#e8d9b8;--dim:#b09873;--red:#c8452c;--green:#5ad38f;--foot:#a08a69}*{box-sizing:bo"
-            + "rder-box}body.brass{display:block;height:auto;min-height:100%;background:radial-gradient"
-            + "(ellipse at 50% 0,#3b2c22 0,#1a1512 55%,#0f0b09 100%);color:var(--ink);font-family:Georg"
-            + "ia,'Times New Roman',serif;padding:28px 12px;text-align:center}.brass h1{font-size:clamp"
-            + "(22px,4.5vw,40px);letter-spacing:.2em;text-transform:uppercase;margin:0 0 6px;color:var("
-            + "--brass);text-shadow:0 1px 0 #f3d78a,0 -1px 0 #3d2a0c,0 0 22px rgba(201,162,77,.35);font"
-            + "-weight:400}.ttl{position:relative;display:inline-block}.ttl .ver{position:absolute;left"
-            + ":100%;bottom:.24em;margin-left:.6em;font:12px/1 'Courier New',monospace;letter-spacing:."
-            + "12em;color:var(--dim);text-shadow:none;white-space:nowrap}.brass .sub{font-family:'Couri"
-            + "er New',monospace;font-size:12px;color:var(--dim);letter-spacing:.3em;text-transform:upp"
-            + "ercase;margin-bottom:24px}.brass .panel{position:relative;width:min(1200px,100%);margin:"
-            + "0 auto;text-align:left;background:linear-gradient(180deg,var(--panel2),var(--panel));bor"
-            + "der:3px solid var(--brass2);border-radius:16px;box-shadow:inset 0 0 0 2px #1a1210,inset "
-            + "0 0 50px rgba(0,0,0,.6),0 24px 48px rgba(0,0,0,.65);padding:30px 24px 24px}.rivet{positi"
-            + "on:absolute;width:14px;height:14px;border-radius:50%;background:radial-gradient(circle a"
-            + "t 35% 35%,#f1d38b,#8c6a2a 60%,#3a2a10)}.rivet.tl{top:8px;left:8px}.rivet.tr{top:8px;righ"
-            + "t:8px}.rivet.bl{bottom:8px;left:8px}.rivet.br{bottom:8px;right:8px}.plate{font-family:'C"
-            + "ourier New',monospace;font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:"
-            + "#2a1c10;background:linear-gradient(180deg,#e2c377,#a88237);border:1px solid #5b4416;bord"
-            + "er-radius:4px;padding:4px 10px;display:inline-block}.brass .top{position:static;display:"
-            + "flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;background"
-            + ":none;padding:0;font-size:inherit;text-shadow:none;color:inherit}.brass nav{display:flex"
-            + ";flex-wrap:wrap;align-items:center;gap:8px;margin:0;font-family:'Courier New',monospace;"
-            + "font-size:12px;color:var(--dim);letter-spacing:.12em;text-transform:uppercase}.bb,.brass"
-            + " .seg button{font:12px Georgia,serif;letter-spacing:.15em;text-transform:uppercase;color"
-            + ":#2a1c10;background:linear-gradient(180deg,#e9cd84,#b08b3c 55%,#7c5c1f);border:0;border-"
-            + "radius:8px;padding:6px 12px;box-shadow:0 3px 0 #4a3510;text-decoration:none;cursor:point"
-            + "er}.brass .seg{display:inline-flex;gap:4px;margin:0}.brass .seg button{border-radius:8px"
-            + ";margin:0}.brass .seg button.on{background:linear-gradient(180deg,#f6dc95,#c99d45 55%,#8"
-            + "a6621);box-shadow:0 1px 0 #4a3510,inset 0 0 10px rgba(255,180,60,.55);color:#2a1c10}.lab"
-            + "{margin-left:6px}.board{margin-top:18px;padding:10px 16px;border:2px solid #574123;borde"
-            + "r-radius:8px;background:#120d0a;box-shadow:inset 0 0 20px rgba(0,0,0,.8);font-family:'Co"
-            + "urier New',monospace;font-size:14px}.board .r{display:grid;grid-template-columns:22px 12"
-            + "0px minmax(0,1fr);align-items:center;padding:5px 0;gap:0 6px}.board .bulb{width:14px;hei"
-            + "ght:14px;border-radius:50%;border:1px solid #6e5320;background:#2a2118}.board .bulb.ok{b"
-            + "ackground:radial-gradient(circle at 40% 35%,#d8ffe8,var(--green) 45%,#155b34);box-shadow"
-            + ":0 0 10px var(--green)}.board .bulb.warn{background:radial-gradient(circle at 40% 35%,#f"
-            + "ff3c4,var(--amber) 45%,#a24d0a);box-shadow:0 0 10px var(--amber)}.board .bulb.bad{backgr"
-            + "ound:radial-gradient(circle at 40% 35%,#ffd0c4,var(--red) 45%,#5a1a0e)}.board .bulb.none"
-            + "{visibility:hidden}.board .k{color:var(--dim);letter-spacing:.15em;text-transform:upperc"
-            + "ase;font-size:12px}.board .v{color:var(--ink);letter-spacing:.06em;text-transform:upperc"
-            + "ase}.brass main{display:flex;flex-direction:column;align-items:center;padding:0;margin-t"
-            + "op:18px;overflow:visible}.brass #wall{border:2px solid #574123;border-radius:8px;overflo"
-            + "w:hidden;box-shadow:inset 0 0 20px rgba(0,0,0,.8)}.brass .cell{border-color:#574123}.bra"
-            + "ss .cell.on{border:2px solid var(--amber)}.brass .top.ct,.brass .cell .top{position:abso"
-            + "lute;display:block;font-family:'Courier New',monospace}.brass .cell .slot{color:var(--am"
-            + "ber)}.brass .ok{color:var(--green)}.brass .bad{color:var(--red)}.brass .warn{color:var(-"
-            + "-amber)}.brass .off b{color:#6e5a3c}.brass #list td{border-top-color:#574123;color:var(-"
-            + "-dim);font-family:'Courier New',monospace}.foot{margin-top:18px;font-family:'Courier New"
-            + "',monospace;font-size:11px;color:var(--foot);letter-spacing:.2em;text-transform:uppercas"
-            + "e;text-align:center}@media (max-width:620px){.ttl .ver{bottom:.1em}.sub .br{display:bloc"
-            + "k}.board{padding:8px 12px;font-size:12px}.board .r{grid-template-columns:20px 74px minma"
-            + "x(0,1fr)}.board .k{font-size:11px;letter-spacing:.1em}.brass .panel{padding:26px 14px 18"
-            + "px}}"
-            + ".board .bulb.dim{background:#2a2118}.brass nav .g{display:inline-flex;align-items:center;gap:6px}"
+            // brass 1.5.0 of the brand project (#286, fonts #304): the shared look of our apps' pages;
+            // Brass Serif for h1-h3 and buttons, Brass Mono for the rest, served from the assets
+            + "@font-face{font-family:'Brass Serif';src:url(fonts/BrassSerif-Bold.woff2?v="
+            + BuildConfig.VERSION_NAME
+            + ") format('woff2');font-weight:100 900;font-display:swap}@font-face{font-family:'Brass Mono';"
+            + "src:url(fonts/BrassMono-Regular.woff2?v="
+            + BuildConfig.VERSION_NAME
+            + ") format('woff2');font-weight:400;font-display:swap}@font-face{font-family:'Brass Mono';src:"
+            + "url(fonts/BrassMono-Bold.woff2?v="
+            + BuildConfig.VERSION_NAME
+            + ") format('woff2');font-weight:700;font-display:swap}:root{--serif:'Brass Serif',Georgia,'Tim"
+            + "es New Roman',serif;--mono:'Brass Mono','Courier New',monospace;--panel:#2c2119;--panel2:#3d"
+            + "2d22;--brass:#c9a24d;--brass2:#8c6a2a;--amber:#ffb347;--ink:#e8d9b8;--dim:#b09873;--red:#c84"
+            + "52c;--green:#5ad38f;--foot:#a08a69}*{box-sizing:border-box}body.brass{display:block;height:a"
+            + "uto;min-height:100%;background:radial-gradient(ellipse at 50% 0,#3b2c22 0,#1a1512 55%,#0f0b0"
+            + "9 100%);color:var(--ink);font-family:var(--mono);padding:28px 12px;text-align:center}.brass "
+            + "h1,.brass h2,.brass h3{font-family:var(--serif)}.brass h1{font-size:clamp(22px,4.5vw,40px);l"
+            + "etter-spacing:.2em;text-transform:uppercase;margin:0 0 6px;color:var(--brass);text-shadow:0 "
+            + "1px 0 #f3d78a,0 -1px 0 #3d2a0c,0 0 22px rgba(201,162,77,.35);font-weight:400}.ttl{position:r"
+            + "elative;display:inline-block}.ttl .ver{position:absolute;left:100%;bottom:.24em;margin-left:"
+            + ".6em;font:12px/1 var(--mono);letter-spacing:.12em;color:var(--dim);text-shadow:none;white-sp"
+            + "ace:nowrap}.brass .sub{font-family:var(--mono);font-size:12px;color:var(--dim);letter-spacin"
+            + "g:.3em;text-transform:uppercase;margin-bottom:24px}.brass .panel{position:relative;width:min"
+            + "(1200px,100%);margin:0 auto;text-align:left;background:linear-gradient(180deg,var(--panel2),"
+            + "var(--panel));border:3px solid var(--brass2);border-radius:16px;box-shadow:inset 0 0 0 2px #"
+            + "1a1210,inset 0 0 50px rgba(0,0,0,.6),0 24px 48px rgba(0,0,0,.65);padding:30px 24px 24px}.riv"
+            + "et{position:absolute;width:14px;height:14px;border-radius:50%;background:radial-gradient(cir"
+            + "cle at 35% 35%,#f1d38b,#8c6a2a 60%,#3a2a10)}.rivet.tl{top:8px;left:8px}.rivet.tr{top:8px;rig"
+            + "ht:8px}.rivet.bl{bottom:8px;left:8px}.rivet.br{bottom:8px;right:8px}.plate{font-family:var(-"
+            + "-mono);font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:#2a1c10;background:"
+            + "linear-gradient(180deg,#e2c377,#a88237);border:1px solid #5b4416;border-radius:4px;padding:4"
+            + "px 10px;display:inline-block}.brass .top{position:static;display:flex;flex-wrap:wrap;gap:10p"
+            + "x;align-items:center;justify-content:space-between;background:none;padding:0;font-size:inher"
+            + "it;text-shadow:none;color:inherit}.brass nav{display:flex;flex-wrap:wrap;align-items:center;"
+            + "gap:8px;margin:0;font-family:var(--mono);font-size:12px;color:var(--dim);letter-spacing:.12e"
+            + "m;text-transform:uppercase}.bb,.brass .seg button{font:12px var(--serif);letter-spacing:.15e"
+            + "m;text-transform:uppercase;color:#2a1c10;background:linear-gradient(180deg,#e9cd84,#b08b3c 5"
+            + "5%,#7c5c1f);border:0;border-radius:8px;padding:6px 12px;box-shadow:0 3px 0 #4a3510;text-deco"
+            + "ration:none;cursor:pointer}.brass .seg{display:inline-flex;gap:4px;margin:0}.brass .seg butt"
+            + "on{border-radius:8px;margin:0}.brass .seg button.on{background:linear-gradient(180deg,#f6dc9"
+            + "5,#c99d45 55%,#8a6621);box-shadow:0 1px 0 #4a3510,inset 0 0 10px rgba(255,180,60,.55);color:"
+            + "#2a1c10}.lab{margin-left:6px}.board{margin-top:18px;padding:10px 16px;border:2px solid #5741"
+            + "23;border-radius:8px;background:#120d0a;box-shadow:inset 0 0 20px rgba(0,0,0,.8);font-family"
+            + ":var(--mono);font-size:14px}.board .r{display:grid;grid-template-columns:22px 120px minmax(0"
+            + ",1fr);align-items:center;padding:5px 0;gap:0 6px}.board .bulb{width:14px;height:14px;border-"
+            + "radius:50%;border:1px solid #6e5320;background:#2a2118}.board .bulb.ok{background:radial-gra"
+            + "dient(circle at 40% 35%,#d8ffe8,var(--green) 45%,#155b34);box-shadow:0 0 10px var(--green)}."
+            + "board .bulb.warn{background:radial-gradient(circle at 40% 35%,#fff3c4,var(--amber) 45%,#a24d"
+            + "0a);box-shadow:0 0 10px var(--amber)}.board .bulb.bad{background:radial-gradient(circle at 4"
+            + "0% 35%,#ffd0c4,var(--red) 45%,#5a1a0e)}.board .bulb.none{visibility:hidden}.board .k{color:v"
+            + "ar(--dim);letter-spacing:.15em;text-transform:uppercase;font-size:12px}.board .v{color:var(-"
+            + "-ink);letter-spacing:.06em;text-transform:uppercase}.brass main{display:flex;flex-direction:"
+            + "column;align-items:center;padding:0;margin-top:18px;overflow:visible}.brass #wall{border:2px"
+            + " solid #574123;border-radius:8px;overflow:hidden;box-shadow:inset 0 0 20px rgba(0,0,0,.8)}.b"
+            + "rass .cell{border-color:#574123}.brass .cell.on{border:2px solid var(--amber)}.brass .top.ct"
+            + ",.brass .cell .top{position:absolute;display:block;font-family:var(--mono)}.brass .cell .slo"
+            + "t{color:var(--amber)}.brass .ok{color:var(--green)}.brass .bad{color:var(--red)}.brass .warn"
+            + "{color:var(--amber)}.brass .off b{color:#6e5a3c}.brass #list td{border-top-color:#574123;col"
+            + "or:var(--dim);font-family:var(--mono)}.foot{margin-top:18px;font-family:var(--mono);font-siz"
+            + "e:11px;color:var(--foot);letter-spacing:.2em;text-transform:uppercase;text-align:center}@med"
+            + "ia (max-width:620px){.ttl .ver{bottom:.1em}.sub .br{display:block}.board{padding:8px 12px;fo"
+            + "nt-size:12px}.board .r{grid-template-columns:20px 74px minmax(0,1fr)}.board .k{font-size:11p"
+            + "x;letter-spacing:.1em}.brass .panel{padding:26px 14px 18px}}.board .bulb.dim{background:#2a2"
+            + "118}.brass nav .g{display:inline-flex;align-items:center;gap:6px}"
             + "</style></head><body class=\"brass\">"
             + "<h1 class=\"ttl\">Decoder<span class=\"ver\" id=\"ver2\"></span></h1>"
             + "<div class=\"sub\">Elegant <span class=\"br\">video player</span></div>"

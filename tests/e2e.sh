@@ -36,6 +36,10 @@
 #   NETEM_IMAGE     image with tc, built from tests/netem when missing (default decoder-netem)
 #   TRANSPORT       the tunnel's transport in Network: UDP or TCP (default UDP); the hub takes
 #                   both on one port, the Linux edge stays on UDP
+#   PAGE_SHOTS      1: also the debug page in a headless Chromium (#304): the brass fonts loaded
+#                   (document.fonts) and tests/out/page-1280.png, page-400.png
+#   CHROME_IMAGE    headless Chromium for PAGE_SHOTS   (default zenika/alpine-chrome:latest)
+#   NODE_IMAGE      Node.js for PAGE_SHOTS's DevTools client (default node:24-slim)
 #   SHOTS           1: slot 1 over TCP, a lighter camera stream and screenshots in tests/out/shots
 #                   (the picture through the tunnel, the menu, the Network dialog); the emulator's
 #                   software decoder still drops some frames: README pictures come from a TV box
@@ -78,7 +82,7 @@ ok() { pass=$((pass + 1)); echo "PASS: $*"; }
 bad() { fail=$((fail + 1)); echo "FAIL: $*"; }
 
 cleanup() {
-    docker rm -f "$NAME" "$CAM" "$PEER" "$HUB" >/dev/null 2>&1 || true
+    docker rm -f "$NAME" "$CAM" "$PEER" "$HUB" "$NAME-chrome" >/dev/null 2>&1 || true
     docker network rm "$NET" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
@@ -423,6 +427,24 @@ if [ -z "$SHOTS" ]; then
     sleep 2
     if [ "$(shown)" = mInputShown=true ]; then ok "remote: OK in the field opens the keyboard"; else bad "remote: OK opened no keyboard (tests/out/logcat-kb.txt)"; $ADB logcat -d > "$OUT/logcat-kb.txt" 2>&1 || true; fi
     close_dialog
+fi
+
+# the debug page in a browser (#304): Chromium and its DevTools client in the emulator
+# container's network, the page through adb forward there (no port on the host)
+if [ -n "${PAGE_SHOTS:-}" ]; then
+    $ADB forward tcp:18085 tcp:8085 >/dev/null
+    docker run -d --name "$NAME-chrome" --network "container:$NAME" --pull never \
+        "${CHROME_IMAGE:-zenika/alpine-chrome:latest}" --headless --no-sandbox --disable-gpu \
+        --hide-scrollbars --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 \
+        about:blank >/dev/null
+    if docker run --rm --network "container:$NAME" --pull never -u "$UID_GID" \
+            -v "$ROOT/tests:/t:ro" -v "$OUT:/out" "${NODE_IMAGE:-node:24-slim}" \
+            node /t/page-fonts.mjs http://127.0.0.1:9222 http://127.0.0.1:18085/ \
+            "x:$WEB_PASSWORD" /out > "$OUT/page-fonts.json" 2>&1; then
+        ok "the debug page: Brass Serif and Brass Mono loaded (tests/out/page-1280.png, page-400.png)"
+    else bad "the debug page: brass fonts not loaded (tests/out/page-fonts.json)"; fi
+    docker rm -f "$NAME-chrome" >/dev/null 2>&1 || true
+    $ADB forward --remove tcp:18085 >/dev/null 2>&1 || true
 fi
 
 # the tunnel restarts in the same process: Network → Save stops it and starts it again with the

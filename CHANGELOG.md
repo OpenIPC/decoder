@@ -12,6 +12,13 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.29.1 — 2026-11-23
+
+- The debug page in the brass 1.5.0 fonts of the brand (#304): headings and buttons in Brass
+  Serif (IBM Plex Serif Bold), the rest in Brass Mono (IBM Plex Mono). The app serves them
+  itself from its assets (`/fonts/<file>.woff2`, cached for a year, asked with the app's
+  version); `OFL.txt` lies next to them. The Android menus and dialogs are unchanged.
+
 ## 2.29.0 — 2026-11-23
 
 - camex 6.2.0 in the tunnel (#302). Settings has a new optional **Network selector** field
