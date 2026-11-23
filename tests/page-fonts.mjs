@@ -22,10 +22,23 @@ let id = 0;
 const pending = new Map();
 ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
-    if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
+    if (m.id && pending.has(m.id)) { pending.get(m.id).resolve(m); pending.delete(m.id); }
 };
-const send = (method, params = {}) => new Promise((r) => {
-    const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method, params }));
+// a closed socket or a silent browser fails the commands waiting for it (Qodo on #305)
+ws.onclose = () => {
+    for (const p of pending.values()) p.reject(new Error('DevTools closed'));
+    pending.clear();
+};
+const send = (method, params = {}) => new Promise((resolve, reject) => {
+    const i = ++id;
+    const timer = setTimeout(() => {
+        pending.delete(i); reject(new Error(method + ': no answer in 30 s'));
+    }, 30000);
+    pending.set(i, {
+        resolve: (m) => { clearTimeout(timer); resolve(m); },
+        reject: (e) => { clearTimeout(timer); reject(e); },
+    });
+    ws.send(JSON.stringify({ id: i, method, params }));
 });
 await send('Network.enable');
 await send('Network.setExtraHTTPHeaders', {

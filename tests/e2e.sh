@@ -432,17 +432,18 @@ fi
 # the debug page in a browser (#304): Chromium and its DevTools client in the emulator
 # container's network, the page through adb forward there (no port on the host)
 if [ -n "${PAGE_SHOTS:-}" ]; then
-    $ADB forward tcp:18085 tcp:8085 >/dev/null
-    docker run -d --name "$NAME-chrome" --network "container:$NAME" --pull never \
-        "${CHROME_IMAGE:-zenika/alpine-chrome:latest}" --headless --no-sandbox --disable-gpu \
-        --hide-scrollbars --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 \
-        about:blank >/dev/null
-    if docker run --rm --network "container:$NAME" --pull never -u "$UID_GID" \
-            -v "$ROOT/tests:/t:ro" -v "$OUT:/out" "${NODE_IMAGE:-node:24-slim}" \
-            node /t/page-fonts.mjs http://127.0.0.1:9222 http://127.0.0.1:18085/ \
-            "x:$WEB_PASSWORD" /out > "$OUT/page-fonts.json" 2>&1; then
+    # a failed start is a failed check, not the end of the run (Qodo on #305)
+    if $ADB forward tcp:18085 tcp:8085 >/dev/null &&
+            docker run -d --name "$NAME-chrome" --network "container:$NAME" --pull never \
+                "${CHROME_IMAGE:-zenika/alpine-chrome:latest}" --headless --no-sandbox \
+                --disable-gpu --hide-scrollbars --remote-debugging-address=127.0.0.1 \
+                --remote-debugging-port=9222 about:blank >/dev/null &&
+            timeout 120 docker run --rm --network "container:$NAME" --pull never -u "$UID_GID" \
+                -v "$ROOT/tests:/t:ro" -v "$OUT:/out" "${NODE_IMAGE:-node:24-slim}" \
+                node /t/page-fonts.mjs http://127.0.0.1:9222 http://127.0.0.1:18085/ \
+                "x:$WEB_PASSWORD" /out > "$OUT/page-fonts.json" 2>&1; then
         ok "the debug page: Brass Serif and Brass Mono loaded (tests/out/page-1280.png, page-400.png)"
-    else bad "the debug page: brass fonts not loaded (tests/out/page-fonts.json)"; fi
+    else bad "the debug page: brass fonts not loaded or no browser (tests/out/page-fonts.json)"; fi
     docker rm -f "$NAME-chrome" >/dev/null 2>&1 || true
     $ADB forward --remove tcp:18085 >/dev/null 2>&1 || true
 fi
