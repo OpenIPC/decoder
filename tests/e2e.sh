@@ -41,8 +41,8 @@
 #   CHROME_IMAGE    headless Chromium for PAGE_SHOTS   (default zenika/alpine-chrome:latest)
 #   NODE_IMAGE      Node.js for PAGE_SHOTS's DevTools client (default node:24-slim)
 #   SHOTS           1: slot 1 over TCP, a lighter camera stream and screenshots in tests/out/shots
-#                   (the menu, Network, the camera's Settings and the Reset question)
-#                   (the picture through the tunnel, the menu, the Network dialog); the emulator's
+#                   (the picture through the tunnel, the menu, the Network dialog, the camera's
+#                   Settings and the Reset question, #306); the emulator's
 #                   software decoder still drops some frames: README pictures come from a TV box
 #
 # Output in tests/out/ (ignored by git). Exit code 0 when all checks pass.
