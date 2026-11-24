@@ -282,6 +282,8 @@ public class Decoder extends Activity
         mSurface = findViewById(R.id.video_surface);
         mSurface.setKeepScreenOn(true);
         statusText = findViewById(R.id.status_text);
+        // the layout's monospace is the fallback; the brand's Brass Mono from the assets (#306)
+        statusText.setTypeface(Brass.mono(this));
         debugUrls = findViewById(R.id.debug_urls);
 
         mSurface.getHolder().addCallback(new SurfaceHolder.Callback() {

@@ -41,7 +41,8 @@
 #   CHROME_IMAGE    headless Chromium for PAGE_SHOTS   (default zenika/alpine-chrome:latest)
 #   NODE_IMAGE      Node.js for PAGE_SHOTS's DevTools client (default node:24-slim)
 #   SHOTS           1: slot 1 over TCP, a lighter camera stream and screenshots in tests/out/shots
-#                   (the picture through the tunnel, the menu, the Network dialog); the emulator's
+#                   (the picture through the tunnel, the menu, the Network dialog, the camera's
+#                   Settings and the Reset question, #306); the emulator's
 #                   software decoder still drops some frames: README pictures come from a TV box
 #
 # Output in tests/out/ (ignored by git). Exit code 0 when all checks pass.
@@ -397,6 +398,17 @@ close_dialog() {
     tap_text Cancel || true
     sleep 2
 }
+if [ -n "$SHOTS" ]; then
+    # the other windows in the brass faces (#306): the camera's Settings and the Reset question
+    for w in Settings Reset; do
+        $ADB shell input keyevent 23
+        sleep 2
+        tap_text "$w" || echo "no $w in the menu"
+        sleep 3
+        $ADB exec-out screencap -p > "$OUT/shots/tunnel_$(echo "$w" | tr 'A-Z' 'a-z').png"
+        close_dialog
+    done
+fi
 if [ -z "$SHOTS" ]; then
     $ADB shell input tap 640 360
     sleep 2

@@ -286,6 +286,7 @@ class MenuManager {
         String ver = "v" + version + ", " + gitHash;
         SpannableString s = new SpannableString("Exit\n" + ver);
         s.setSpan(new RelativeSizeSpan(0.5f), 5, s.length(), 0);
+        s.setSpan(new Brass.MonoSpan(activity), 5, s.length(), 0);
         TextView exit = wordItem(actionRow, "Exit", cell);
         exit.setSingleLine(false);
         exit.setText(s);
@@ -465,6 +466,8 @@ class MenuManager {
         android.text.TextPaint paint = new android.text.TextPaint();
         paint.setTextSize(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 18,
                 activity.getResources().getDisplayMetrics()));
+        // measured in the keys' own face (#306): Brass Serif is wider than the system serif
+        paint.setTypeface(Brass.serif(activity));
         float widest = 0;
         for (String w : new String[]{"Settings", "WebUI", "Grid", "Slides",
                 "Exit", "Reset", "Debug", "UDP"}) {
@@ -510,7 +513,7 @@ class MenuManager {
         text.setText(title);
         text.setPadding(dp(8), dp(6), dp(8), dp(6));
         text.setTextColor(Brass.INK_DARK);
-        text.setTypeface(android.graphics.Typeface.SERIF);
+        text.setTypeface(Brass.serif(activity));
         text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
         // Reachable with a remote (#91); not only by the clickable default of newer Androids
         text.setFocusable(true);

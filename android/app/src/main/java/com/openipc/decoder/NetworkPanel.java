@@ -318,7 +318,7 @@ final class NetworkPanel {
         TextView state = new TextView(a);
         // the tunnel's state under Join, amber monospace as a display line (#286)
         state.setTextColor(Brass.color(a, R.color.amber));
-        state.setTypeface(android.graphics.Typeface.MONOSPACE);
+        state.setTypeface(Brass.mono(a));
         state.setTag(R.id.brass_keep, true);
         state.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
 
