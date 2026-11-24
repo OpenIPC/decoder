@@ -51,7 +51,7 @@ The menu is one grid: the eight slots on top, two rows of four below. Every word
 | **Debug**    | Text in the corner of every multi-view cell (resolution, codec, decoded/received fps, key frames, status), or none. **Long press** (remote: hold **OK**, or **Menu** on Debug): [save a report](debug.md#save-report) to `Download/OpenIPC` and share it |
 | **UDP**      | [The U cell](#the-u-cell) full-screen                                                                                                                                                                                                                    |
 
-The menu is a brass panel of brass keys. Items that are on (Grid, Slides, Debug, UDP and the active slot) are pressed brass with an amber glow; the item the remote is on has an amber frame; a slot without a camera has dim text. On a narrow screen or with a large font the labels are shortened with an ellipsis rather than clipped.
+The menu is a brass panel of brass keys, in the brand's fonts as the dialogs: keys, titles and buttons in Brass Serif, the rest in Brass Mono. Items that are on (Grid, Slides, Debug, UDP and the active slot) are pressed brass with an amber glow; the item the remote is on has an amber frame; a slot without a camera has dim text. On a narrow screen or with a large font the labels are shortened with an ellipsis rather than clipped.
 
 ## Gestures and keys
 

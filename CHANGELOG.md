@@ -12,6 +12,16 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.30.0 — 2026-11-24
+
+- The Android screens in the brand's fonts (#306, brass 1.5.1), as the debug page: the menu
+  keys, dialog titles, section bands and the dialogs' buttons in Brass Serif, everything else
+  (fields, check boxes, radio buttons, labels, messages, the tunnel's state line, the status
+  line, the version under Exit) in Brass Mono. The `.ttf` files lie next to the page's
+  `.woff2` in the assets and are read once; if one does not open, the system serif or
+  monospace stays. The menu's cells are measured in Brass Serif, so no label is clipped.
+  Overlays on the video keep their faces.
+
 ## 2.29.1 — 2026-11-23
 
 - The debug page in the brass 1.5.0 fonts of the brand (#304): headings and buttons in Brass

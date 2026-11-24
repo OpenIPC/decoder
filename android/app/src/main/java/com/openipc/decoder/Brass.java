@@ -1,7 +1,8 @@
 /*
  * Copyright (c) OpenIPC  https://openipc.org  Prosperity Public License 3.0.0
  *
- * Brass.java — the "brass" look of the menu and the dialogs (#286, brand brass 1.3.0)
+ * Brass.java — the "brass" look of the menu and the dialogs (#286, brand brass 1.3.0) in the
+ * brand's faces (#306, brass 1.5.1)
  *
  */
 
@@ -47,6 +48,79 @@ final class Brass {
     private static final int PLATE_EDGE = 0xFF5B4416;
 
     private Brass() {
+    }
+
+    /** The brand's faces in assets/fonts (#306), the same files as the .woff2 of the debug page. */
+    static final String SERIF_FILE = "BrassSerif-Bold.ttf";
+    static final String MONO_FILE = "BrassMono-Regular.ttf";
+    static final String MONO_BOLD_FILE = "BrassMono-Bold.ttf";
+
+    // read once per process; null until the first view asks
+    private static Typeface serif, mono, monoBold;
+
+    /**
+     * The three faces, read from the assets once. A face whose asset does not open stays the
+     * system's serif or monospace, the faces the app had before.
+     */
+    private static synchronized void loadFonts(Context c) {
+        if (serif != null) return;
+        android.content.res.AssetManager a = c.getApplicationContext().getAssets();
+        mono = font(a, MONO_FILE, Typeface.MONOSPACE);
+        monoBold = font(a, MONO_BOLD_FILE, Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
+        serif = font(a, SERIF_FILE, Typeface.SERIF);
+    }
+
+    private static Typeface font(android.content.res.AssetManager a, String name, Typeface system) {
+        try {
+            return Typeface.createFromAsset(a, "fonts/" + name);
+        } catch (RuntimeException e) {   // "native typeface cannot be made": no such asset
+            return system;
+        }
+    }
+
+    /** Brass Serif (bold): menu keys, dialog titles, section bands, the dialogs' buttons. */
+    static Typeface serif(Context c) {
+        loadFonts(c);
+        return serif;
+    }
+
+    /** Brass Mono: fields, check boxes, labels, messages, the status line. */
+    static Typeface mono(Context c) {
+        loadFonts(c);
+        return mono;
+    }
+
+    static Typeface monoBold(Context c) {
+        loadFonts(c);
+        return monoBold;
+    }
+
+    /** Brass Mono, or Brass Mono Bold for a view that was bold. */
+    private static Typeface monoFor(Context c, TextView t) {
+        Typeface f = t.getTypeface();
+        return f != null && f.isBold() && f != serif(c) ? monoBold(c) : mono(c);
+    }
+
+    /**
+     * A part of a text in Brass Mono (the version under Exit in a serif key); TypefaceSpan
+     * takes a Typeface only from Android 9.
+     */
+    static final class MonoSpan extends android.text.style.MetricAffectingSpan {
+        private final Typeface face;
+
+        MonoSpan(Context c) {
+            face = mono(c);
+        }
+
+        @Override
+        public void updateMeasureState(android.text.TextPaint p) {
+            p.setTypeface(face);
+        }
+
+        @Override
+        public void updateDrawState(android.text.TextPaint p) {
+            p.setTypeface(face);
+        }
     }
 
     /** A colour of colors.xml (Context.getColor is API 23; the app starts at 21). */
@@ -114,7 +188,7 @@ final class Brass {
         TextView t = new TextView(c);
         t.setText(text);
         t.setAllCaps(true);
-        t.setTypeface(Typeface.SERIF, Typeface.BOLD);
+        t.setTypeface(serif(c));
         t.setLetterSpacing(0.25f);
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         t.setTextColor(INK_DARK);
@@ -208,7 +282,7 @@ final class Brass {
     private static void key(Context c, Button b) {
         b.setBackground(keyStates(c));
         b.setTextColor(INK_DARK);
-        b.setTypeface(Typeface.SERIF);
+        b.setTypeface(serif(c));
         b.setLetterSpacing(0.15f);
         b.setAllCaps(true);
         ViewGroup.LayoutParams lp = b.getLayoutParams();
@@ -224,7 +298,7 @@ final class Brass {
             EditText e = (EditText) v;
             e.setTextColor(color(c, R.color.ink));
             e.setHintTextColor(0x99B09873);
-            e.setTypeface(Typeface.MONOSPACE);
+            e.setTypeface(monoFor(c, e));
             int l = e.getPaddingLeft(), t = e.getPaddingTop();
             e.setBackground(displayStates(c));
             int p = Math.round(10 * dp(c));
@@ -232,6 +306,7 @@ final class Brass {
         } else if (v instanceof CompoundButton) {
             CompoundButton b = (CompoundButton) v;
             b.setTextColor(color(c, R.color.ink));
+            b.setTypeface(monoFor(c, b));
             // the app's own box and ring, untinted: on and off read under the focus too (#290)
             b.setButtonTintList(null);
             b.setButtonDrawable(b instanceof android.widget.RadioButton
@@ -252,13 +327,17 @@ final class Brass {
             TextView t = (TextView) v;
             if (t.getId() == android.R.id.title || isAlertTitle(t)) {
                 t.setTextColor(color(c, R.color.brass));
-                t.setTypeface(Typeface.SERIF);
+                t.setTypeface(serif(c));
                 t.setAllCaps(true);
                 t.setLetterSpacing(0.2f);
-            } else if (t.getId() == android.R.id.message) {
-                t.setTextColor(color(c, R.color.ink));
-            } else if (!Boolean.TRUE.equals(t.getTag(R.id.brass_keep))) {
-                t.setTextColor(color(c, R.color.dim));
+            } else {
+                // the message, the labels, the tunnel's state line, a list's rows: Brass Mono
+                t.setTypeface(monoFor(c, t));
+                if (t.getId() == android.R.id.message) {
+                    t.setTextColor(color(c, R.color.ink));
+                } else if (!Boolean.TRUE.equals(t.getTag(R.id.brass_keep))) {
+                    t.setTextColor(color(c, R.color.dim));
+                }
             }
         }
         if (v instanceof ViewGroup) {
