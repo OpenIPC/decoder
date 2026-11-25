@@ -283,7 +283,7 @@ class MenuManager {
         // Exit | Reset | Debug | UDP
         LinearLayout actionRow = gridRow(layout);
         // The version under Exit, small (#176): beside it, it would widen every cell
-        String ver = "v" + version + ", " + gitHash;
+        String ver = versionLine(version, gitHash);
         SpannableString s = new SpannableString("Exit\n" + ver);
         s.setSpan(new RelativeSizeSpan(0.5f), 5, s.length(), 0);
         s.setSpan(new Brass.MonoSpan(activity), 5, s.length(), 0);
@@ -438,6 +438,11 @@ class MenuManager {
             default:
                 return false;
         }
+    }
+
+    /** The version and the commit; a build without git has no hash, and then no comma (#308). */
+    static String versionLine(String version, String gitHash) {
+        return "v" + version + (gitHash == null || gitHash.isEmpty() ? "" : ", " + gitHash);
     }
 
     /** A row of the menu grid (#177), as wide as the menu. */

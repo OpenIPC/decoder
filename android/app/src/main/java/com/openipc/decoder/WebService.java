@@ -33,6 +33,12 @@ public final class WebService extends Service {
     /** Not the camex tunnel's (its library uses its own id). */
     private static final int NOTIFICATION_ID = 0x5745;
 
+    /**
+     * Started, its {@link #onStartCommand} not run yet: Android ends the app when a service
+     * asked for with startForegroundService is stopped before startForeground (#308). Main thread.
+     */
+    private static boolean pending;
+
     /** After {@code MY_PACKAGE_REPLACED}: the page back, when it is allowed and the app is shut. */
     static void startAfterUpdate(Context c) {
         if (!WebPort.allowed(c)) {
@@ -42,11 +48,13 @@ public final class WebService extends Service {
         if (Decoder.openOrOpening()) return;
         Intent i = new Intent(c, WebService.class);
         try {
+            pending = true;
             // exempt from the background limits on foreground services: the update broadcast
             if (Build.VERSION.SDK_INT >= 26) c.startForegroundService(i);
             else c.startService(i);
             Log.i(TAG, "Updated: the web page is back, nothing else (no video, no tunnel)");
         } catch (RuntimeException e) {
+            pending = false;
             Log.w(TAG, "Updated: the web page could not be started: " + e.getMessage());
         }
     }
@@ -77,6 +85,7 @@ public final class WebService extends Service {
 
     /** The app's screen is open: its own process keeps the page from now on. */
     static void stop(Context c) {
+        if (pending) return;   // it stops itself once it may, in onStartCommand (#308)
         try {
             c.stopService(new Intent(c, WebService.class));
         } catch (RuntimeException e) {
@@ -92,7 +101,9 @@ public final class WebService extends Service {
         } else {
             startForeground(NOTIFICATION_ID, n);
         }
-        if (!WebPort.allowed(this)) {
+        pending = false;
+        // remote access off, or the app opened meanwhile: its screen keeps the page (#308)
+        if (!WebPort.allowed(this) || Decoder.openOrOpening()) {
             stopSelf();
             return START_NOT_STICKY;
         }

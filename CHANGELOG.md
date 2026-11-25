@@ -12,6 +12,13 @@ Versions after 2.17 are `MAJOR.MINOR.PATCH` (2.17 is followed by 2.17.1 or 2.18.
 `docs/testing.md`, "Versions and releases"); the headings below keep the numbers as they
 were released.
 
+## 2.30.1 — 2026-11-25
+
+- Opening the app right after an update no longer crashes it (#308, since 2.27.0): the web
+  page's service was stopped before it had become a foreground service; now it stops itself
+  as soon as it may.
+- No trailing comma after the version under Exit in a build without a git commit.
+
 ## 2.30.0 — 2026-11-24
 
 - The Android screens in the brand's fonts (#306, brass 1.5.1), as the debug page: the menu
