@@ -557,6 +557,32 @@ if [ -z "$SHOTS" ]; then
     $ADB forward --remove tcp:18085 >/dev/null 2>&1 || true
 fi
 
+# the app opened right after an update, with the page's service still starting: no crash (#308)
+if [ -z "$SHOTS" ]; then
+    $ADB logcat -c 2>/dev/null || true
+    $ADB push /w/decoder.apk /data/local/tmp/update.apk >/dev/null
+    n=0
+    late=0
+    installed=0
+    while [ "$n" -lt 5 ]; do
+        n=$((n + 1))
+        # in one shell on the device: no adb round trip between the two
+        # (pm's exit code is of no use on old Androids: its Success is counted, Qodo on #309)
+        $ADB shell "pm install -r /data/local/tmp/update.apk 2>&1; am start -n $PKG/.Decoder >/dev/null" |
+            grep '^Success' >/dev/null && installed=$((installed + 1)) || true
+        sleep 8
+        # the service must not outlive the opened screen either
+        ! $ADB shell dumpsys activity services "$PKG" | grep -q 'ServiceRecord.*WebService' || late=$((late + 1))
+    done
+    $ADB shell rm -f /data/local/tmp/update.apk
+    $ADB logcat -d > "$OUT/logcat-update-open.txt" 2>&1 || true
+    races=$(grep -c 'Updated: the web page is back' "$OUT/logcat-update-open.txt" || true)
+    if ! grep -q 'did not then call Service.startForeground' "$OUT/logcat-update-open.txt" && [ "$late" = 0 ] &&
+            [ "$installed" = 5 ]; then
+        ok "opened right after an update, 5 times ($races with the service starting): no crash, the service gone"
+    else bad "opened right after an update: a crash, the service stayed ($late) or updates failed ($installed of 5; tests/out/logcat-update-open.txt)"; fi
+fi
+
 $ADB logcat -d -b crash > "$OUT/crash.log" 2>&1 || true
 if grep -q "$PKG" "$OUT/crash.log"; then bad "crash in logcat (tests/out/crash.log)"; else ok "no crash"; fi
 
